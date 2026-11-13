@@ -367,7 +367,19 @@ table.data tr.excluded td { opacity: 0.5; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; } }
 
 /* ───────── dashboard ───────── */
-.overview { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(320px, 1fr); gap: var(--space-lg); align-items: stretch; }
+.overview { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(320px, 1fr); gap: var(--space-lg); align-items: stretch; position: relative; isolation: isolate; }
+/* Home signature: soft ambient blue light behind the two headline cards, layered blue glow on the cards.
+   Tints stay light at the top and fade to the plain surface, so text keeps its AA contrast. */
+.overview::before { content: ''; position: absolute; z-index: -1; inset: -48px 0 -24px; pointer-events: none;
+  background: radial-gradient(ellipse 55% 60% at 28% 40%, color-mix(in srgb, var(--c-accent) 24%, transparent), transparent 70%),
+              radial-gradient(ellipse 40% 55% at 82% 35%, color-mix(in srgb, var(--c-accent) 20%, transparent), transparent 70%); }
+.overview .card.outlook, .overview .card.sts {
+  border-color: color-mix(in srgb, var(--c-accent) 22%, var(--c-border));
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--c-accent) 12%, transparent),
+              0 4px 16px color-mix(in srgb, var(--c-accent) 12%, transparent),
+              0 16px 52px color-mix(in srgb, var(--c-accent) 22%, transparent); }
+.overview .card.outlook { background: linear-gradient(180deg, color-mix(in srgb, var(--c-accent) 6%, var(--c-surface)), var(--c-surface) 42%); }
+.overview .card.next-income { border-color: color-mix(in srgb, var(--c-accent) 12%, var(--c-border)); box-shadow: 0 6px 24px color-mix(in srgb, var(--c-accent) 9%, transparent); }
 @media (max-width: 1080px) { .overview { grid-template-columns: 1fr; } }
 .outlook .t-hero { margin: 6px 0 8px; }
 .side { display: flex; flex-direction: column; gap: var(--space-lg); min-width: 0; }
@@ -377,7 +389,7 @@ table.data tr.excluded td { opacity: 0.5; }
 .delta svg { flex: none; margin-top: 2px; }
 @media (max-width: 900px) { .t-hero { font-size: 42px; line-height: 46px; letter-spacing: -1.1px; } }
 
-.sts { display: flex; flex-direction: column; background: linear-gradient(180deg, var(--c-accent-soft), transparent 46%), var(--c-surface); }
+.sts { display: flex; flex-direction: column; background: linear-gradient(165deg, color-mix(in srgb, var(--c-accent) 10%, var(--c-surface)), color-mix(in srgb, var(--c-accent) 4%, var(--c-surface)) 45%, var(--c-surface) 75%); }
 .sts .metric { font-size: 40px; line-height: 44px; font-weight: 600; letter-spacing: -1px; margin: 6px 0 4px; }
 .sts .metric.short { color: var(--c-negative); }
 .eq { display: grid; margin: 18px 0; border-top: 1px solid var(--c-border); }
