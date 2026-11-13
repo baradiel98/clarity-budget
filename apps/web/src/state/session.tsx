@@ -8,6 +8,7 @@ import { requestPersistence } from '../platform/persistence';
 
 type Phase =
   | { kind: 'loading' }
+  | { kind: 'error'; message: string }
   | { kind: 'welcome' }
   | { kind: 'locked' }
   | { kind: 'ready'; store: WorkspaceStore; demo: boolean };
@@ -54,9 +55,24 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const today = useToday();
 
   useEffect(() => {
+    // Opening browser storage can hang or fail (private browsing, in-app browsers, blocked site data).
+    // Never leave a blank screen: report it after a few seconds.
+    let done = false;
+    const timer = setTimeout(() => {
+      if (!done) setPhase({ kind: 'error', message: 'This browser did not allow Clarity to open its storage. This happens in some private-browsing modes, in browsers inside other apps, or when site data is blocked.' });
+    }, 8000);
     WorkspaceStore.exists(adapter)
-      .then((e) => setPhase(e ? { kind: 'locked' } : { kind: 'welcome' }))
-      .catch(() => setPhase({ kind: 'welcome' }));
+      .then((e) => {
+        done = true;
+        clearTimeout(timer);
+        setPhase(e ? { kind: 'locked' } : { kind: 'welcome' });
+      })
+      .catch((err: unknown) => {
+        done = true;
+        clearTimeout(timer);
+        setPhase({ kind: 'error', message: `Clarity could not open its storage in this browser (${err instanceof Error ? err.name : 'error'}). Try a normal (non-private) window in Chrome, Safari, Edge or Firefox.` });
+      });
+    return () => clearTimeout(timer);
   }, []);
 
   const lock = useCallback(() => {

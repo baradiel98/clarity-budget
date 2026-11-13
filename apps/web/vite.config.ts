@@ -53,7 +53,8 @@ export default defineConfig({
     react(),
     csp(),
     VitePWA({
-      registerType: 'prompt',
+      // New versions take over as soon as they are downloaded, so fixes reach people without closing every tab.
+      registerType: 'autoUpdate',
       injectRegister: 'script',
       includeAssets: ['favicon.svg', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'],
       manifest: {

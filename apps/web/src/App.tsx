@@ -23,13 +23,24 @@ import { Welcome } from './features/Welcome';
 export function App() {
   const session = useSession();
   const { phase } = session;
-  if (phase.kind === 'loading') return <div className="center-screen" aria-busy="true" />;
+  if (phase.kind === 'loading') return <div className="boot" aria-busy="true"><p className="boot-title">Loading Clarity…</p></div>;
+  if (phase.kind === 'error') return <StartupProblem message={phase.message} />;
   if (phase.kind === 'welcome') return <RouterProvider><PublicRoutes /></RouterProvider>;
   if (phase.kind === 'locked') return <LockScreen />;
   return (
     <RouterProvider>
       <Unlocked />
     </RouterProvider>
+  );
+}
+
+export function StartupProblem({ message }: { message: string }) {
+  return (
+    <div className="boot" role="alert">
+      <p className="boot-title">Clarity couldn't start</p>
+      <p className="boot-hint now">{message}</p>
+      <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={() => window.location.reload()}>Try again</button>
+    </div>
   );
 }
 

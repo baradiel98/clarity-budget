@@ -566,3 +566,10 @@ table.data tr.excluded td { opacity: 0.55; }
 .mini-lines > div { display: flex; justify-content: space-between; gap: 12px; color: var(--c-text-secondary); }
 .mini-lines > div > :last-child { color: var(--c-text); font-weight: 600; }
 input[type='checkbox'], input[type='radio'] { accent-color: var(--c-accent); }
+
+/* shown before the app starts, and whenever startup fails: never a blank screen */
+.boot { min-height: 100vh; display: grid; place-content: center; justify-items: center; gap: 8px; padding: 24px; text-align: center; }
+.boot-title { font-size: 17px; font-weight: 600; margin: 0; }
+.boot-hint { max-width: 420px; margin: 0; font-size: 13px; line-height: 19px; color: var(--c-text-secondary); opacity: 0; animation: boot-hint 0.3s 4s forwards; }
+.boot-hint.now { opacity: 1; animation: none; }
+@keyframes boot-hint { to { opacity: 1; } }
