@@ -30,6 +30,15 @@ interface Session {
 }
 
 const SessionCtx = createContext<Session | null>(null);
+
+/** Max time in the background before locking, regardless of the auto-lock setting. */
+export const MAX_BACKGROUND_MS = 5 * 60_000;
+
+/** Pure lock decision so it can be unit-tested. */
+export function shouldLockOnResume(backgroundedAt: number | null, now: number, autoLockMinutes: number): boolean {
+  if (backgroundedAt === null) return false;
+  return now - backgroundedAt >= Math.min(autoLockMinutes * 60_000, MAX_BACKGROUND_MS);
+}
 const adapter = new SQLiteAdapter();
 
 export function SessionProvider({ children }: { children: ReactNode }) {
@@ -67,10 +76,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (s === 'background') backgroundedAt.current = Date.now();
       if (s === 'active') {
         setToday(localISODate(new Date()));
-        if (p.kind === 'ready' && !p.demo && backgroundedAt.current !== null) {
-          const graceMs = p.store.data.settings.autoLockMinutes * 60_000;
-          if (Date.now() - backgroundedAt.current >= Math.min(graceMs, 5 * 60_000)) lock();
-        }
+        if (p.kind === 'ready' && !p.demo && shouldLockOnResume(backgroundedAt.current, Date.now(), p.store.data.settings.autoLockMinutes)) lock();
         backgroundedAt.current = null;
       }
     });
