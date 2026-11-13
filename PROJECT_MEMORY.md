@@ -98,3 +98,13 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - Secure storage can throw on some devices or environments. Startup must never depend on it succeeding.
 - A test expecting the next paycheck after month-end exposed a horizon bug: the forecast only looked to month-end. Fixed by looking ahead 62 days for the next income.
 - In test fixtures, `trackFrom` must be set deliberately. Past occurrences after it are (correctly) overdue.
+
+## Unlock screen (Nov 2026)
+- **[Decision, user]** The unlock screen is always dark (deep navy #070B14, one blue light), brand = logo + "Clarity" wordmark, heading "Unlock Clarity", subtitle "Your financial world, securely stored on this device." (checked as accurate). No lock icon.
+- **[Decision]** Help link is "Forgot your passphrase?" not "Having trouble accessing your account?": Clarity has no account. Help is an in-panel view; erasing still needs the type-DELETE dialog.
+- **[Verified]** Redesign is UI-only: no diff in packages/security or packages/data. Tests: `e2e/lock.spec.ts` (10).
+- **[Lesson]** A grid with `place-items: center` sizes its column from content, so a child's `width: min(400px, 100%)` can overflow a phone. Use `grid-template-columns: minmax(0, 1fr)`.
+- **[Lesson]** Playwright `getByLabel('Passphrase')` also matches "Show passphrase"; use `{ exact: true }`.
+- **[Open]** After unlocking with the recovery key, the passphrase cannot be changed (change requires the current passphrase). Needs a separate, deliberate fix in WorkspaceStore + Settings.
+- **[Open]** The native mobile lock screen has not been redesigned to match.
+

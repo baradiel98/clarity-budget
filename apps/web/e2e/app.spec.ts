@@ -137,7 +137,7 @@ test.describe('security and storage', () => {
     await toDashboard(page);
     await addExpense(page, '43.21', 'Trader Joes');
     await page.getByRole('button', { name: 'Lock' }).click();
-    await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Unlock Clarity' })).toBeVisible();
     const dump = await page.evaluate(async () => {
       const db = await new Promise<IDBDatabase>((res, rej) => { const r = indexedDB.open('clarity'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
       const all = async (store: string) => new Promise<unknown[]>((res) => { const r = db.transaction(store).objectStore(store).getAll(); r.onsuccess = () => res(r.result); });
@@ -145,10 +145,10 @@ test.describe('security and storage', () => {
     });
     expect(dump.length).toBeGreaterThan(500);
     expect(dump).not.toMatch(/Trader|4321|Rent|Paycheck|Checking|120000/);
-    await page.getByLabel('Passphrase').fill('wrong passphrase!');
+    await page.getByLabel('Passphrase', { exact: true }).fill('wrong passphrase!');
     await page.getByRole('button', { name: 'Unlock' }).click();
     await expect(page.getByText('That passphrase is not correct.')).toBeVisible();
-    await page.getByLabel('Passphrase').fill(PASS);
+    await page.getByLabel('Passphrase', { exact: true }).fill(PASS);
     await page.getByRole('button', { name: 'Unlock' }).click();
     await expect(money(page, 'available-cash')).toHaveText('$1,156.79');
   });
@@ -159,7 +159,7 @@ test.describe('security and storage', () => {
     await toDashboard(page);
     await page.getByRole('button', { name: 'Lock' }).click();
     await page.getByRole('button', { name: 'Use recovery key instead' }).click();
-    await page.getByLabel('Recovery key').fill(key.toLowerCase());
+    await page.getByLabel('Recovery key', { exact: true }).fill(key.toLowerCase());
     await page.getByRole('button', { name: 'Unlock' }).click();
     await expect(money(page, 'month-end')).toHaveText('$4,800.00');
   });

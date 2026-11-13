@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { buildDemoWorkspace, CommandError, MemoryAdapter, WorkspaceStore, type Ctx, type Op } from '@clarity/data';
 import { localISODate, TABLES, type ISODate, type WorkspaceData } from '@clarity/shared';
-import { WrongSecretError } from '@clarity/security';
+import { hasRecoveryKey, WrongSecretError } from '@clarity/security';
 import type { DexieAdapter } from '../platform/dexieAdapter';
 import { provider } from '../platform/crypto';
 import { requestPersistence } from '../platform/persistence';
@@ -24,6 +24,8 @@ interface Session {
   finishIntro(): void;
   createVault(passphrase: string, withRecoveryKey: boolean): Promise<string | null>;
   unlock(how: { passphrase: string } | { recoveryKey: string }): Promise<void>;
+  /** Whether a recovery key was set up for the data on this device. Reads only which key slots exist (no secrets). */
+  recoveryKeyAvailable(): Promise<boolean>;
   restore(fileText: string, secret: { passphrase: string } | { recoveryKey: string }): Promise<void>;
   startDemo(): Promise<void>;
   exitDemo(): void;
@@ -139,6 +141,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         lastActive.current = Date.now();
         void requestPersistence();
         setPhase({ kind: 'ready', store, demo: false });
+      },
+      async recoveryKeyAvailable() {
+        const meta = await (await getAdapter()).loadVaultMeta();
+        return !!meta && hasRecoveryKey(meta);
       },
       async restore(text, secret) {
         const store = await WorkspaceStore.restoreBackup(await getAdapter(), provider, text, secret);

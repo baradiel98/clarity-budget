@@ -81,7 +81,7 @@ test.describe('budget and reports', () => {
     await expect(page.getByTestId('budget-spent')).toHaveText('$60.00');
     // budgets survive lock and unlock (stored encrypted with the category)
     await page.getByRole('button', { name: 'Lock' }).click();
-    await page.getByLabel('Passphrase').fill('river otter lantern');
+    await page.getByLabel('Passphrase', { exact: true }).fill('river otter lantern');
     await page.getByRole('button', { name: 'Unlock' }).click();
     await page.keyboard.press('3');
     await expect(page.getByTestId('budget-cat_groceries')).toContainText('$40.00 left');

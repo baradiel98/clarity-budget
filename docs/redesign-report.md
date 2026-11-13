@@ -72,3 +72,19 @@ Everything in the inventory marked "Working" still works and is covered by the b
 - **Native mobile app:** picks up the new colors but not the new dashboard layout, Budget or Reports.
 - **Settings → Categories** is still a dense chip list; it works but is the least refined screen.
 - The black screen reported on the deployed site has not been reproduced. The app now reports storage problems instead of showing nothing.
+
+## Unlock screen redesign (Nov 2026)
+Before/after captures: `docs/screenshots/{before,after}/{desktop,mobile}-lock-{default,typing,error,recovery,help}-{light,dark}.png` (run `SCREENSHOTS=1 SHOT_DIR=after npx playwright test e2e/lock-screenshots.spec.ts`).
+
+**What changed (UI only):** always-dark screen with one quiet blue light; logo + "Clarity" wordmark above a single 400px panel (full width minus 16px on phones); "Unlock Clarity" with the requested subtitle; 50px field with a soft blue focus ring, show/hide toggle, Caps Lock notice and inline error with icon; full-width Unlock button that is never shown disabled for an empty field (it explains instead) and shows a spinner while unlocking; recovery key as a quiet secondary link; "Forgot your passphrase?" opens an in-panel help view. The erase step still uses the existing type-DELETE confirmation.
+
+**Wording decisions:**
+- Subtitle "Your financial world, securely stored on this device." is accurate: data lives only in this browser's storage, every record is AES-256-GCM encrypted, and the key is wrapped by the passphrase (Argon2id) or recovery key. Footer: "Encrypted on this device. No account, no server."
+- The suggested "Having trouble accessing your account?" was not used: Clarity has no account, so the help link is "Forgot your passphrase?" and the help view says plainly there is no password reset.
+- The recovery-key link is hidden, and the help view says so, when no recovery key was set up (read from the key-slot list, which holds no secrets).
+
+**Small behavior fixes, separately justified:** iOS autocorrect/auto-capitalize are off on both fields (they could change a passphrase shown in plain text or a recovery key); a repeated Enter cannot start a second attempt, and no longer replaces a real "wrong passphrase" error with "enter your passphrase"; focus returns to the field after an error.
+
+**Unchanged:** `packages/security`, `packages/data` and the session's unlock/wipe logic (no diff). Covered by the existing e2e tests (wrong passphrase, recovery unlock, no plaintext in storage, backup/restore) plus 10 new ones in `e2e/lock.spec.ts`.
+
+**Known gap (not part of this redesign):** after unlocking with the recovery key you cannot set a new passphrase, because Settings → Change passphrase requires the current passphrase (`WorkspaceStore.changePassphrase` re-verifies it). The help text therefore does not promise a passphrase reset.
