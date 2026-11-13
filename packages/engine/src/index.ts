@@ -7,3 +7,5 @@ export * from './validate';
 export * from './matching';
 export * from './text';
 export * from './reports';
+export { runEngineSelfTest, type EngineSelfTestResult } from './golden/selftest';
+export { GOLDEN_SCENARIOS } from './golden/scenarios';
