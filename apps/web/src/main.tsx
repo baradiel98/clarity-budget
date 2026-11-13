@@ -7,6 +7,7 @@ import './styles/tokens.css';
 import './styles/base.css';
 import { captureInstallPrompt } from './platform/persistence';
 
+(window as unknown as { __clarityModuleLoaded?: boolean }).__clarityModuleLoaded = true;
 captureInstallPrompt();
 
 /** Any unexpected error shows a message with a way out, never a blank page. */

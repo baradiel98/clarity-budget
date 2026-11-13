@@ -41,7 +41,10 @@ export function StartupProblem({ message }: { message: string }) {
     <div className="boot" role="alert">
       <p className="boot-title">Clarity couldn't start</p>
       <p className="boot-hint now">{message}</p>
-      <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={() => window.location.reload()}>Try again</button>
+      <div className="row" style={{ marginTop: 12 }}>
+        <button className="btn btn-primary" onClick={() => window.location.reload()}>Try again</button>
+        <button className="btn btn-secondary" onClick={() => (window as unknown as { __clarityShowDiagnostics?: () => void }).__clarityShowDiagnostics?.()}>Show details</button>
+      </div>
     </div>
   );
 }

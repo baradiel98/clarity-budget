@@ -34,6 +34,11 @@ interface Session {
 const SessionCtx = createContext<Session | null>(null);
 const adapter = new DexieAdapter();
 
+/** Tells the startup safety net (public/boot.js) that the app started. */
+function markReady() {
+  (window as unknown as { __clarityReady?: boolean }).__clarityReady = true;
+}
+
 function useToday(): ISODate {
   const [today, setToday] = useState(() => localISODate(new Date()));
   useEffect(() => {
@@ -65,6 +70,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       .then((e) => {
         done = true;
         clearTimeout(timer);
+        markReady();
         setPhase(e ? { kind: 'locked' } : { kind: 'welcome' });
       })
       .catch((err: unknown) => {
