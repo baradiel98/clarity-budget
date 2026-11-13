@@ -82,6 +82,7 @@ a:hover {
 .warn { color: var(--c-warning); }
 
 /* ───────── app shell ───────── */
+.shell.with-banner .sidebar { top: 46px; height: calc(100vh - 46px); }
 .shell {
   display: grid;
   grid-template-columns: 248px 1fr;
@@ -164,6 +165,7 @@ a:hover {
 .page-head .sub { margin-top: 4px; }
 
 .demo-banner {
+  height: 46px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -559,3 +561,8 @@ table.data tr.excluded td { opacity: 0.55; }
 .fc-grid { stroke: var(--c-chart-grid); stroke-width: 1; }
 .fc-dot { fill: var(--c-surface); stroke: var(--c-chart-line); stroke-width: 2; }
 .fc-dot.neg { stroke: var(--c-negative); }
+
+.mini-lines { display: grid; gap: 6px; margin-top: var(--space-md); padding-top: var(--space-md); border-top: 1px solid var(--c-border); font-size: 13px; }
+.mini-lines > div { display: flex; justify-content: space-between; gap: 12px; color: var(--c-text-secondary); }
+.mini-lines > div > :last-child { color: var(--c-text); font-weight: 600; }
+input[type='checkbox'], input[type='radio'] { accent-color: var(--c-accent); }

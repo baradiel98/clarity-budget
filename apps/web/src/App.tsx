@@ -109,7 +109,7 @@ function Shell() {
           <button className="btn btn-sm btn-secondary" onClick={session.exitDemo}>Exit demo</button>
         </div>
       )}
-      <div className="shell">
+      <div className={`shell ${demo ? 'with-banner' : ''}`}>
         <nav className="sidebar" aria-label="Main">
           <div className="brand"><img src="/favicon.svg" alt="" /> {TERMS.appName}</div>
           {NAV.map((n) => (

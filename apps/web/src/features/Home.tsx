@@ -4,7 +4,7 @@ import { backupDue, engineInput } from '@clarity/data';
 import { buildDashboard, type UpcomingItem } from '@clarity/engine';
 import { formatMonthYear, formatShortDate, formatWeekdayDate, INCOME_STATUS_LABEL, OCCURRENCE_STATUS_LABEL, TERMS } from '@clarity/shared';
 import { useRouter } from '../lib/router';
-import { useData, useSession } from '../state/session';
+import { useData, useSession, useStore } from '../state/session';
 import { useUi } from '../state/ui';
 import { ForecastChart } from '../ui/ForecastChart';
 import { Money } from '../ui/Money';
@@ -24,7 +24,8 @@ export function Home() {
   const cur = data.settings.baseCurrency;
   const d = useMemo(() => buildDashboard(engineInput(data, today)), [data, today]);
   const [lowMode, setLowMode] = useState<'month' | 'income'>('month');
-  const backup = backupDue(data, Date.now());
+  const { demo } = useStore();
+  const backup = demo ? { due: false, reason: null } : backupDue(data, Date.now());
   const sts = d.safeToSpend;
   const lowest = lowMode === 'income' && d.lowestBeforeNextIncome ? d.lowestBeforeNextIncome : d.lowestThroughMonthEnd;
 
@@ -73,6 +74,11 @@ export function Home() {
               <button className="btn btn-secondary btn-sm" onClick={() => ui.openAfford()}>{TERMS.canIAfford}</button>
               <button className="btn-link" onClick={() => ui.explain(sts.explanation)}>{TERMS.whyThisNumber}</button>
             </div>
+            <div className="mini-lines">
+              <div><span>Lowest point</span><span className={`num ${sts.lowPoint.cents < 0 ? 'neg' : ''}`}><Money cents={sts.lowPoint.cents} currency={cur} /> · {formatShortDate(sts.lowPoint.date)}</span></div>
+              <div><span>Bills before then</span><span className="num"><Money cents={-sts.lowPoint.obligations.reduce((s, e) => s + e.cashDeltaCents, 0)} currency={cur} /></span></div>
+              {sts.excludedIncome.length > 0 && <div><span>Income not counted</span><span>{sts.excludedIncome.length} item{sts.excludedIncome.length > 1 ? 's' : ''}</span></div>}
+            </div>
           </section>
 
           <section className="card" aria-labelledby="h-cash">
@@ -83,6 +89,14 @@ export function Home() {
             </div>
             <div className="row" style={{ marginTop: 14 }}>
               <button className="btn-link" onClick={() => ui.explain(d.recordedBalanceExplanation)}>{TERMS.whyThisNumber}</button>
+            </div>
+            <div className="mini-lines">
+              {d.balances.lines.slice(0, 4).map((l) => (
+                <div key={l.accountId}>
+                  <span>{l.name}{l.type === 'credit_card' ? ' (owed)' : !l.countsAsCash ? ' (not spendable)' : ''}</span>
+                  <span className="num"><Money cents={l.type === 'credit_card' ? -l.balanceCents : l.balanceCents} currency={cur} /></span>
+                </div>
+              ))}
             </div>
           </section>
         </div>

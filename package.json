@@ -10,8 +10,9 @@
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.dom.json && tsc -p tsconfig.test.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint packages apps/web/src",
-    "bench:kdf": "node --experimental-strip-types scripts/kdf-benchmark.ts"
+    "lint": "eslint packages apps/web/src apps/web/e2e",
+    "bench:kdf": "node --experimental-strip-types scripts/kdf-benchmark.ts",
+    "check": "npm run typecheck && npm run lint && npm test && npm run build -w @clarity/web"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",

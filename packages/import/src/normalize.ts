@@ -118,7 +118,7 @@ export function parseStatementAmount(text: string, dec: DecimalSeparator): Cents
     v = v.slice(1, -1);
   }
   v = v.replace(/^[A-Z]{3}\s*/i, '').replace(/\s*[A-Z]{3}$/i, '');
-  v = v.replace(/[$€£¥\s ']/g, '');
+  v = v.replace(/[$€£¥\s\u00a0']/g, '');
   if (/^[-−]/.test(v)) {
     negative = !negative;
     v = v.slice(1);

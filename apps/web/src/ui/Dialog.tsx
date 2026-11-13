@@ -15,15 +15,21 @@ interface Props {
 /** Modal dialog / side drawer with focus trap, Escape to close and focus restore. */
 export function Dialog({ title, onClose, children, footer, wide, variant = 'dialog', labelId = 'dlg-title' }: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  // Keep the latest onClose without re-running the focus effect on every parent render.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
     const el = ref.current;
-    const first = el?.querySelector<HTMLElement>('[autofocus], input, select, textarea, button:not(.dlg-close)');
-    (first ?? el)?.focus();
+    // Respect a field that already took focus (autoFocus); otherwise prefer the first form field.
+    if (el && !el.contains(document.activeElement)) {
+      const first = el.querySelector<HTMLElement>('input:not([type=hidden]):not([disabled]), select, textarea') ?? el.querySelector<HTMLElement>('button:not(.dlg-close)');
+      (first ?? el).focus();
+    }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
-        onClose();
+        closeRef.current();
       }
       if (e.key === 'Tab' && el) {
         const f = [...el.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')].filter((x) => !x.hasAttribute('disabled'));
@@ -44,7 +50,7 @@ export function Dialog({ title, onClose, children, footer, wide, variant = 'dial
       document.removeEventListener('keydown', onKey, true);
       prev?.focus?.();
     };
-  }, [onClose]);
+  }, []);
   return (
     <div className={`overlay ${variant === 'drawer' ? 'drawer-overlay' : ''}`} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div ref={ref} className={variant === 'drawer' ? 'drawer' : `dialog ${wide ? 'wide' : ''}`} role="dialog" aria-modal="true" aria-labelledby={labelId} tabIndex={-1}>

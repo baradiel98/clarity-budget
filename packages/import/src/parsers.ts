@@ -28,6 +28,7 @@ export const csvParser: StatementParser = {
   detect(fileName, text) {
     const ext = fileName.toLowerCase().slice(fileName.lastIndexOf('.'));
     if (!this.extensions.includes(ext)) return 0;
+    // eslint-disable-next-line no-control-regex -- ZIP (XLSX) magic bytes
     if (/^\s*(<\?xml|OFXHEADER|<OFX|%PDF|PK\u0003\u0004)/.test(text)) return 0;
     return 1;
   },
@@ -56,6 +57,7 @@ export function checkImportFile(fileName: string, sizeBytes: number, head: strin
     return { ok: false, reason: `${ext.slice(1).toUpperCase()} statements are not supported yet. Download a CSV export from your bank instead.` };
   }
   // Binary content (NUL bytes or many control characters) is rejected.
+  // eslint-disable-next-line no-control-regex -- detecting binary content is the point
   const control = (head.match(/[\u0000-\u0008\u000e-\u001f]/g) ?? []).length;
   if (head.includes('\u0000') || control > head.length * 0.01) return { ok: false, reason: 'This does not look like a text CSV file.' };
   const parser = PARSERS.map((p) => ({ p, s: p.detect(fileName, head) })).sort((a, b) => b.s - a.s)[0];
