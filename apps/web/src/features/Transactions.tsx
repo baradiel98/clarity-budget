@@ -6,6 +6,7 @@ import { addDays, endOfMonth, formatMonthYear, formatShortDate, startOfMonth, TE
 import { useRouter } from '../lib/router';
 import { useData, useRun, useSession, useStore } from '../state/session';
 import { useUi } from '../state/ui';
+import { categoryColors } from '../ui/categoryColor';
 import { CategoryIcon } from '../ui/icons';
 import { Money } from '../ui/Money';
 import { useToast } from '../ui/Toast';
@@ -22,15 +23,19 @@ export function Transactions() {
   const run = useRun();
   const ui = useUi();
   const toast = useToast();
-  const { navigate } = useRouter();
+  const { navigate, search } = useRouter();
   const cur = data.settings.baseCurrency;
+  // Links from Budget and Reports arrive as /transactions?category=…&from=…&to=…
+  const params = useMemo(() => new URLSearchParams(search), [search]);
+  const linked = params.has('from') || params.has('category');
+  const colors = useMemo(() => categoryColors(data.categories), [data.categories]);
 
   const [q, setQ] = useState('');
-  const [period, setPeriod] = useState<Period>('this');
-  const [from, setFrom] = useState(startOfMonth(today));
-  const [to, setTo] = useState(endOfMonth(today));
+  const [period, setPeriod] = useState<Period>(params.has('from') ? 'custom' : 'this');
+  const [from, setFrom] = useState(params.get('from') ?? startOfMonth(today));
+  const [to, setTo] = useState(params.get('to') ?? endOfMonth(today));
   const [accountId, setAccountId] = useState('');
-  const [categoryId, setCategoryId] = useState('');
+  const [categoryId, setCategoryId] = useState(params.get('category') ?? '');
   const [type, setType] = useState<'all' | 'expense' | 'income' | 'transfer'>('all');
   const [sort, setSort] = useState<Sort>({ key: 'date', dir: -1 });
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -154,56 +159,50 @@ export function Transactions() {
     <div>
       <div className="page-head">
         <div>
-          <h1 className="t-title1">{TERMS.tabs.transactions}</h1>
+          <h1>{TERMS.tabs.transactions}</h1>
           <div className="sub muted t-callout">{rows.length} {rows.length === 1 ? 'transaction' : 'transactions'}{period === 'this' ? ` in ${formatMonthYear(today)}` : ''}</div>
         </div>
-        <div className="row">
+        <div className="page-actions">
+          {linked && <button className="btn btn-ghost" onClick={() => navigate('/transactions')}>Clear filters</button>}
           <button className="btn btn-secondary" onClick={() => navigate('/import')}><Upload size={15} /> {TERMS.importStatement}</button>
-          <button className="btn btn-primary" onClick={() => ui.openAdd()}>{TERMS.addTransaction} <kbd>N</kbd></button>
+          <button className="btn btn-primary hide-mobile" onClick={() => ui.openAdd()}>{TERMS.addTransaction} <kbd>N</kbd></button>
         </div>
       </div>
 
-      <div className="card" style={{ padding: 16, marginBottom: 16 }}>
-        <div className="row wrap" style={{ gap: 10 }}>
-          <div style={{ position: 'relative', flex: '1 1 220px' }}>
-            <Search size={16} className="faint" style={{ position: 'absolute', left: 12, top: 12 }} />
-            <input id="tx-search" className="input" style={{ paddingLeft: 36 }} placeholder="Search merchants, notes, categories" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search transactions" />
-          </div>
-          <select className="select" style={{ width: 160 }} value={period} onChange={(e) => setPeriod(e.target.value as Period)} aria-label="Period">
-            <option value="this">This month</option>
-            <option value="last">Last month</option>
-            <option value="90">Last 90 days</option>
-            <option value="year">This year</option>
-            <option value="all">All time</option>
-            <option value="custom">Custom range</option>
-          </select>
-          {period === 'custom' && (
-            <>
-              <input className="input" style={{ width: 160 }} type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="From date" />
-              <input className="input" style={{ width: 160 }} type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="To date" />
-            </>
-          )}
-          <select className="select" style={{ width: 170 }} value={accountId} onChange={(e) => setAccountId(e.target.value)} aria-label="Account">
-            <option value="">All accounts</option>
-            {data.accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select>
-          <select className="select" style={{ width: 170 }} value={categoryId} onChange={(e) => setCategoryId(e.target.value)} aria-label="Category">
-            <option value="">All categories</option>
-            <option value="__none">Uncategorized</option>
-            {data.categories.filter((c) => !c.archived).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          <select className="select" style={{ width: 140 }} value={type} onChange={(e) => setType(e.target.value as typeof type)} aria-label="Type">
-            <option value="all">All types</option>
-            <option value="expense">Spending</option>
-            <option value="income">Income</option>
-            <option value="transfer">Transfers</option>
-          </select>
+      <div className="toolbar" role="search">
+        <div className="search">
+          <Search size={16} />
+          <input id="tx-search" className="input" placeholder="Search merchants, notes, categories" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search transactions" />
         </div>
-        <div className="facts" style={{ marginTop: 14, paddingTop: 14 }}>
-          <div><div className="k">Income</div><div className="v pos"><Money cents={totals.incomeCents} currency={cur} /></div></div>
-          <div><div className="k">Spending</div><div className="v"><Money cents={totals.spendingCents} currency={cur} /></div></div>
-          <div><div className="k">Net</div><div className={`v ${totals.netCents < 0 ? 'neg' : ''}`}><Money cents={totals.netCents} currency={cur} sign="always" /></div></div>
-        </div>
+        <select className="select" value={period} onChange={(e) => setPeriod(e.target.value as Period)} aria-label="Period">
+          <option value="this">This month</option>
+          <option value="last">Last month</option>
+          <option value="90">Last 90 days</option>
+          <option value="year">This year</option>
+          <option value="all">All time</option>
+          <option value="custom">Custom range</option>
+        </select>
+        {period === 'custom' && (
+          <>
+            <input className="input" style={{ width: 156, flex: 'none' }} type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="From date" />
+            <input className="input" style={{ width: 156, flex: 'none' }} type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="To date" />
+          </>
+        )}
+        <select className="select" value={accountId} onChange={(e) => setAccountId(e.target.value)} aria-label="Account">
+          <option value="">All accounts</option>
+          {data.accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+        <select className="select" value={categoryId} onChange={(e) => setCategoryId(e.target.value)} aria-label="Category">
+          <option value="">All categories</option>
+          <option value="__none">Uncategorized</option>
+          {data.categories.filter((c) => !c.archived || c.id === categoryId).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <select className="select" value={type} onChange={(e) => setType(e.target.value as typeof type)} aria-label="Type">
+          <option value="all">All types</option>
+          <option value="expense">Spending</option>
+          <option value="income">Income</option>
+          <option value="transfer">Transfers</option>
+        </select>
       </div>
 
       {selected.size > 0 && (
@@ -217,9 +216,14 @@ export function Transactions() {
       )}
 
       <div className="card flush">
+        <div className="totals" data-testid="tx-totals">
+          <div><div className="k">Income</div><div className="v pos num"><Money cents={totals.incomeCents} currency={cur} /></div></div>
+          <div><div className="k">Spending</div><div className="v num"><Money cents={totals.spendingCents} currency={cur} /></div></div>
+          <div><div className="k">Net</div><div className={`v num ${totals.netCents < 0 ? 'neg' : ''}`}><Money cents={totals.netCents} currency={cur} sign="always" /></div></div>
+        </div>
         {rows.length === 0 ? (
           <div className="empty">
-            <ReceiptText size={30} />
+            <div className="ico"><ReceiptText size={24} /></div>
             <div className="t-headline">{data.transactions.length ? 'No transactions match these filters' : 'No transactions yet'}</div>
             <div className="t-callout">{data.transactions.length ? 'Try a different period or clear the search.' : 'Add your first purchase, or import a statement from your bank.'}</div>
             <div className="row" style={{ marginTop: 8 }}>
@@ -235,8 +239,8 @@ export function Transactions() {
                   <th className="w-check"><input type="checkbox" aria-label="Select all" checked={allChecked} onChange={() => setSelected(allChecked ? new Set() : new Set(visible.map((r) => r.id)))} /></th>
                   {header('date', 'Date')}
                   {header('merchant', 'Merchant')}
-                  <th>Category</th>
-                  <th>Account</th>
+                  <th className="col-cat">Category</th>
+                  <th className="col-acct">Account</th>
                   {header('amount', 'Amount', true)}
                 </tr>
               </thead>
@@ -249,7 +253,9 @@ export function Transactions() {
                     const mt = periodTotals(rows.filter((r) => r.date.startsWith(m)), '0000-01-01', '9999-12-31');
                     out.push(
                       <tr key={`g${m}`} className="group">
-                        <td colSpan={5}>{formatMonthYear(`${m}-01`)}</td>
+                        <td className="w-check" />
+                        <td colSpan={2}>{formatMonthYear(`${m}-01`)}</td>
+                        <td className="col-cat" /><td className="col-acct" />
                         <td className="right num">{mt.count ? <Money cents={mt.netCents} currency={cur} sign="always" /> : ''}</td>
                       </tr>,
                     );
@@ -275,6 +281,8 @@ export function Transactions() {
     const acct = accounts.get(t.accountId);
     const other = t.transferGroupId ? data.transactions.find((x) => x.transferGroupId === t.transferGroupId && x.id !== t.id) : undefined;
     const icon = t.kind === 'transfer' ? 'transfer' : t.kind === 'adjustment' ? 'adjustment' : cat?.icon;
+    const name = t.kind === 'transfer' ? `${t.amountCents < 0 ? 'To' : 'From'} ${other ? accounts.get(other.accountId)?.name ?? '' : ''}` : t.merchant || (t.kind === 'income' ? 'Income' : '—');
+    const catName = t.splits?.length ? t.splits.map((x) => categories.get(x.categoryId)?.name).join(', ') : t.kind === 'transfer' ? 'Transfer' : t.kind === 'adjustment' ? 'Adjustment' : cat?.name ?? 'Uncategorized';
     return (
       <tr
         data-row={t.id}
@@ -287,21 +295,29 @@ export function Transactions() {
         </td>
         <td className="num muted" style={{ whiteSpace: 'nowrap' }}>{formatShortDate(t.date)}</td>
         <td>
-          <div className="row">
-            <span className={`cat-icon ${t.amountCents > 0 && t.kind !== 'transfer' ? 'inflow' : ''}`} style={{ width: 28, height: 28, borderRadius: 8 }}><CategoryIcon name={icon} size={15} /></span>
-            <button className="btn-link" style={{ color: 'var(--c-text)', fontSize: 14, fontWeight: 500 }} onClick={() => ui.openAdd({ editId: t.id })}>
-              {t.kind === 'transfer' ? `${t.amountCents < 0 ? 'To' : 'From'} ${other ? accounts.get(other.accountId)?.name ?? '' : ''}` : t.merchant || (t.kind === 'income' ? 'Income' : '—')}
-            </button>
-            {t.status === 'pending' && <span className="badge warn">Pending</span>}
-            {t.kind === 'refund' && <span className="badge pos">Refund</span>}
-            {t.kind === 'adjustment' && <span className="badge" title={t.adjustmentReason}>Adjustment</span>}
-            {t.splits?.length ? <span className="badge">Split</span> : null}
-            {t.provenance.source === 'import' && <span className="badge" title={t.provenance.rawDescription}>Imported</span>}
-            {t.date > today && <span className="badge accent">Planned</span>}
+          <div className="tx-name">
+            <span className={`cat-icon sm ${t.amountCents > 0 && t.kind !== 'transfer' ? 'inflow' : ''}`}><CategoryIcon name={icon} size={15} /></span>
+            <div style={{ minWidth: 0 }}>
+              <div className="row" style={{ gap: 6 }}>
+                <button className="btn-link" onClick={() => ui.openAdd({ editId: t.id })}>{name}</button>
+                {t.status === 'pending' && <span className="badge warn">Pending</span>}
+                {t.kind === 'refund' && <span className="badge pos">Refund</span>}
+                {t.kind === 'adjustment' && <span className="badge" title={t.adjustmentReason}>Adjustment</span>}
+                {t.splits?.length ? <span className="badge">Split</span> : null}
+                {t.provenance.source === 'import' && <span className="badge hide-mobile" title={t.provenance.rawDescription}>Imported</span>}
+                {t.date > today && <span className="badge accent">Planned</span>}
+              </div>
+              <div className="tx-sub">{catName} · {acct?.name}</div>
+            </div>
           </div>
         </td>
-        <td className="muted">{t.splits?.length ? t.splits.map((s) => categories.get(s.categoryId)?.name).join(', ') : t.kind === 'transfer' ? 'Transfer' : cat?.name ?? <span className="faint">Uncategorized</span>}</td>
-        <td className="muted">{acct?.name}</td>
+        <td className="col-cat">
+          <span className="cat-cell">
+            {t.kind !== 'transfer' && t.kind !== 'adjustment' && !t.splits?.length && <span className="dot" style={{ background: t.categoryId ? colors.get(t.categoryId) : undefined }} />}
+            {t.kind === 'transfer' || cat || t.splits?.length ? catName : <span className="faint">Uncategorized</span>}
+          </span>
+        </td>
+        <td className="muted col-acct">{acct?.name}</td>
         <td className={`right num ${t.amountCents > 0 && t.kind !== 'transfer' ? 'pos' : ''}`} style={{ fontWeight: 600 }}>
           <Money cents={t.amountCents} currency={cur} sign="always" />
         </td>

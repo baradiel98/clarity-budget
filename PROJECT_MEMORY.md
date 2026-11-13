@@ -58,6 +58,15 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Decision]** Mobile background auto-lock is capped at 5 minutes.
 - **[Verified]** One React version (19.3.0) is pinned via root `overrides`. Expo SDK 58 requires it, and two copies break hooks.
 
+## Web redesign (2026-11-13)
+- **[Decision]** The owner asked for a product-wide redesign of the web app (Apple-inspired; Copilot Money and YNAB as quality references, not templates).
+- **[Decision]** Budget and Reports pages were added because the redesign brief describes them and lists budgeting in its definition of done. Savings goals were **not** built (no data model for them yet).
+- **[Verified]** Web navigation: Home, Transactions, Budget, Planning, Reports, Settings (keys 1–6), plus Import Statement. Phone width uses a bottom tab bar: Home, Transactions, Add, Planning, More.
+- **[Verified]** Tokens: warm neutral backgrounds, deep teal accent, system font on Apple devices with Inter elsewhere, radii 8/10/16/22. Category hues come from `categorical` tokens.
+- **[Verified]** `Category.budgetCents` (optional) stores a monthly budget. No migration needed. The mobile app ignores it for now.
+- **[Decision]** The dashboard chart marks the lowest point of the plotted projection (which includes estimated income). The "Lowest projected balance" tile stays conservative (fixed income only). They differ only when estimated income exists.
+- **[Open]** The native mobile app has the new colors (shared tokens) but not the new Budget and Reports screens or the new dashboard layout.
+
 ## Known limitations / not yet verified
 - **[Open]** No device testing has been possible from the dev container. Not yet verified:
   - iOS and Android;

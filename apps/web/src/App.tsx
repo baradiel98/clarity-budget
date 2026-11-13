@@ -1,4 +1,4 @@
-import { CalendarRange, Home as HomeIcon, Lock, Plus, ReceiptText, Settings as SettingsIcon, ShieldCheck, Upload } from 'lucide-react';
+import { BarChart3, CalendarRange, Ellipsis, Home as HomeIcon, Lock, PieChart, Plus, ReceiptText, Settings as SettingsIcon, ShieldCheck, Upload } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { Explanation } from '@clarity/engine';
 import { TERMS } from '@clarity/shared';
@@ -9,12 +9,14 @@ import { ExplainDialog } from './ui/Explain';
 import { Dialog } from './ui/Dialog';
 import { AddTransactionDialog } from './features/AddTransaction';
 import { AffordDialog } from './features/Afford';
+import { Budget } from './features/Budget';
 import { Home } from './features/Home';
 import { ImportPage } from './features/Import';
 import { LockScreen } from './features/Lock';
 import { Onboarding } from './features/Onboarding';
 import { Planning } from './features/Planning';
 import { PrivacyCenter } from './features/Privacy';
+import { Reports } from './features/Reports';
 import { SelfTest } from './features/SelfTest';
 import { Settings } from './features/Settings';
 import { Transactions } from './features/Transactions';
@@ -66,22 +68,25 @@ function Unlocked() {
 const NAV = [
   { to: '/', label: TERMS.tabs.home, icon: HomeIcon, key: '1' },
   { to: '/transactions', label: TERMS.tabs.transactions, icon: ReceiptText, key: '2' },
-  { to: '/planning', label: TERMS.tabs.planning, icon: CalendarRange, key: '3' },
-  { to: '/settings', label: TERMS.tabs.settings, icon: SettingsIcon, key: '4' },
+  { to: '/budget', label: 'Budget', icon: PieChart, key: '3' },
+  { to: '/planning', label: TERMS.tabs.planning, icon: CalendarRange, key: '4' },
+  { to: '/reports', label: 'Reports', icon: BarChart3, key: '5' },
+  { to: '/settings', label: TERMS.tabs.settings, icon: SettingsIcon, key: '6' },
 ];
 
 function Shell() {
   const session = useSession();
-  const { path, navigate } = useRouter();
+  const { path, search, navigate } = useRouter();
   const [add, setAdd] = useState<AddPrefill | null>(null);
   const [afford, setAfford] = useState(false);
   const [explain, setExplain] = useState<Explanation | null>(null);
   const [help, setHelp] = useState(false);
+  const [more, setMore] = useState(false);
   const data = useData();
   const demo = session.phase.kind === 'ready' && session.phase.demo;
 
   const ui = useMemo<UiApi>(() => ({ openAdd: (p) => setAdd(p ?? {}), openAfford: () => setAfford(true), explain: setExplain }), []);
-  const anyOpen = add !== null || afford || explain !== null || help;
+  const anyOpen = add !== null || afford || explain !== null || help || more;
 
   const onKey = useCallback(
     (e: KeyboardEvent) => {
@@ -104,53 +109,87 @@ function Shell() {
   }, [onKey]);
 
   let page: ReactNode;
-  if (path === '/transactions') page = <Transactions />;
+  if (path === '/transactions') page = <Transactions key={search} />;
+  else if (path === '/budget') page = <Budget />;
   else if (path === '/planning') page = <Planning />;
+  else if (path === '/reports') page = <Reports />;
   else if (path === '/settings') page = <Settings />;
   else if (path === '/import') page = <ImportPage />;
   else if (path === '/privacy') page = <PrivacyCenter />;
   else if (path === '/dev/self-test') page = <SelfTest />;
   else page = <Home />;
 
+  const item = (n: (typeof NAV)[number]) => (
+    <Link key={n.to} to={n.to} className="nav-item">
+      <n.icon size={17} strokeWidth={1.9} /> {n.label} <kbd>{n.key}</kbd>
+    </Link>
+  );
+  const tab = (n: (typeof NAV)[number]) => (
+    <Link key={n.to} to={n.to} className="tab">
+      <n.icon size={21} strokeWidth={1.9} />
+      {n.label}
+    </Link>
+  );
+  const inMore = ['/budget', '/reports', '/settings', '/import', '/privacy', '/dev/self-test'].includes(path);
+
   return (
     <UiCtx.Provider value={ui}>
       {demo && (
         <div className="demo-banner" role="note">
-          Sample data — fictional numbers for exploring. Nothing here is saved.
+          <span><strong>Sample data.</strong> Fictional numbers for exploring; nothing here is saved.</span>
           <button className="btn btn-sm btn-secondary" onClick={session.exitDemo}>Exit demo</button>
         </div>
       )}
       <div className={`shell ${demo ? 'with-banner' : ''}`}>
         <nav className="sidebar" aria-label="Main">
           <div className="brand"><img src="/favicon.svg" alt="" /> {TERMS.appName}</div>
-          {NAV.map((n) => (
-            <Link key={n.to} to={n.to} className="nav-item">
-              <n.icon size={18} strokeWidth={1.9} /> {n.label} <kbd>{n.key}</kbd>
-            </Link>
-          ))}
-          <div className="sidebar-actions">
-            <button className="btn btn-primary btn-block" onClick={() => setAdd({})}><Plus size={16} /> {TERMS.addTransaction}</button>
-            <Link to="/import" className="btn btn-secondary btn-block"><Upload size={15} /> {TERMS.importStatement}</Link>
+          <div className="nav-group">{NAV.slice(0, 5).map(item)}</div>
+          <button className="btn btn-primary btn-block sidebar-add" onClick={() => setAdd({})}><Plus size={16} /> {TERMS.addTransaction}</button>
+          <div className="nav-group">
+            <Link to="/import" className="nav-item"><Upload size={17} strokeWidth={1.9} /> {TERMS.importStatement}</Link>
+            {item(NAV[5]!)}
           </div>
           <div className="sidebar-foot">
             <Link to="/privacy" className="privacy-chip"><ShieldCheck size={16} /> <span>Stored only on this device, encrypted</span></Link>
-            {!demo && <button className="nav-item" onClick={session.lock}><Lock size={17} /> Lock</button>}
+            {!demo && <button className="nav-item" onClick={session.lock}><Lock size={17} strokeWidth={1.9} /> Lock</button>}
           </div>
         </nav>
         <main className="main" id="main">
-          <div className="main-inner">{page}</div>
+          <div className="main-inner" key={path}>{page}</div>
         </main>
       </div>
+
+      {/* phone-width navigation */}
+      <nav className="tabbar" aria-label="Main (compact)">
+        {tab(NAV[0]!)}
+        {tab(NAV[1]!)}
+        <button className="tab-add" aria-label={TERMS.addTransaction} onClick={() => setAdd({})}><Plus size={26} strokeWidth={2.3} /></button>
+        {tab(NAV[3]!)}
+        <button className="tab" aria-current={inMore ? 'page' : undefined} onClick={() => setMore(true)}><Ellipsis size={21} strokeWidth={1.9} />More</button>
+      </nav>
+
       {add !== null && <AddTransactionDialog prefill={add} onClose={() => setAdd(null)} />}
       {afford && <AffordDialog onClose={() => setAfford(false)} />}
       {explain && <ExplainDialog ex={explain} currency={data.settings.baseCurrency} onClose={() => setExplain(null)} />}
+      {more && (
+        <Dialog title="More" onClose={() => setMore(false)}>
+          <div className="more-list" onClick={() => setMore(false)}>
+            <Link to="/budget" className="nav-item"><PieChart size={19} /> Budget</Link>
+            <Link to="/reports" className="nav-item"><BarChart3 size={19} /> Reports</Link>
+            <Link to="/import" className="nav-item"><Upload size={19} /> {TERMS.importStatement}</Link>
+            <Link to="/settings" className="nav-item"><SettingsIcon size={19} /> {TERMS.tabs.settings}</Link>
+            <Link to="/privacy" className="nav-item"><ShieldCheck size={19} /> {TERMS.privacyCenter}</Link>
+            {!demo && <button className="nav-item" onClick={session.lock}><Lock size={19} /> Lock</button>}
+          </div>
+        </Dialog>
+      )}
       {help && (
         <Dialog title="Keyboard shortcuts" onClose={() => setHelp(false)}>
           <div className="list">
             {[
-              ['N', TERMS.addTransaction], ['/', 'Search transactions'], ['1 – 4', 'Go to Home, Transactions, Planning, Settings'],
+              ['N', TERMS.addTransaction], ['/', 'Search transactions'], ['1 – 6', 'Home, Transactions, Budget, Planning, Reports, Settings'],
               ['↑ ↓', 'Move between transactions'], ['E or Enter', 'Edit selected transaction'], ['Delete', 'Delete selected transaction'],
-              ['Esc', 'Close dialog'], ['?', 'Show this help'],
+              ['← →', 'Move along the forecast chart (when focused)'], ['Esc', 'Close dialog'], ['?', 'Show this help'],
             ].map(([k, d]) => (
               <div key={k} className="kv"><span>{d}</span><kbd>{k}</kbd></div>
             ))}

@@ -35,71 +35,81 @@ export interface ColorScheme {
   chartLine: string;
   chartFill: string;
   chartGrid: string;
+  chartNeutral: string;
+  shadowSm: string;
+  shadowMd: string;
 }
 
 export const light: ColorScheme = {
-  bg: '#F4F4F6',
-  bgElevated: '#FAFAFB',
+  bg: '#F6F5F2',
+  bgElevated: '#FBFAF8',
   surface: '#FFFFFF',
-  surfaceMuted: '#F0F0F3',
-  surfacePressed: '#E7E7EB',
-  text: '#1C1C1F',
-  textSecondary: '#5E5E66',
-  textTertiary: '#66666E',
-  border: 'rgba(20, 20, 30, 0.08)',
-  borderStrong: 'rgba(20, 20, 30, 0.16)',
-  accent: '#0F5F73',
+  surfaceMuted: '#F1EFEB',
+  surfacePressed: '#E7E4DF',
+  text: '#1A1917',
+  textSecondary: '#57544E',
+  textTertiary: '#66635C',
+  border: 'rgba(26, 25, 23, 0.08)',
+  borderStrong: 'rgba(26, 25, 23, 0.16)',
+  accent: '#0A5A63',
   accentText: '#FFFFFF',
-  accentSoft: 'rgba(15, 95, 115, 0.10)',
-  positive: '#2B6E4A',
-  positiveSoft: 'rgba(43, 110, 74, 0.10)',
-  warning: '#8A5A0B',
-  warningSoft: 'rgba(196, 135, 30, 0.14)',
-  negative: '#B42318',
-  negativeSoft: 'rgba(180, 35, 24, 0.08)',
-  focus: '#2F7FA0',
-  glassFill: 'rgba(255, 255, 255, 0.72)',
-  glassBorder: 'rgba(255, 255, 255, 0.65)',
-  glassShadow: '0 8px 32px rgba(20, 20, 40, 0.10), 0 1px 0 rgba(20, 20, 40, 0.06)',
-  overlay: 'rgba(15, 15, 20, 0.32)',
-  chartLine: '#0F5F73',
-  chartFill: 'rgba(15, 95, 115, 0.10)',
-  chartGrid: 'rgba(20, 20, 30, 0.06)',
+  accentSoft: 'rgba(10, 90, 99, 0.08)',
+  positive: '#1E6A45',
+  positiveSoft: 'rgba(30, 106, 69, 0.10)',
+  warning: '#85560A',
+  warningSoft: 'rgba(190, 130, 30, 0.14)',
+  negative: '#B3261E',
+  negativeSoft: 'rgba(179, 38, 30, 0.08)',
+  focus: '#2C7F8C',
+  glassFill: 'rgba(250, 249, 246, 0.74)',
+  glassBorder: 'rgba(255, 255, 255, 0.7)',
+  glassShadow: '0 10px 40px rgba(26, 25, 23, 0.10), 0 1px 2px rgba(26, 25, 23, 0.06)',
+  overlay: 'rgba(20, 19, 17, 0.36)',
+  chartLine: '#0A5A63',
+  chartFill: 'rgba(10, 90, 99, 0.10)',
+  chartGrid: 'rgba(26, 25, 23, 0.07)',
+  chartNeutral: '#8E8A81',
+  shadowSm: '0 1px 2px rgba(26, 25, 23, 0.05)',
+  shadowMd: '0 1px 2px rgba(26, 25, 23, 0.04), 0 8px 24px rgba(26, 25, 23, 0.06)',
 };
 
 export const dark: ColorScheme = {
-  bg: '#0C0D0F',
-  bgElevated: '#121316',
-  surface: '#17181B',
-  surfaceMuted: '#1E1F23',
-  surfacePressed: '#26272C',
-  text: '#F3F3F5',
-  textSecondary: '#A9A9B2',
-  textTertiary: '#9898A2',
-  border: 'rgba(255, 255, 255, 0.07)',
-  borderStrong: 'rgba(255, 255, 255, 0.14)',
-  accent: '#5DB6C7',
-  accentText: '#062A33',
-  accentSoft: 'rgba(93, 182, 199, 0.14)',
-  positive: '#6CC796',
-  positiveSoft: 'rgba(108, 199, 150, 0.12)',
-  warning: '#E5B05C',
-  warningSoft: 'rgba(229, 176, 92, 0.14)',
-  negative: '#F2847A',
-  negativeSoft: 'rgba(242, 132, 122, 0.12)',
-  focus: '#7CC6D4',
-  glassFill: 'rgba(30, 31, 36, 0.70)',
-  glassBorder: 'rgba(255, 255, 255, 0.08)',
-  glassShadow: '0 8px 32px rgba(0, 0, 0, 0.45), 0 1px 0 rgba(255, 255, 255, 0.04) inset',
-  overlay: 'rgba(0, 0, 0, 0.55)',
-  chartLine: '#5DB6C7',
-  chartFill: 'rgba(93, 182, 199, 0.14)',
-  chartGrid: 'rgba(255, 255, 255, 0.06)',
+  bg: '#0D0D0C',
+  bgElevated: '#131312',
+  surface: '#181817',
+  surfaceMuted: '#201F1D',
+  surfacePressed: '#2A2927',
+  text: '#F4F3EF',
+  textSecondary: '#ABA89F',
+  textTertiary: '#98958C',
+  border: 'rgba(255, 252, 245, 0.08)',
+  borderStrong: 'rgba(255, 252, 245, 0.15)',
+  accent: '#6CC5CB',
+  accentText: '#06292D',
+  accentSoft: 'rgba(108, 197, 203, 0.12)',
+  positive: '#6FCB9B',
+  positiveSoft: 'rgba(111, 203, 155, 0.12)',
+  warning: '#E6B566',
+  warningSoft: 'rgba(230, 181, 102, 0.13)',
+  negative: '#F28B82',
+  negativeSoft: 'rgba(242, 139, 130, 0.12)',
+  focus: '#86D2D7',
+  glassFill: 'rgba(28, 28, 26, 0.72)',
+  glassBorder: 'rgba(255, 252, 245, 0.09)',
+  glassShadow: '0 10px 40px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 252, 245, 0.04) inset',
+  overlay: 'rgba(0, 0, 0, 0.6)',
+  chartLine: '#6CC5CB',
+  chartFill: 'rgba(108, 197, 203, 0.14)',
+  chartGrid: 'rgba(255, 252, 245, 0.07)',
+  chartNeutral: '#7C7971',
+  shadowSm: '0 1px 2px rgba(0, 0, 0, 0.3)',
+  shadowMd: '0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.28)',
 };
 
 export const fontFamily = {
   sans: 'Inter',
-  webStack: "'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+  /** San Francisco on Apple devices; self-hosted Inter everywhere else. */
+  webStack: "-apple-system, BlinkMacSystemFont, 'Inter Variable', 'Inter', 'Segoe UI', Roboto, sans-serif",
 } as const;
 
 /** Type scale (px). Financial numbers use tabular figures everywhere. */
@@ -119,7 +129,7 @@ export const type = {
 export const space = { xxs: 2, xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24, x3: 32, x4: 40, x5: 48, x6: 64 } as const;
 
 /** One radius scale. Cards 18, controls 12, chips 8, pills only for segmented controls/tab bar. */
-export const radius = { sm: 8, md: 12, lg: 18, xl: 24, pill: 999 } as const;
+export const radius = { sm: 8, md: 10, lg: 16, xl: 22, pill: 999 } as const;
 
 export const motion = {
   fast: 120,
@@ -141,6 +151,12 @@ export const layout = {
   desktopSidebar: 240,
   desktopContentMax: 1280,
   touchTarget: 44,
+} as const;
+
+/** Muted categorical hues for category dots and charts (never the only cue: always paired with a label). */
+export const categorical = {
+  light: ['#0A5A63', '#A8662F', '#55699F', '#84568F', '#3B7F62', '#A84F5A', '#6F7434', '#497596'],
+  dark: ['#6CC5CB', '#E0A26E', '#98A8E6', '#C89BD8', '#7FCBA9', '#E8929B', '#BCC077', '#8FBADE'],
 } as const;
 
 export const tokens = { light, dark, fontFamily, type, space, radius, motion, glass, layout } as const;

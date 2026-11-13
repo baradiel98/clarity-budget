@@ -9,7 +9,7 @@ import { createWebCryptoProvider } from '@clarity/security/webcrypto';
 import {
   CommandError, MemoryAdapter, WorkspaceStore, addTransaction, adjustBalance, backupDue, buildDemoWorkspace, commitImport, createAccount,
   createRecurring, deleteTransaction, engineInput, exportTransactionsCsv, migrate, onboard, recordOccurrence, setOccurrenceException,
-  undoImportBatch, updateTransaction, SCHEMA_VERSION, csvCell,
+  undoImportBatch, updateCategory, updateTransaction, SCHEMA_VERSION, csvCell,
 } from '../src';
 
 const noble = createNobleProvider((n) => new Uint8Array(randomBytes(n)));
@@ -268,5 +268,17 @@ describe('demo workspace', () => {
     expect(dash.warnings.filter((w) => w.severity === 'critical')).toEqual([]);
     expect(dash.warnings.filter((w) => w.id.startsWith('overdue'))).toEqual([]);
     expect(dash.safeToSpend.cents).toBeGreaterThan(0);
+  });
+});
+
+describe('category budgets', () => {
+  it('sets, clears and validates a monthly budget', async () => {
+    const { store } = await fresh();
+    await store.apply(updateCategory(store.ctx(NOW, TODAY), 'cat_groceries', { budgetCents: 40000 }));
+    expect(store.data.categories.find((c) => c.id === 'cat_groceries')!.budgetCents).toBe(40000);
+    await store.apply(updateCategory(store.ctx(NOW, TODAY), 'cat_groceries', { budgetCents: null }));
+    expect(store.data.categories.find((c) => c.id === 'cat_groceries')!.budgetCents).toBeNull();
+    expect(() => updateCategory(store.ctx(NOW, TODAY), 'cat_groceries', { budgetCents: -1 })).toThrow(/zero or more/);
+    expect(() => updateCategory(store.ctx(NOW, TODAY), 'cat_paycheck', { budgetCents: 100 })).toThrow(/spending categories/);
   });
 });

@@ -143,6 +143,8 @@ export interface Category {
   /** lucide icon name */
   icon: string;
   kind: 'expense' | 'income';
+  /** Optional monthly budget for an expense category. Absent or null = no budget set. */
+  budgetCents?: Cents | null;
   archived: boolean;
   createdAt: number;
   updatedAt: number;

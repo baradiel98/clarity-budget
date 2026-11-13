@@ -365,9 +365,13 @@ export function createCategory(ctx: Ctx, input: { name: string; kind: Category['
   return { ops: [{ t: 'put', table: 'categories', value: category }], category };
 }
 
-export function updateCategory(ctx: Ctx, id: ID, patch: Partial<Pick<Category, 'name' | 'archived' | 'icon'>>): Op[] {
+export function updateCategory(ctx: Ctx, id: ID, patch: Partial<Pick<Category, 'name' | 'archived' | 'icon' | 'budgetCents'>>): Op[] {
   const c = ctx.data.categories.find((x) => x.id === id) ?? fail('Category not found.');
   if (patch.name !== undefined && !patch.name.trim()) fail('Give the category a name.', 'name');
+  if (patch.budgetCents !== undefined && patch.budgetCents !== null) {
+    if (!Number.isSafeInteger(patch.budgetCents) || patch.budgetCents < 0) fail('Enter a budget of zero or more.', 'budget');
+    if (c.kind !== 'expense') fail('Only spending categories can have a budget.', 'budget');
+  }
   return [{ t: 'put', table: 'categories', value: { ...c, ...patch, updatedAt: ctx.now } }];
 }
 

@@ -92,7 +92,7 @@ test.describe('transactions', () => {
   });
 
   test('transfer to savings is not spending', async ({ page }) => {
-    await page.keyboard.press('4');
+    await page.keyboard.press('6');
     await page.getByRole('button', { name: 'Add account' }).click();
     await page.getByLabel('Name', { exact: true }).fill('Savings');
     await page.getByRole('button', { name: 'Savings' }).click();
@@ -105,7 +105,7 @@ test.describe('transactions', () => {
     await page.getByTestId('save-tx').click();
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await page.keyboard.press('2');
-    await expect(page.locator('.facts')).toContainText('Spending$0.00');
+    await expect(page.getByTestId('tx-totals')).toContainText('Spending$0.00');
     await page.keyboard.press('1');
     await expect(money(page, 'available-cash')).toHaveText('$1,000.00');
   });
@@ -122,7 +122,7 @@ test.describe('transactions', () => {
   });
 
   test('why this number shows the engine breakdown', async ({ page }) => {
-    await page.getByRole('button', { name: 'Why this number?' }).nth(1).click();
+    await page.getByTestId('why-sts').click();
     const dlg = page.getByRole('dialog');
     await expect(dlg).toContainText('Available cash now');
     await expect(dlg).toContainText('Safe to Spend');
@@ -169,7 +169,7 @@ test.describe('security and storage', () => {
     await onboard(page);
     await toDashboard(page);
     await addExpense(page, '55.00', 'Hardware store');
-    await page.keyboard.press('4');
+    await page.keyboard.press('6');
     const dl = page.waitForEvent('download');
     await page.getByTestId('backup-btn').click();
     const file = await (await dl).path();
@@ -195,7 +195,7 @@ test.describe('security and storage', () => {
     await fresh(page);
     await onboard(page);
     await toDashboard(page);
-    await page.keyboard.press('4');
+    await page.keyboard.press('6');
     await page.getByRole('button', { name: 'Delete', exact: true }).click();
     await page.getByLabel('Type DELETE to confirm').fill('DELETE');
     await page.getByRole('button', { name: 'Delete permanently' }).click();
@@ -267,8 +267,8 @@ test.describe('privacy guarantees', () => {
     await onboard(page);
     await toDashboard(page);
     await addExpense(page, '77.77', 'Secret Merchant');
-    await page.keyboard.press('3');
     await page.keyboard.press('4');
+    await page.keyboard.press('6');
     await page.getByRole('link', { name: 'Import Statement' }).click();
     await page.getByTestId('import-file').setInputFiles(join(here, 'statement.csv'));
     await chooseUsDates(page);
@@ -308,7 +308,7 @@ test.describe('demo mode', () => {
   test('sample data is labelled and not persisted', async ({ page }) => {
     await fresh(page);
     await page.getByRole('button', { name: 'Explore sample data' }).click();
-    await expect(page.getByText('Sample data — fictional numbers')).toBeVisible();
+    await expect(page.getByText('Fictional numbers for exploring')).toBeVisible();
     await expect(money(page, 'month-end')).toBeVisible();
     await page.getByRole('button', { name: 'Exit demo' }).click();
     await expect(page.getByRole('button', { name: 'Get started' })).toBeVisible();

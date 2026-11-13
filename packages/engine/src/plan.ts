@@ -261,8 +261,10 @@ export interface UpcomingItem {
   id: string;
   date: ISODate;
   label: string;
-  /** Signed effect on cash (0 for card-only or unknown). */
+  /** Signed amount. Normally the effect on cash; for items paid from a card it is the charge to the card. */
   cents: Cents;
+  /** False when the item does not move cash (for example a subscription charged to a credit card). */
+  affectsCash: boolean;
   status: Occurrence['status'] | 'scheduled_tx';
   occurrence?: Occurrence;
   txId?: ID;
@@ -340,7 +342,8 @@ export function buildDashboard(input: EngineInput): Dashboard {
       id: `occ:${o.key}`,
       date: o.date,
       label: o.name,
-      cents: ev ? ev.cashDeltaCents : sign * o.amountCents,
+      cents: ev ? ev.cashDeltaCents || (ev.legs.find((l) => l.accountId === o.accountId)?.deltaCents ?? 0) : sign * o.amountCents,
+      affectsCash: !ev || ev.cashDeltaCents !== 0 || ev.legs.length === 0,
       status: o.status,
       occurrence: ev?.occurrence ?? o,
       isIncome: o.kind === 'income',
@@ -350,7 +353,7 @@ export function buildDashboard(input: EngineInput): Dashboard {
     if (d.date > until) break;
     for (const e of d.events) {
       if (e.source !== 'scheduled_tx' || !e.txId) continue;
-      upcoming.push({ id: e.id, date: e.date, label: e.label, cents: e.cashDeltaCents || e.legs[0]!.deltaCents, status: 'scheduled_tx', txId: e.txId, isIncome: e.legs[0]!.deltaCents > 0 });
+      upcoming.push({ id: e.id, date: e.date, label: e.label, cents: e.cashDeltaCents || e.legs[0]!.deltaCents, affectsCash: e.cashDeltaCents !== 0, status: 'scheduled_tx', txId: e.txId, isIncome: e.legs[0]!.deltaCents > 0 });
     }
   }
   upcoming.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));

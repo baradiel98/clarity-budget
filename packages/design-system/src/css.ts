@@ -1,8 +1,8 @@
-import { dark, light, radius, space, type ColorScheme, fontFamily, motion, glass } from './tokens';
+import { categorical, dark, light, radius, space, type ColorScheme, fontFamily, motion, glass } from './tokens';
 
 const kebab = (s: string) => s.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`);
-const colors = (c: ColorScheme, indent: string) =>
-  Object.entries(c).map(([k, v]) => `${indent}--c-${kebab(k)}: ${v};`).join('\n');
+const colors = (c: ColorScheme, indent: string, cats: readonly string[] = c === dark ? categorical.dark : categorical.light) =>
+  [...Object.entries(c).map(([k, v]) => `${indent}--c-${kebab(k)}: ${v};`), ...cats.map((v, i) => `${indent}--cat-${i + 1}: ${v};`)].join('\n');
 
 /**
  * CSS custom properties for the web app. Light by default; dark under

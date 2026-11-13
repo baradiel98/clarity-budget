@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDashboard, buildForecast, canIAfford, computeSafeToSpend, periodTotals, spendingByCategory, balanceSummary, type EngineInput } from '../src';
+import { buildDashboard, buildForecast, budgetSummary, canIAfford, cashHistory, computeSafeToSpend, monthlySeries, monthsEnding, periodTotals, spendingByCategory, balanceSummary, type EngineInput } from '../src';
 import { account, input, rec, transfer, tx } from './builders';
 
 const chk = account({ id: 'chk', openingBalanceCents: 120000, openingDate: '2026-09-03' });
@@ -250,5 +250,56 @@ describe('Accounts and currency', () => {
 
   it('forecast rejects horizons in the past', () => {
     expect(() => buildForecast({ ...scenarioA, horizonEnd: '2026-09-01', includeEstimatedIncome: true })).toThrow();
+  });
+});
+
+describe('Budget, monthly series and cash history', () => {
+  const cat = (id: string, budgetCents?: number | null, kind: 'expense' | 'income' = 'expense') => ({ id, name: id, group: 'g', icon: 'tag', kind, archived: false, createdAt: 0, updatedAt: 0, ...(budgetCents !== undefined ? { budgetCents } : {}) });
+  const acct = account({ id: 'chk', openingBalanceCents: 100000, openingDate: '2026-08-10' });
+  const card2 = account({ id: 'card', type: 'credit_card', openingDate: '2026-08-10' });
+  const txs = [
+    tx({ accountId: 'chk', date: '2026-09-02', amountCents: -6000, kind: 'expense', categoryId: 'food' }),
+    tx({ accountId: 'card', date: '2026-09-05', amountCents: -5000, kind: 'expense', categoryId: 'food' }),
+    tx({ accountId: 'chk', date: '2026-09-06', amountCents: 1000, kind: 'refund', categoryId: 'food' }),
+    tx({ accountId: 'chk', date: '2026-09-07', amountCents: -3000, kind: 'expense', categoryId: 'fun' }),
+    tx({ accountId: 'chk', date: '2026-09-08', amountCents: -700, kind: 'expense' }),
+    tx({ accountId: 'chk', date: '2026-09-09', amountCents: -4000, kind: 'expense', splits: [{ categoryId: 'food', amountCents: -1000 }, { categoryId: 'fun', amountCents: -3000 }] }),
+    ...transfer('chk', 'card', '2026-09-10', 5000),
+    tx({ accountId: 'chk', date: '2026-09-12', amountCents: 200000, kind: 'income', categoryId: 'pay' }),
+    tx({ accountId: 'chk', date: '2026-08-20', amountCents: -2500, kind: 'expense', categoryId: 'food' }),
+  ];
+  const cats = [cat('food', 10000), cat('fun', 5000), cat('none'), cat('zero', 0), cat('pay', undefined, 'income')];
+
+  it('budget vs actual respects splits, refunds and never counts card payments', () => {
+    const b = budgetSummary(cats, txs, '2026-09-01', '2026-09-30');
+    const row = (id: string) => b.rows.find((r) => r.categoryId === id)!;
+    // food: 60 + 50 − 10 + 10 (split) = 110 → over by 10
+    expect(row('food')).toMatchObject({ spentCents: 11000, remainingCents: -1000, over: true });
+    // fun: 30 + 30 (split) = 60 → over by 10
+    expect(row('fun')).toMatchObject({ spentCents: 6000, remainingCents: -1000, over: true });
+    expect(row('none')).toMatchObject({ budgetCents: null, remainingCents: null, over: false });
+    expect(row('zero')).toMatchObject({ budgetCents: 0, remainingCents: 0, over: false });
+    expect(b.rows.some((r) => r.categoryId === 'pay')).toBe(false);
+    expect(b).toMatchObject({ budgetedCents: 15000, spentBudgetedCents: 17000, uncategorizedCents: 700, spentUnbudgetedCents: 700, remainingCents: -2000, overCount: 2 });
+    // identity: budgeted + unbudgeted spending = total spending for the period
+    expect(b.spentBudgetedCents + b.spentUnbudgetedCents).toBe(periodTotals(txs, '2026-09-01', '2026-09-30').spendingCents);
+  });
+
+  it('monthly series matches period totals and crosses years', () => {
+    expect(monthsEnding('2026-02-15', 4)).toEqual(['2025-11', '2025-12', '2026-01', '2026-02']);
+    const s = monthlySeries(txs, ['2026-08', '2026-09']);
+    expect(s).toEqual([
+      { month: '2026-08', incomeCents: 0, spendingCents: 2500, netCents: -2500, count: 1 },
+      { month: '2026-09', incomeCents: 200000, spendingCents: 17700, netCents: 182300, count: 7 },
+    ]);
+    expect(monthlySeries(txs, ['2026-09'], '2026-09-05')[0]!.spendingCents).toBe(11000);
+  });
+
+  it('cash history is recorded cash per day and never starts before accounts were added', () => {
+    const h = cashHistory([acct, card2], txs, '2026-08-01', '2026-09-03', 'USD');
+    expect(h[0]).toEqual({ date: '2026-08-10', cents: 100000 });
+    expect(h.find((x) => x.date === '2026-08-20')!.cents).toBe(97500);
+    expect(h[h.length - 1]).toEqual({ date: '2026-09-03', cents: 91500 });
+    expect(cashHistory([card2], txs, '2026-08-01', '2026-09-03', 'USD')).toEqual([]);
   });
 });

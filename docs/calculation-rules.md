@@ -102,6 +102,14 @@ So:
 - Lowest: **$1,050 on Sep 12**.
 - Safe to Spend: 1,050 − 100 = **$950**.
 
+## Budget and reports
+- A **budget** is one optional monthly amount per spending category. It repeats every month. Empty means "not tracked".
+- **Spent** in a category = expenses − refunds for the month, with split transactions divided by their parts. Transfers, card payments and balance adjustments are never spending.
+- **Left** = budget − spent. Negative is shown as "Over by $X" with an icon and words, not color alone.
+- Identity (tested): spending in budgeted categories + spending not budgeted (including uncategorized) = total spending for the month.
+- **Reports** use recorded transactions only, up to today. The current month is labelled "so far". Nothing estimated or scheduled is included.
+- **Balance history** on the dashboard chart is the recorded available cash per day. It starts no earlier than the date the newest spendable account was added, because earlier balances are not known.
+
 ## Import rules (`packages/import`)
 - **Dates:** if several formats fit (for example MM/DD vs DD/MM), the user must choose. The app never guesses.
 - **Amounts:** these forms are all supported:

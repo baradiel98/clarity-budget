@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, FileUp, Link2, Upload } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, CopyCheck, FileUp, Link2, ListChecks, ShieldCheck, Upload } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { commitImport, undoImportBatch as undoImport, type ImportDecision } from '@clarity/data';
 import {
@@ -161,11 +161,18 @@ export function ImportPage() {
     <div>
       <div className="page-head">
         <div>
-          <h1 className="t-title1">{TERMS.importStatement}</h1>
-          <div className="sub muted t-callout">Read on this device only. The file is never uploaded or stored — only the transactions you approve are saved, encrypted.</div>
+          <h1>{TERMS.importStatement}</h1>
+          <div className="sub muted t-callout">Bring in a statement from your bank instead of typing every transaction.</div>
         </div>
         {stage !== 'choose' && stage !== 'done' && <button className="btn btn-ghost" onClick={() => { setStage('choose'); setPreview(null); setAnalysis(null); }}>Start over</button>}
       </div>
+
+      <ol className="stepper" aria-label="Import steps">
+        {(['choose', 'map', 'review', 'done'] as Stage[]).map((st, i) => {
+          const at = ['choose', 'map', 'review', 'done'].indexOf(stage);
+          return <li key={st} className={`step ${i === at ? 'on' : i < at ? 'done' : ''}`} aria-current={i === at ? 'step' : undefined}><span>{['Choose a statement', 'Check how it is read', 'Review transactions', 'Done'][i]}</span></li>;
+        })}
+      </ol>
 
       {error && <div className="callout neg" role="alert" style={{ marginBottom: 16 }}>{error}</div>}
 
@@ -178,7 +185,7 @@ export function ImportPage() {
             onDragLeave={() => setOver(false)}
             onDrop={(e) => { e.preventDefault(); setOver(false); const f = e.dataTransfer.files[0]; if (f) void onFile(f); }}
           >
-            <FileUp size={28} className="faint" />
+            <div className="ico"><FileUp size={22} /></div>
             <p className="t-headline">Drop a CSV statement here</p>
             <p className="t-callout muted">Download it from your bank's website (often under “Download transactions” or “Export”). Up to 10 MB.</p>
             <label className="btn btn-primary" style={{ marginTop: 8 }}>
@@ -186,6 +193,11 @@ export function ImportPage() {
               <input type="file" accept=".csv,.tsv,.txt,text/csv" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); e.target.value = ''; }} data-testid="import-file" />
             </label>
             <p className="hint" style={{ marginTop: 14 }}>PDF, OFX/QFX and Excel statements are not supported yet.</p>
+          </div>
+          <div className="assure">
+            <div><ShieldCheck size={16} /><span><strong>Stays on this device.</strong> The file is read here and never uploaded.</span></div>
+            <div><ListChecks size={16} /><span><strong>You approve every row.</strong> Nothing is saved until you review it.</span></div>
+            <div><CopyCheck size={16} /><span><strong>Duplicates are flagged.</strong> Never assumed from the amount alone.</span></div>
           </div>
           <ImportHistory />
         </div>
@@ -374,7 +386,7 @@ export function ImportPage() {
 
       {stage === 'done' && result && (
         <div className="card empty" data-testid="import-done">
-          <CheckCircle2 size={32} className="pos" />
+          <div className="ico" style={{ background: 'var(--c-positive-soft)', color: 'var(--c-positive)' }}><CheckCircle2 size={26} /></div>
           <div className="t-title2">Imported {result.count} transaction{result.count === 1 ? '' : 's'}</div>
           <div className="t-callout">Your balances and forecast are updated. The statement file was not kept.</div>
           <div className="row" style={{ marginTop: 8 }}>
