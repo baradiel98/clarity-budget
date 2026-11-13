@@ -121,5 +121,5 @@
   }
 
   window.__clarityShowDiagnostics = show;
-  setTimeout(show, 10000);
+  setTimeout(show, 15000);
 })();

@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { buildDemoWorkspace, CommandError, MemoryAdapter, WorkspaceStore, type Ctx, type Op } from '@clarity/data';
 import { localISODate, TABLES, type ISODate, type WorkspaceData } from '@clarity/shared';
 import { WrongSecretError } from '@clarity/security';
-import { DexieAdapter } from '../platform/dexieAdapter';
+import type { DexieAdapter } from '../platform/dexieAdapter';
 import { provider } from '../platform/crypto';
 import { requestPersistence } from '../platform/persistence';
 
@@ -32,7 +32,15 @@ interface Session {
 }
 
 const SessionCtx = createContext<Session | null>(null);
-const adapter = new DexieAdapter();
+let adapterInstance: DexieAdapter | null = null;
+/** Created on first use (not at import time), so a storage failure is reported instead of stopping the app from loading. */
+async function getAdapter(): Promise<DexieAdapter> {
+  if (!adapterInstance) {
+    const { DexieAdapter: Impl } = await import('../platform/dexieAdapter');
+    adapterInstance = new Impl();
+  }
+  return adapterInstance;
+}
 
 /** Tells the startup safety net (public/boot.js) that the app started. */
 function markReady() {
@@ -66,7 +74,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const timer = setTimeout(() => {
       if (!done) setPhase({ kind: 'error', message: 'This browser did not allow Clarity to open its storage. This happens in some private-browsing modes, in browsers inside other apps, or when site data is blocked.' });
     }, 8000);
-    WorkspaceStore.exists(adapter)
+    getAdapter()
+      .then((a) => WorkspaceStore.exists(a))
       .then((e) => {
         done = true;
         clearTimeout(timer);
@@ -118,7 +127,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       introActive,
       finishIntro: () => setIntroActive(false),
       async createVault(passphrase, withRecoveryKey) {
-        const { store, recoveryKey } = await WorkspaceStore.create(adapter, provider, passphrase, { withRecoveryKey, now: Date.now() });
+        const { store, recoveryKey } = await WorkspaceStore.create(await getAdapter(), provider, passphrase, { withRecoveryKey, now: Date.now() });
         void requestPersistence();
         setPendingRecoveryKey(recoveryKey);
         setIntroActive(true);
@@ -126,13 +135,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         return recoveryKey;
       },
       async unlock(how) {
-        const store = await WorkspaceStore.unlock(adapter, provider, how);
+        const store = await WorkspaceStore.unlock(await getAdapter(), provider, how);
         lastActive.current = Date.now();
         void requestPersistence();
         setPhase({ kind: 'ready', store, demo: false });
       },
       async restore(text, secret) {
-        const store = await WorkspaceStore.restoreBackup(adapter, provider, text, secret);
+        const store = await WorkspaceStore.restoreBackup(await getAdapter(), provider, text, secret);
         void requestPersistence();
         setPhase({ kind: 'ready', store, demo: false });
       },
@@ -155,12 +164,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           if (p.kind === 'ready') p.store.lock();
           return { kind: 'loading' };
         });
-        WorkspaceStore.exists(adapter).then((e) => setPhase(e ? { kind: 'locked' } : { kind: 'welcome' }));
+        getAdapter().then((a) => WorkspaceStore.exists(a)).then((e) => setPhase(e ? { kind: 'locked' } : { kind: 'welcome' }));
       },
       lock,
       async wipe() {
         if (phase.kind === 'ready') await phase.store.wipe();
-        else await adapter.wipe();
+        else await (await getAdapter()).wipe();
         setPhase({ kind: 'welcome' });
       },
     }),

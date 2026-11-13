@@ -565,4 +565,5 @@ table.data tr.excluded td { opacity: 0.5; }
 .boot-title { font-size: 17px; font-weight: 600; margin: 0; }
 .boot-hint { max-width: 420px; margin: 0; font-size: 13px; line-height: 19px; color: var(--c-text-secondary); opacity: 0; animation: boot-hint 0.3s 4s forwards; }
 .boot-hint.now { opacity: 1; animation: none; }
+.boot-build { font-size: 11px; color: var(--c-text-tertiary, #8e8a81); margin: 6px 0 0; }
 @keyframes boot-hint { to { opacity: 1; } }

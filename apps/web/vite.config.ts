@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,6 +38,22 @@ const CSP = [
   "form-action 'none'",
 ].join('; ');
 
+/** Short build id shown on the loading screen, so a device's version can be identified. */
+function buildId(): string {
+  const fromEnv = process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT;
+  if (fromEnv) return fromEnv.slice(0, 7);
+  try {
+    return execSync('git rev-parse --short=7 HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+  } catch {
+    return new Date().toISOString().slice(0, 16);
+  }
+}
+
+function stamp(): Plugin {
+  const id = buildId();
+  return { name: 'clarity-build-stamp', transformIndexHtml: (html) => html.replaceAll('%CLARITY_BUILD%', id) };
+}
+
 function csp(): Plugin {
   return {
     name: 'clarity-csp',
@@ -52,6 +69,7 @@ export default defineConfig({
     designTokens(),
     react(),
     csp(),
+    stamp(),
     VitePWA({
       // New versions take over as soon as they are downloaded, so fixes reach people without closing every tab.
       registerType: 'autoUpdate',

@@ -17,8 +17,15 @@
     <div id="root">
       <div class="boot">
         <p class="boot-title">Loading Clarity…</p>
-        <p class="boot-hint">If this message stays for more than a few seconds, refresh the page. Very old browsers, some private-browsing modes and browsers inside other apps may not be supported: try Chrome, Safari, Edge or Firefox directly.</p>
+        <p class="boot-hint">Still starting… If nothing changes within 15 seconds, a details screen will explain what went wrong.</p>
+        <p class="boot-build">Version %CLARITY_BUILD%</p>
       </div>
+      <noscript>
+        <div class="boot" style="min-height: 0">
+          <p class="boot-title">JavaScript is turned off</p>
+          <p class="boot-hint now">Clarity needs JavaScript. On iPhone: Settings → Apps → Safari → Advanced → turn on JavaScript, and check that no content blocker blocks this site.</p>
+        </div>
+      </noscript>
     </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
