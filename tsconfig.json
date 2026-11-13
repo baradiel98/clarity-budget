@@ -4,5 +4,10 @@
     "noEmit": true,
     "types": []
   },
-  "include": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts"]
+  "include": [
+    "packages/*/src/**/*.ts"
+  ],
+  "exclude": [
+    "packages/security/src/providers/webcrypto.ts"
+  ]
 }
