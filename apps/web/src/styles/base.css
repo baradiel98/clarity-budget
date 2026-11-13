@@ -820,3 +820,17 @@ tr.fresh > td:first-child { animation-name: fresh; }
 input[type='date'].input { -webkit-appearance: none; appearance: none; display: block; min-height: 40px; line-height: 38px; text-align: left; }
 input[type='date'].input::-webkit-date-and-time-value { text-align: left; }
 input[type='date'].input::-webkit-calendar-picker-indicator { opacity: 0.6; cursor: pointer; }
+
+/* unlock: remember this device + status */
+.auth-status { display: flex; gap: 7px; align-items: flex-start; margin: -12px 0 18px; padding: 9px 12px; border-radius: 10px; background: rgba(121, 166, 255, 0.08); border: 1px solid rgba(121, 166, 255, 0.18); color: var(--c-text-secondary); font-size: 13.5px; line-height: 20px; }
+.auth-status svg { flex: none; margin-top: 3px; color: var(--c-accent); }
+.auth-remember { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; min-height: 32px; margin: 0 0 6px; }
+.auth-check { display: inline-flex; align-items: center; gap: 9px; cursor: pointer; color: var(--c-text); font-size: 14px; }
+.auth-check input { width: 18px; height: 18px; margin: 0; accent-color: var(--auth-blue); cursor: pointer; }
+.auth-days { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--radius-pill); background: var(--auth-field); border: 1px solid var(--auth-line); }
+.auth-day { position: relative; padding: 3px 11px; border-radius: var(--radius-pill); font-size: 13px; font-weight: 600; color: var(--c-text-secondary); cursor: pointer; transition: background var(--motion-fast), color var(--motion-fast); }
+.auth-day input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.auth-day.on { background: rgba(121, 166, 255, 0.16); color: #CFE0FF; }
+.auth-day:has(input:focus-visible) { outline: 2px solid var(--c-focus); outline-offset: 2px; }
+.auth-remember-hint { margin: 0 0 16px; }
+.test-banner strong { color: var(--c-accent); }

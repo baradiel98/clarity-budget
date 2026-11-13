@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import type { Explanation } from '@clarity/engine';
 import { TERMS } from '@clarity/shared';
 import { Link, RouterProvider, useRouter } from './lib/router';
-import { useData, useSession } from './state/session';
+import { TEST_MODE, useData, useSession } from './state/session';
 import { UiCtx, type AddPrefill, type UiApi } from './state/ui';
 import { ExplainDialog } from './ui/Explain';
 import { Dialog } from './ui/Dialog';
@@ -145,13 +145,19 @@ function Shell() {
 
   return (
     <UiCtx.Provider value={ui}>
+      {TEST_MODE && !demo && (
+        <div className="demo-banner test-banner" role="note" data-testid="test-mode-banner">
+          <span><strong>Test mode.</strong> Fictional sample data in a separate test database. Not available in the production app.</span>
+          <button className="btn btn-sm btn-secondary" onClick={() => { if (window.confirm('Delete the test data and start again with fresh sample data?')) void session.resetTestData(); }}>Reset test data</button>
+        </div>
+      )}
       {demo && (
         <div className="demo-banner" role="note">
           <span><strong>Sample data.</strong> Fictional numbers for exploring; nothing here is saved.</span>
           <button className="btn btn-sm btn-secondary" onClick={session.exitDemo}>Exit demo</button>
         </div>
       )}
-      <div className={`shell ${demo ? 'with-banner' : ''}`}>
+      <div className={`shell ${demo || TEST_MODE ? 'with-banner' : ''}`}>
         <nav className="sidebar" aria-label="Main">
           <div className="brand"><img src="/favicon.svg" alt="" /> {TERMS.appName}</div>
           <div className="nav-group">{NAV.slice(0, 5).map(item)}</div>
@@ -162,7 +168,7 @@ function Shell() {
           </div>
           <div className="sidebar-foot">
             <Link to="/privacy" className="privacy-chip"><ShieldCheck size={16} /> <span>Stored only on this device, encrypted</span></Link>
-            {!demo && <button className="nav-item" onClick={session.lock}><Lock size={17} strokeWidth={1.9} /> Lock</button>}
+            {!demo && <button className="nav-item" onClick={() => session.lock('manual')}><Lock size={17} strokeWidth={1.9} /> Lock</button>}
           </div>
         </nav>
         <main className="main" id="main">
@@ -190,7 +196,7 @@ function Shell() {
             <Link to="/import" className="nav-item"><Upload size={19} /> {TERMS.importStatement}</Link>
             <Link to="/settings" className="nav-item"><SettingsIcon size={19} /> {TERMS.tabs.settings}</Link>
             <Link to="/privacy" className="nav-item"><ShieldCheck size={19} /> {TERMS.privacyCenter}</Link>
-            {!demo && <button className="nav-item" onClick={session.lock}><Lock size={19} /> Lock</button>}
+            {!demo && <button className="nav-item" onClick={() => session.lock('manual')}><Lock size={19} /> Lock</button>}
           </div>
         </Dialog>
       )}

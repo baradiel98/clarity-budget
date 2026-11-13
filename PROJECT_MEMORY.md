@@ -122,3 +122,11 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Added]** An "Upcoming paydays" preview shows the next three dates, worked out by the engine's `scheduleDates`. Date fields get consistent styling (`appearance: none`) because iOS Safari centres and resizes them; this is unverified on a real iPhone.
 - **[Open]** The native mobile app's onboarding still has the old single-paycheck segmented control (likely the same overflow). Not changed.
 
+## Remember this device and test mode (Nov 2026)
+- **[Decision, user]** No passphrase on every visit. A web "Remember this device" option (7 or 30 days): a non-extractable WebCrypto AES-GCM device key in IndexedDB `clarity-device` wraps a copy of the master key; the passphrase is never stored. Details, state rules and limits are in `docs/security.md` → "Remembered devices".
+- **[Decision]** Manual Lock and the automatic inactivity lock PAUSE remembered access (passphrase once, then it continues). Otherwise a lock could be bypassed by refreshing. This is open to the user's preference.
+- **[Lesson]** A lock must take effect even if the tab is closed immediately after it. The IndexedDB write is asynchronous, so a synchronous `localStorage` "locked" flag backs it up (found by a test).
+- **[Decision]** Test mode is a compile-time flag (`__CLARITY_TEST_MODE__`): on in `vite` dev and in builds with `CLARITY_TEST_MODE=1`; compiled out of production (tested by grepping the bundle). It uses a separate `clarity-test` database with sample data and the passphrase "clarity sample data". The `clarity-budget-test` service in render.yaml is the test site; the owner must sync the Blueprint in Render.
+- **[Verified]** `WorkspaceStore.copyMasterKey()` and `vaultId` were added; no change to encryption or the record format.
+- Tests: `e2e/remember.spec.ts` (11, production build) and `e2e/test-mode.spec.ts` (3, test build on port 4174; Playwright projects "production" and "test-mode").
+

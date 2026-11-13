@@ -70,6 +70,51 @@ On mobile, everyday unlock uses biometrics, so the KDF runs only:
 | Auto-lock | after inactivity (default 15 min) and when the tab is hidden for that long | when the app goes to the background (configurable grace period); content hidden in the app switcher |
 | Persistence | `navigator.storage.persist()` requested; result shown in the Privacy Center | app sandbox |
 
+## Remembered devices (web, "Remember this device")
+**What it does.** After a successful unlock with the passphrase or recovery key, the user can choose to remember this browser for 7 or 30 days. Until then, opening or refreshing Clarity in that browser does not ask for the passphrase.
+
+**How it works** (`apps/web/src/platform/deviceTrust.ts`):
+1. WebCrypto generates a random AES-256-GCM **device key** with `extractable: false`. Its raw bytes cannot be exported or read by any script, including Clarity's own (verified by a test: `exportKey` is rejected).
+2. The device key encrypts a copy of the vault's **master key**. The associated data binds the vault id and the expiry time, so editing the stored expiry makes decryption fail. The plaintext copy is zeroed immediately.
+3. The `CryptoKey` object and the encrypted master key are stored in a separate IndexedDB database, `clarity-device`. The browser keeps the key material; the page only holds a handle to it.
+4. On the next visit, if the trust exists, has not expired and is not paused, the browser decrypts the master key and the vault opens with it (`WorkspaceStore.unlock({ masterKey })`). Records are not changed, re-encrypted or migrated.
+
+**Where things are stored.**
+| Item | Where |
+|---|---|
+| Passphrase | **Nowhere.** Never stored or logged; it only exists in memory while it is typed and checked |
+| Device key | IndexedDB `clarity-device`, as a non-extractable `CryptoKey`, this browser profile only |
+| Encrypted master key, IV, vault id, created/expiry dates, paused flag | Same record, not secret except the ciphertext |
+| "Locked" flag | `localStorage['clarity-device-locked'] = '1'`, set synchronously by a lock so that closing the tab immediately cannot skip the lock. Not secret |
+| Master key (plaintext) | Only in memory while Clarity is unlocked (as before) |
+
+None of this is in backups, and nothing is sent anywhere.
+
+**State rules.**
+| Event | Result |
+|---|---|
+| First unlock on a device | Passphrase or recovery key; optional "Remember this device" (7 or 30 days) |
+| Remembered and not expired | Opens directly |
+| Trust period over | Record deleted; lock screen says remembered access ended |
+| Lock button or automatic lock after inactivity | Locks at once and **pauses** remembered access. The passphrase is needed once, then remembered access continues if "Remember" stays checked |
+| Unlock with "Remember" unchecked | Any earlier trust on this browser is deleted |
+| Settings → Security → This device → "Forget this device" | Device key and wrapped master key deleted |
+| Delete all data, or restore a backup (a different vault) | Trust deleted |
+| A broken or mismatched record (other vault, tampered) | Deleted; the passphrase is asked |
+| Wrong passphrase | Fails as before; nothing is remembered |
+
+**Limits (stated honestly).**
+- During the trust period, **anyone who can use this browser profile can open Clarity without the passphrase.** Only remember devices you don't share, and keep the device itself locked.
+- Non-extractable means the key cannot be *copied*, not that it cannot be *used*. Malicious code running in Clarity's page (an XSS bug or a supply-chain compromise) or a malicious browser extension could ask the browser to decrypt the master key while the trust exists. CSP, no third-party scripts and no `eval` reduce this risk; they cannot remove it.
+- Malware running as the same OS user, or someone with a copy of the browser profile and that machine's OS-level key protection, may be able to use the stored key. Browser storage is not a hardware security module.
+- Expiry is enforced by the app on this device, using the device clock. Turning the clock back extends trust; deleting the record (or the clock moving past expiry) ends it.
+- Clearing site data, private windows and some browsers' storage eviction (for example Safari's limits for sites that are not installed) remove the remembered state. The user then simply enters the passphrase.
+- The mobile app uses the platform Keychain/Keystore with biometrics instead (see "Platform storage").
+
+## Test mode (development and the separate test site only)
+- It exists only when the code is built by the Vite dev server or with `CLARITY_TEST_MODE=1`. In the production build the flag is the constant `false` and the bundler removes the code. A test checks that the production bundle contains none of the test-mode strings and that URL parameters do nothing.
+- It uses a separate IndexedDB database (`clarity-test`) filled with fictional sample data, still encrypted, with a published test passphrase. It never opens or touches the real `clarity` database.
+
 ## Deletion ("crypto-shredding")
 Browsers and phones cannot guarantee that deleted bytes are physically overwritten. So "Delete all data" works in this order:
 1. Overwrite, then delete, the key slots (and on mobile the Keychain/Keystore copy). Without them the remaining ciphertext cannot be decrypted by anyone.

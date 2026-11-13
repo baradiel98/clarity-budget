@@ -73,6 +73,21 @@ describe('onboarding with two paychecks (shared account)', () => {
   });
 });
 
+describe('device unlock with a copy of the master key', () => {
+  it('a copied master key unlocks the same data; locking makes copying impossible', async () => {
+    const { store, adapter } = await fresh();
+    const mk = store.copyMasterKey();
+    const before = norm(store.data);
+    store.lock();
+    expect(() => store.copyMasterKey()).toThrow();
+    const again = await WorkspaceStore.unlock(adapter, noble, { masterKey: mk });
+    expect(JSON.parse(norm(again.data))).toEqual(JSON.parse(before));
+    expect(again.vaultId).toBe(store.vaultId);
+    mk.fill(0);
+    await expect(WorkspaceStore.unlock(adapter, noble, { masterKey: mk })).rejects.toThrow();
+  });
+});
+
 describe('persistence and encryption', () => {
   it('lock → unlock restores identical data; storage holds only ciphertext', async () => {
     const { store, adapter } = await fresh();

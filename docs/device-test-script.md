@@ -8,6 +8,14 @@ The web app works offline, so a phone or browser can keep showing the version it
 2. Compare it with the latest commit on the deployed branch (`phase-1`) on GitHub, or with the commit shown in Render's deploy log.
 3. If it is older, tap **Check for updates**. When the new version has downloaded, a "A new version of Clarity is ready" banner appears; tap **Reload**. (Closing the tab completely and reopening also works.)
 
+## Remember this device (iPhone Safari and desktop)
+1. Lock Clarity. On the unlock screen, check **Remember this device**, choose 7 or 30 days, and enter the passphrase.
+2. Refresh, close the tab and reopen the link: Clarity opens without the passphrase.
+3. **Settings → Security → This device** shows the date until which it is remembered.
+4. Tap **Lock**: the passphrase is asked again (also after a refresh). Unlock once and remembered access continues.
+5. **Forget this device**, then refresh: the passphrase is asked.
+6. Note whether Safari keeps the remembered state after several days without opening Clarity (Safari may clear data for sites that are not added to the Home Screen).
+
 ## 0. Run the apps
 **Web (desktop):**
 

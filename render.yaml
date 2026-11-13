@@ -27,3 +27,30 @@ services:
       - path: /*
         name: Cross-Origin-Opener-Policy
         value: same-origin
+
+  # Separate TEST site: sample data only, no passphrase prompts (CLARITY_TEST_MODE=1).
+  # It has its own address and its own browser storage, so it can never see data from the real app.
+  - type: web
+    name: clarity-budget-test
+    runtime: static
+    branch: phase-1
+    buildCommand: npm ci && CLARITY_TEST_MODE=1 npm run build -w @clarity/web
+    staticPublishPath: apps/web/dist
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Robots-Tag
+        value: noindex
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+

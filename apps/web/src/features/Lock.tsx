@@ -1,7 +1,8 @@
-import { AlertCircle, ArrowLeft, Eye, EyeOff, KeyRound, ShieldCheck } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Eye, EyeOff, KeyRound, Lock as LockIcon, ShieldCheck } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useRouter } from '../lib/router';
-import { useSession } from '../state/session';
+import { TEST_MODE, TEST_PASSPHRASE, useSession, type LockReason } from '../state/session';
+import { TRUST_CHOICES, type TrustDays } from '../platform/deviceTrust';
 import { Field } from '../ui/Field';
 import { Dialog } from '../ui/Dialog';
 
@@ -24,6 +25,10 @@ export function LockScreen() {
   const [shake, setShake] = useState(0);
   const [hasRecovery, setHasRecovery] = useState<boolean | null>(null);
   const [erase, setErase] = useState(false);
+  // Pre-select "remember" if this browser was remembered before a lock paused it.
+  const [remember, setRemember] = useState(!!session.trust);
+  const [days, setDays] = useState<TrustDays>(session.trust?.days ?? 7);
+  const reason = session.phase.kind === 'locked' ? session.phase.reason : undefined;
   const inFlight = useRef(false);
   const input = useRef<HTMLInputElement>(null);
   const ids = { title: useId(), desc: useId(), field: useId(), err: useId(), caps: useId() };
@@ -58,7 +63,7 @@ export function LockScreen() {
     setBusy(true);
     setError(null);
     try {
-      await session.unlock(view === 'passphrase' ? { passphrase: secret } : { recoveryKey: secret });
+      await session.unlock(view === 'passphrase' ? { passphrase: secret } : { recoveryKey: secret }, remember ? days : null);
     } catch (err) {
       setError((err as Error).message);
       setSecret('');
@@ -94,6 +99,8 @@ export function LockScreen() {
                   : 'Enter the recovery key you saved when you set up Clarity. Dashes and capital letters are optional.'}
               </p>
 
+              {reason && <p className="auth-status" role="status" data-testid="lock-reason"><LockIcon size={14} aria-hidden /> {REASON[reason]}</p>}
+              {TEST_MODE && <p className="auth-status">Test mode: the sample data passphrase is “{TEST_PASSPHRASE}”.</p>}
               <label className="auth-label" htmlFor={ids.field}>{isPass ? 'Passphrase' : 'Recovery key'}</label>
               <div className={`auth-input ${error ? 'invalid' : ''}`} data-shake={shake ? (shake % 2 ? 'a' : 'b') : undefined}>
                 <input
@@ -126,6 +133,23 @@ export function LockScreen() {
                 {!error && caps && isPass && <p className="auth-caps" id={ids.caps}>Caps Lock is on</p>}
               </div>
 
+              <div className="auth-remember">
+                <label className="auth-check">
+                  <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} disabled={busy} />
+                  <span>Remember this device</span>
+                </label>
+                {remember && (
+                  <div className="auth-days" role="radiogroup" aria-label="Remember for">
+                    {TRUST_CHOICES.map((d) => (
+                      <label key={d} className={`auth-day ${days === d ? 'on' : ''}`}>
+                        <input type="radio" name="trust-days" checked={days === d} onChange={() => setDays(d)} disabled={busy} />
+                        {d} days
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {remember && <p className="auth-hint auth-remember-hint">You won't need your passphrase on this browser for {days} days, unless you lock Clarity. Only choose this on a device you don't share.</p>}
               <button type="submit" className="auth-primary" disabled={busy}>
                 {busy ? <><span className="auth-spinner" aria-hidden /> Unlocking…</> : 'Unlock'}
               </button>
@@ -226,3 +250,11 @@ export function DeleteEverything({ onClose, onDone, title = 'Delete all data on 
     </Dialog>
   );
 }
+
+const REASON: Record<LockReason, string> = {
+  manual: 'Clarity is locked.',
+  idle: 'Locked after a period of inactivity.',
+  suspended: 'Clarity was locked on this device. Enter your passphrase to continue.',
+  expired: 'Your remembered access on this device has ended. Enter your passphrase to continue.',
+  forgotten: 'This device is no longer remembered. Enter your passphrase to continue.',
+};

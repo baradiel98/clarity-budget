@@ -107,6 +107,21 @@ export class WorkspaceStore {
     this.emit();
   }
 
+  /** The id of the encrypted vault on this device (not secret). */
+  get vaultId(): string {
+    return this.meta.vaultId;
+  }
+
+  /**
+   * A copy of the master key, for a platform to protect with a device-bound key
+   * ("remember this device" on the web, Keychain/Keystore on mobile). The caller must zero it after use.
+   * The master key is already in memory while unlocked; this does not create new key material.
+   */
+  copyMasterKey(): Uint8Array {
+    this.assertUnlocked();
+    return this.mk.slice();
+  }
+
   get isLocked(): boolean {
     return this.locked;
   }

@@ -64,7 +64,15 @@ function csp(): Plugin {
   };
 }
 
-export default defineConfig({
+/**
+ * Test mode (sample data, no passphrase prompts) exists ONLY in the dev server and in builds made with
+ * CLARITY_TEST_MODE=1 (the separate test site). The normal production build compiles it to `false`
+ * and the bundler removes that code entirely, so no URL, setting or script can switch it on there.
+ */
+export default defineConfig(({ command }) => {
+  const testMode = command === 'serve' || process.env.CLARITY_TEST_MODE === '1';
+  return {
+  define: { __CLARITY_TEST_MODE__: JSON.stringify(testMode) },
   plugins: [
     designTokens(),
     react(),
@@ -100,4 +108,5 @@ export default defineConfig({
   build: { target: 'es2022', sourcemap: false },
   worker: { format: 'es' },
   server: { port: 5173 },
+  };
 });

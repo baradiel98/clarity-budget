@@ -102,11 +102,13 @@ test.describe('unlock screen', () => {
     await expect(field(page)).toHaveValue('secret words here');
   });
 
-  test('keyboard order: field → show → Unlock → recovery key → help', async ({ page }) => {
+  test('keyboard order: field → show → remember → Unlock → recovery key → help', async ({ page }) => {
     await lockedVault(page);
     await expect(field(page)).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(page.getByRole('button', { name: 'Show passphrase' })).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('checkbox', { name: 'Remember this device' })).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(unlockBtn(page)).toBeFocused();
     await page.keyboard.press('Tab');

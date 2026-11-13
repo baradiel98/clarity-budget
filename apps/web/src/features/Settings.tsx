@@ -111,7 +111,7 @@ export function Settings() {
               <Field label="Lock automatically after">
                 {(id) => (
                   <select id={id} className="select" value={data.settings.autoLockMinutes} onChange={(e) => void run((ctx) => updateSettings(ctx, { autoLockMinutes: Number(e.target.value) }))}>
-                    {[1, 5, 15, 30, 60, 120].map((m) => <option key={m} value={m}>{m} minute{m > 1 ? 's' : ''} of inactivity</option>)}
+                    {[1, 5, 15, 30, 60, 120, 240].map((m) => <option key={m} value={m}>{m >= 60 ? `${m / 60} hour${m > 60 ? 's' : ''}` : `${m} minute${m > 1 ? 's' : ''}`} of inactivity</option>)}
                   </select>
                 )}
               </Field>
@@ -122,6 +122,7 @@ export function Settings() {
             <h2 className="t-title2" style={{ marginBottom: 4 }}>Security</h2>
             <div className="kv"><div><div style={{ fontWeight: 500 }}>Passphrase</div><div className="hint">Changing it does not re-encrypt your data; it re-protects the key.</div></div><button className="btn btn-secondary btn-sm" disabled={demo} onClick={() => setDialog({ kind: 'passphrase' })}><KeyRound size={14} /> Change</button></div>
             <RecoveryRow disabled={demo} onShow={(key) => setDialog({ kind: 'recovery', key })} />
+            {!demo && <DeviceRow />}
           </section>
 
           <section className="card" id="backup">
@@ -367,3 +368,27 @@ function CsvDialog({ onClose }: { onClose: () => void }) {
     </Dialog>
   );
 }
+
+/** "Remember this device" status for this browser, with a way to revoke it. */
+function DeviceRow() {
+  const session = useSession();
+  const toast = useToast();
+  const t = session.trust;
+  const until = t ? new Date(t.expiresAt).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : null;
+  return (
+    <div className="kv" data-testid="device-row">
+      <div>
+        <div style={{ fontWeight: 500 }}>This device</div>
+        <div className="hint">
+          {t
+            ? t.suspended
+              ? `Remembered until ${until}, paused by a lock. Your passphrase will be asked once, then remembered access continues.`
+              : `Remembered until ${until}. Opening Clarity in this browser won't ask for your passphrase until then, unless you lock it.`
+            : 'Not remembered. Choose “Remember this device” when you unlock to skip the passphrase on this browser for 7 or 30 days.'}
+        </div>
+      </div>
+      {t && <button className="btn btn-secondary btn-sm" onClick={async () => { await session.forgetDevice(); toast({ message: 'This device is no longer remembered' }); }}>Forget this device</button>}
+    </div>
+  );
+}
+
