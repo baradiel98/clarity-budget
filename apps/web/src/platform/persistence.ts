@@ -23,3 +23,24 @@ export async function persistenceState(): Promise<PersistState> {
 export function isStandalone(): boolean {
   return window.matchMedia?.('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
 }
+
+/** Chrome/Edge install prompt (Safari has no prompt; the Privacy Center explains Add to Dock / Home Screen). */
+interface InstallPromptEvent extends Event {
+  prompt(): Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
+let deferred: InstallPromptEvent | null = null;
+export function captureInstallPrompt() {
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferred = e as InstallPromptEvent;
+  });
+}
+export const canPromptInstall = () => deferred !== null;
+export async function promptInstall(): Promise<boolean> {
+  if (!deferred) return false;
+  await deferred.prompt();
+  const r = await deferred.userChoice;
+  deferred = null;
+  return r.outcome === 'accepted';
+}

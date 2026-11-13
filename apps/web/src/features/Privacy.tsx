@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NO_SYNC_NOTICE, TERMS } from '@clarity/shared';
-import { isStandalone, persistenceState, requestPersistence, type PersistState } from '../platform/persistence';
+import { canPromptInstall, isStandalone, persistenceState, promptInstall, requestPersistence, type PersistState } from '../platform/persistence';
 import { useData } from '../state/session';
 
 const QA: [string, string][] = [
@@ -63,6 +63,16 @@ export function PrivacyCenter() {
             <div className="kv"><span>Storage protected from automatic clearing</span><span className={`badge ${persist === 'persisted' ? 'pos' : 'warn'}`}>{persist === 'persisted' ? 'Yes' : persist === 'not-persisted' ? 'Not granted' : 'Unknown'}</span></div>
             {persist !== 'persisted' && <button className="btn btn-secondary btn-sm" onClick={() => void requestPersistence().then(setPersist)}>Ask the browser again</button>}
             <div className="kv"><span>Installed as an app</span><span className="badge">{isStandalone() ? 'Yes' : 'No'}</span></div>
+            {!isStandalone() && (
+              <div className="callout" style={{ marginTop: 8 }}>
+                Installing protects your data from automatic browser clean-up.{' '}
+                {canPromptInstall() ? (
+                  <button className="btn-link" onClick={() => void promptInstall()}>Install Clarity</button>
+                ) : (
+                  <>Safari on Mac: File → Add to Dock. Chrome or Edge: the install icon in the address bar.</>
+                )}
+              </div>
+            )}
             <div className="kv"><span>Last encrypted backup</span><span className="t-footnote">{data.settings.lastBackupAt ? new Date(data.settings.lastBackupAt).toLocaleDateString() : 'Never'}</span></div>
           </div>
           <div className="card">

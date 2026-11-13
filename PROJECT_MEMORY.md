@@ -51,6 +51,13 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - `node scripts/kdf-benchmark.mjs`: KDF timings.
 - `GEN_GOLDEN=1 npx vitest run packages/engine/test/golden.gen.test.ts`: regenerate golden outputs. Review the diff before committing.
 
+## Implementation status (2026-11-13, branch phase-1)
+- **[Verified]** Web app is complete for Phase 1. Unit, end-to-end (Chromium) and network-audit tests pass.
+- **[Verified]** The mobile app type-checks, passes its Jest tests and bundles for iOS and Android. It has **not** been run on a device.
+- **[Decision]** Mobile split editing is deferred to the web app; mobile preserves splits when editing.
+- **[Decision]** Mobile background auto-lock is capped at 5 minutes.
+- **[Verified]** One React version (19.3.0) is pinned via root `overrides`. Expo SDK 58 requires it, and two copies break hooks.
+
 ## Known limitations / not yet verified
 - **[Open]** No device testing has been possible from the dev container. Not yet verified:
   - iOS and Android;
@@ -67,5 +74,9 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
   - web biometrics.
 
 ## Lessons
+- Bank CSV dates like 09/12/2026 are genuinely ambiguous. The app must ask, never guess (e2e covers this).
+- Playwright: wait for the dialog to close after Save. Saves are async (encryption), so shortcuts pressed earlier go to the dialog.
+- Testing Library 14 for React Native has an async `render`/`fireEvent`. Jest mock factories may only reference `mock*` variables.
+- Secure storage can throw on some devices or environments. Startup must never depend on it succeeding.
 - A test expecting the next paycheck after month-end exposed a horizon bug: the forecast only looked to month-end. Fixed by looking ahead 62 days for the next income.
 - In test fixtures, `trackFrom` must be set deliberately. Past occurrences after it are (correctly) overdue.

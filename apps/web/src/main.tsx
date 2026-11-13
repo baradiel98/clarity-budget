@@ -5,6 +5,9 @@ import { SessionProvider } from './state/session';
 import { ToastProvider } from './ui/Toast';
 import './styles/tokens.css';
 import './styles/base.css';
+import { captureInstallPrompt } from './platform/persistence';
+
+captureInstallPrompt();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
