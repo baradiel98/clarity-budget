@@ -1,0 +1,11 @@
+﻿Account: Everyday Checking ****1234
+Statement period: 09/01/2026 - 09/30/2026
+
+Posted Date,Payee,Amount,Reference
+09/02/2026,"Joe's Diner, Main St",(18.40),A001
+09/03/2026,"Deposit ""Mobile""",250.00 CR,A002
+09/04/2026,Gym membership,45.00 DR,A003
+
+not a date,???,abc,A004
+09/05/2026,Bookstore,12.345,A005
+09/06/2026,Rent,-1400,A006

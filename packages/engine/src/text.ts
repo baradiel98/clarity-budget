@@ -26,7 +26,7 @@ export function cleanMerchant(raw: string): string {
   if (!s) return raw.trim();
   // Title-case ALL CAPS descriptions for readability; leave mixed case alone.
   if (s === s.toUpperCase()) {
-    s = s.toLowerCase().replace(/\b([a-z])/g, (c) => c.toUpperCase());
+    s = s.toLowerCase().replace(/(^|[\s\-/&(])([a-z])/g, (_m, pre: string, c: string) => pre + c.toUpperCase());
   }
   return s;
 }
