@@ -1,5 +1,6 @@
 import { X } from 'lucide-react';
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { exitMs } from '../lib/motion';
 
 interface Props {
   title: string;
@@ -12,12 +13,24 @@ interface Props {
   labelId?: string;
 }
 
-/** Modal dialog / side drawer with focus trap, Escape to close and focus restore. */
+/**
+ * Modal dialog / side drawer with focus trap, Escape to close and focus restore.
+ * Closing by Escape, backdrop or the close button plays a short exit first. A dialog that the
+ * parent removes itself (for example after saving) disappears immediately: work never waits for motion.
+ */
 export function Dialog({ title, onClose, children, footer, wide, variant = 'dialog', labelId = 'dlg-title' }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   // Keep the latest onClose without re-running the focus effect on every parent render.
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  const requestClose = useCallback(() => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    setClosing(true);
+    setTimeout(() => closeRef.current(), exitMs());
+  }, []);
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
     const el = ref.current;
@@ -29,7 +42,7 @@ export function Dialog({ title, onClose, children, footer, wide, variant = 'dial
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
-        closeRef.current();
+        requestClose();
       }
       if (e.key === 'Tab' && el) {
         const f = [...el.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')].filter((x) => !x.hasAttribute('disabled'));
@@ -50,13 +63,13 @@ export function Dialog({ title, onClose, children, footer, wide, variant = 'dial
       document.removeEventListener('keydown', onKey, true);
       prev?.focus?.();
     };
-  }, []);
+  }, [requestClose]);
   return (
-    <div className={`overlay ${variant === 'drawer' ? 'drawer-overlay' : ''}`} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className={`overlay ${variant === 'drawer' ? 'drawer-overlay' : ''} ${closing ? 'closing' : ''}`} onMouseDown={(e) => e.target === e.currentTarget && requestClose()}>
       <div ref={ref} className={variant === 'drawer' ? 'drawer' : `dialog ${wide ? 'wide' : ''}`} role="dialog" aria-modal="true" aria-labelledby={labelId} tabIndex={-1}>
         <div className="dialog-head">
           <h2 className="t-title2" id={labelId}>{title}</h2>
-          <button className="icon-btn dlg-close" onClick={onClose} aria-label="Close">
+          <button className="icon-btn dlg-close" onClick={requestClose} aria-label="Close">
             <X size={18} />
           </button>
         </div>

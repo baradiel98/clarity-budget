@@ -136,6 +136,8 @@ export function ForecastChart({ history, forecast, currency, reserve, monthEnd }
             </g>
           ))}
           {reserve > 0 && <line x1={0} x2={width} y1={geo.y(reserve)} y2={geo.y(reserve)} className="fc-reserve" />}
+          {/* the lines, markers and lowest point draw in from left to right whenever the range changes */}
+          <g className="fc-reveal" key={`${points[0]?.date}-${n}`}>
           <path d={geo.area} className="fc-area" />
           {geo.rec && <path d={geo.rec} className="fc-line recorded" />}
           <path d={geo.proj} className="fc-line projected" />
@@ -165,6 +167,7 @@ export function ForecastChart({ history, forecast, currency, reserve, monthEnd }
               </text>
             </g>
           )}
+          </g>
           {cur && cursor !== null && (
             <g>
               <line x1={geo.x(cursor)} x2={geo.x(cursor)} y1={pad.t} y2={H - pad.b} className="fc-cursor" />

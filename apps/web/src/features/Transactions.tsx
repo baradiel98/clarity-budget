@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { deleteTransaction, type Op } from '@clarity/data';
 import { periodTotals } from '@clarity/engine';
 import { addDays, endOfMonth, formatMonthYear, formatShortDate, startOfMonth, TERMS, type Transaction } from '@clarity/shared';
+import { isFresh } from '../state/fresh';
 import { useRouter } from '../lib/router';
 import { useData, useRun, useSession, useStore } from '../state/session';
 import { useUi } from '../state/ui';
@@ -286,6 +287,7 @@ export function Transactions() {
     return (
       <tr
         data-row={t.id}
+        className={isFresh(t.id) ? 'fresh' : undefined}
         aria-selected={cursor === t.id || selected.has(t.id)}
         onClick={() => setCursor(t.id)}
         onDoubleClick={() => ui.openAdd({ editId: t.id })}

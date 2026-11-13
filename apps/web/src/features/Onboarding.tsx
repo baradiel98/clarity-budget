@@ -8,6 +8,7 @@ import { Field } from '../ui/Field';
 import { Money } from '../ui/Money';
 import { Segmented } from '../ui/Segmented';
 import { RecoveryKeyStep } from './RecoveryKey';
+import { Spinner } from '../ui/Spinner';
 
 type Freq = 'weekly' | 'biweekly' | 'twice' | 'monthly' | 'none';
 const FREQS: { value: Freq; label: string }[] = [
@@ -193,7 +194,7 @@ export function Onboarding() {
           <span className="spacer" />
           {step === 1 && <button type="button" className="btn btn-ghost" onClick={() => { setFreq('none'); setStep(2); }}>Skip</button>}
           {step === 2 && <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => { setSkipBill(true); void finish(false); }}>Skip</button>}
-          <button type="submit" className="btn btn-primary" disabled={busy}>{step === 2 ? (busy ? 'Saving…' : 'See my overview') : 'Continue'}</button>
+          <button type="submit" className="btn btn-primary" disabled={busy} aria-busy={busy}>{step === 2 ? (busy ? <><Spinner /> Saving…</> : 'See my overview') : 'Continue'}</button>
         </div>
         <p className="hint" style={{ marginTop: 16 }}>{formatMonthYear(session.today)} · Everything stays on this device.</p>
       </form>

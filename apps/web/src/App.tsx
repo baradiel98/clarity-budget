@@ -7,6 +7,7 @@ import { useData, useSession } from './state/session';
 import { UiCtx, type AddPrefill, type UiApi } from './state/ui';
 import { ExplainDialog } from './ui/Explain';
 import { Dialog } from './ui/Dialog';
+import { AccountPreview } from './features/AccountPreview';
 import { AddTransactionDialog } from './features/AddTransaction';
 import { AffordDialog } from './features/Afford';
 import { Budget } from './features/Budget';
@@ -25,15 +26,22 @@ import { Welcome } from './features/Welcome';
 export function App() {
   const session = useSession();
   const { phase } = session;
-  if (phase.kind === 'loading') return <div className="boot" aria-busy="true"><p className="boot-title">Loading Clarity…</p></div>;
+  if (phase.kind === 'loading') return <div className="boot" aria-busy="true"><img className="boot-logo" src="/favicon.svg" width={44} height={44} alt="" /><p className="boot-title">Loading Clarity…</p><div className="boot-bar" aria-hidden><span /></div></div>;
   if (phase.kind === 'error') return <StartupProblem message={phase.message} />;
-  if (phase.kind === 'welcome') return <RouterProvider><PublicRoutes /></RouterProvider>;
-  if (phase.kind === 'locked') return <LockScreen />;
   return (
     <RouterProvider>
-      <Unlocked />
+      <Gate kind={phase.kind} />
     </RouterProvider>
   );
+}
+
+/** The account sign-in preview is reachable in every state; everything else depends on the session. */
+function Gate({ kind }: { kind: 'welcome' | 'locked' | 'ready' }) {
+  const { path } = useRouter();
+  if (path === '/preview/sign-in') return <AccountPreview />;
+  if (kind === 'welcome') return <PublicRoutes />;
+  if (kind === 'locked') return <LockScreen />;
+  return <Unlocked />;
 }
 
 export function StartupProblem({ message }: { message: string }) {

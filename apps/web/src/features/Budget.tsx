@@ -23,6 +23,8 @@ export function Budget() {
   const cur = data.settings.baseCurrency;
   const thisMonth = today.slice(0, 7);
   const [month, setMonth] = useState(thisMonth);
+  const [dir, setDir] = useState<'next' | 'prev' | null>(null);
+  const go = (step: 1 | -1) => { setDir(step > 0 ? 'next' : 'prev'); setMonth(shiftMonth(month, step)); };
   const from = `${month}-01`;
   const to = endOfMonth(from);
   const b = useMemo(() => budgetSummary(data.categories, data.transactions, from, to), [data.categories, data.transactions, from, to]);
@@ -47,28 +49,28 @@ export function Budget() {
           <div className="sub muted t-callout">A monthly amount for each category you want to keep an eye on. Budgets repeat every month.</div>
         </div>
         <div className="month-nav" role="group" aria-label="Month">
-          <button className="icon-btn" aria-label="Previous month" onClick={() => setMonth(shiftMonth(month, -1))}><ChevronLeft size={18} /></button>
+          <button className="icon-btn" aria-label="Previous month" onClick={() => go(-1)}><ChevronLeft size={18} /></button>
           <span className="label" aria-live="polite">{formatMonthYear(from)}</span>
-          <button className="icon-btn" aria-label="Next month" disabled={month >= thisMonth} onClick={() => setMonth(shiftMonth(month, 1))}><ChevronRight size={18} /></button>
+          <button className="icon-btn" aria-label="Next month" disabled={month >= thisMonth} onClick={() => go(1)}><ChevronRight size={18} /></button>
         </div>
       </div>
 
-      <div className="stack">
+      <div className="stack month-body" key={month} data-dir={dir ?? undefined}>
         <section className="card" aria-label="Budget summary">
           <div className="summary">
             <div>
               <div className="k">{b.remainingCents < 0 ? 'Over budget' : 'Left to spend'}</div>
-              <div className={`v money ${b.remainingCents < 0 ? 'neg' : ''}`} data-testid="budget-left"><Money cents={Math.abs(b.remainingCents)} currency={cur} /></div>
+              <div className={`v money ${b.remainingCents < 0 ? 'neg' : ''}`} data-testid="budget-left"><Money cents={Math.abs(b.remainingCents)} currency={cur} animate /></div>
               <div className="s">{anyBudget ? (b.overCount > 0 ? `${b.overCount} ${b.overCount === 1 ? 'category is' : 'categories are'} over budget` : 'Every budgeted category is within its amount') : 'No budgets set yet'}</div>
             </div>
             <div>
               <div className="k">Budgeted</div>
-              <div className="v money" data-testid="budget-total"><Money cents={b.budgetedCents} currency={cur} /></div>
+              <div className="v money" data-testid="budget-total"><Money cents={b.budgetedCents} currency={cur} animate /></div>
               <div className="s">per month</div>
             </div>
             <div>
               <div className="k">Spent</div>
-              <div className="v money" data-testid="budget-spent"><Money cents={b.spentBudgetedCents} currency={cur} /></div>
+              <div className="v money" data-testid="budget-spent"><Money cents={b.spentBudgetedCents} currency={cur} animate /></div>
               <div className="s">{b.spentUnbudgetedCents > 0 ? <>plus <Money cents={b.spentUnbudgetedCents} currency={cur} /> not budgeted</> : 'in budgeted categories'}</div>
             </div>
           </div>
@@ -135,9 +137,9 @@ export function Budget() {
           {r.remainingCents === null ? (
             <span className="faint">{r.spentCents > 0 ? 'Not budgeted' : '—'}</span>
           ) : r.over ? (
-            <span className="left-text neg"><AlertTriangle size={14} /> Over by <Money cents={-r.remainingCents} currency={cur} /></span>
+            <span key="over" className="left-text neg value-in"><AlertTriangle size={14} /> Over by <Money cents={-r.remainingCents} currency={cur} animate /></span>
           ) : (
-            <span className="left-text"><Money cents={r.remainingCents} currency={cur} /> left</span>
+            <span key="left" className="left-text"><Money cents={r.remainingCents} currency={cur} animate /> left</span>
           )}
         </span>
       </div>

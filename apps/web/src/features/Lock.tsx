@@ -1,5 +1,6 @@
 import { AlertCircle, ArrowLeft, Eye, EyeOff, KeyRound, ShieldCheck } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useRouter } from '../lib/router';
 import { useSession } from '../state/session';
 import { Field } from '../ui/Field';
 import { Dialog } from '../ui/Dialog';
@@ -13,6 +14,7 @@ type View = 'passphrase' | 'recovery' | 'help';
  */
 export function LockScreen() {
   const session = useSession();
+  const { navigate } = useRouter();
   const [view, setView] = useState<View>('passphrase');
   const [secret, setSecret] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -142,6 +144,7 @@ export function LockScreen() {
         </section>
 
         <p className="auth-foot"><ShieldCheck size={14} aria-hidden /> Encrypted on this device. No account, no server.</p>
+        <button type="button" className="auth-help auth-preview-link" onClick={() => navigate('/preview/sign-in')}>Preview: account sign-in (coming later)</button>
       </div>
       {erase && <DeleteEverything onClose={() => setErase(false)} onDone={() => setErase(false)} title="Erase data on this device" />}
     </main>
@@ -183,7 +186,7 @@ function HelpView({ titleId, hasRecovery, onRecovery, onBack, onErase }: { title
 }
 
 /** Dark theme while the lock screen is shown (page, dialogs and browser chrome); restores the previous state after. */
-function useForcedDark() {
+export function useForcedDark() {
   useEffect(() => {
     const root = document.documentElement;
     const prev = root.dataset.theme;

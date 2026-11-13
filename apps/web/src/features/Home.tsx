@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import { backupDue, engineInput } from '@clarity/data';
 import { buildDashboard, buildForecast, cashHistory, type Explanation, type UpcomingItem } from '@clarity/engine';
 import { addDays, formatMonthYear, formatShortDate, formatWeekdayDate, INCOME_STATUS_LABEL, OCCURRENCE_STATUS_LABEL, TERMS } from '@clarity/shared';
+import { isFresh } from '../state/fresh';
 import { useRouter } from '../lib/router';
 import { useData, useSession, useStore } from '../state/session';
 import { useUi } from '../state/ui';
@@ -75,7 +76,7 @@ export function Home() {
         </div>
       )}
 
-      <div className="stack">
+      <div className="stack stagger">
         <div className="overview">
           {/* 1. Where you are heading */}
           <section className="card outlook" aria-labelledby="h-me">
@@ -83,7 +84,7 @@ export function Home() {
               <h2 className="overline" id="h-me">{TERMS.projectedMonthEnd}</h2>
               <Segmented label="Chart range" value={range} onChange={setRange} options={[{ value: 'month', label: 'Month-end' }, { value: '30', label: '30 days' }, { value: '90', label: '90 days' }]} />
             </div>
-            <div className={`t-hero money ${d.monthEnd.cents < 0 ? 'neg' : ''}`} data-testid="month-end"><Money cents={d.monthEnd.cents} currency={cur} /></div>
+            <div className={`t-hero money ${d.monthEnd.cents < 0 ? 'neg' : ''}`} data-testid="month-end"><Money cents={d.monthEnd.cents} currency={cur} animate /></div>
             <div className="delta">
               {delta >= 0 ? <TrendingUp size={16} className="pos" /> : <TrendingDown size={16} className="neg" />}
               <span>
@@ -99,7 +100,7 @@ export function Home() {
           <section className="card sts" aria-labelledby="h-sts">
             <h2 className="overline" id="h-sts">{TERMS.safeToSpend}</h2>
             <div className={`metric money ${sts.cents < 0 ? 'short' : ''}`} data-testid="safe-to-spend">
-              {sts.cents < 0 ? <>{TERMS.shortBy} <Money cents={sts.shortfallCents} currency={cur} /></> : <Money cents={sts.cents} currency={cur} />}
+              {sts.cents < 0 ? <>{TERMS.shortBy} <Money cents={sts.shortfallCents} currency={cur} animate /></> : <Money cents={sts.cents} currency={cur} animate />}
             </div>
             <p className="t-callout muted">
               {sts.cents < 0 ? 'What is scheduled is more than your cash and reserve cover' : 'What you can spend today and still cover everything scheduled'} through {formatShortDate(sts.horizonEnd)}.
@@ -142,19 +143,19 @@ export function Home() {
         <section className="stats" aria-label="Key balances">
           <div className="stat">
             <div className="k">{TERMS.recordedBalance} <Why ex={d.recordedBalanceExplanation} label={TERMS.recordedBalance} /></div>
-            <div className="v money" data-testid="available-cash"><Money cents={d.balances.availableCashCents} currency={cur} /></div>
+            <div className="v money" data-testid="available-cash"><Money cents={d.balances.availableCashCents} currency={cur} animate /></div>
             <div className="s">{d.balances.cardOwedCents > 0 ? <><Money cents={d.balances.cardOwedCents} currency={cur} /> {TERMS.cardOwed.toLowerCase()}</> : 'Across spendable accounts'}</div>
           </div>
           <div className="stat">
             <div className="k">{TERMS.lowestBalance} <Why ex={d.lowestThroughMonthEnd.explanation} label={TERMS.lowestBalance} /></div>
-            <div className={`v money ${d.lowestThroughMonthEnd.cents < 0 ? 'neg' : ''}`} data-testid="lowest"><Money cents={d.lowestThroughMonthEnd.cents} currency={cur} /></div>
+            <div className={`v money ${d.lowestThroughMonthEnd.cents < 0 ? 'neg' : ''}`} data-testid="lowest"><Money cents={d.lowestThroughMonthEnd.cents} currency={cur} animate /></div>
             <div className="s">{formatShortDate(d.lowestThroughMonthEnd.date)} · through month-end</div>
           </div>
           <div className="stat">
             <div className="k">{TERMS.lowestBeforeIncome} {d.lowestBeforeNextIncome && <Why ex={d.lowestBeforeNextIncome.explanation} label={TERMS.lowestBeforeIncome} />}</div>
             {d.lowestBeforeNextIncome ? (
               <>
-                <div className={`v money ${d.lowestBeforeNextIncome.cents < 0 ? 'neg' : ''}`}><Money cents={d.lowestBeforeNextIncome.cents} currency={cur} /></div>
+                <div className={`v money ${d.lowestBeforeNextIncome.cents < 0 ? 'neg' : ''}`}><Money cents={d.lowestBeforeNextIncome.cents} currency={cur} animate /></div>
                 <div className="s">{formatShortDate(d.lowestBeforeNextIncome.date)} · next income {formatShortDate(d.lowestBeforeNextIncome.nextIncome.date)}</div>
               </>
             ) : (
@@ -166,7 +167,7 @@ export function Home() {
           </div>
           <div className="stat">
             <div className="k">{TERMS.endOfDay} <Why ex={d.endOfDay.explanation} label={TERMS.endOfDay} /></div>
-            <div className={`v money ${d.endOfDay.cents < 0 ? 'neg' : ''}`}><Money cents={d.endOfDay.cents} currency={cur} /></div>
+            <div className={`v money ${d.endOfDay.cents < 0 ? 'neg' : ''}`}><Money cents={d.endOfDay.cents} currency={cur} animate /></div>
             <div className="s">After anything scheduled today</div>
           </div>
         </section>
@@ -220,7 +221,7 @@ export function Home() {
                 <div className="card-head"><h2 className="card-title" id="h-warn">Needs attention</h2></div>
                 {d.warnings.slice(0, 5).map((w) => (
                   <div key={w.id} className="warning-row">
-                    {w.severity === 'critical' ? <CircleAlert size={18} className="neg" /> : w.severity === 'warning' ? <AlertTriangle size={18} className="warn" /> : <Info size={18} className="faint" />}
+                    {w.severity === 'critical' ? <span className="attention neg warn-ico"><CircleAlert size={18} className="neg" /></span> : w.severity === 'warning' ? <span className="attention warn-ico"><AlertTriangle size={18} className="warn" /></span> : <Info size={18} className="faint" />}
                     <div>
                       <div className="t">{w.title}</div>
                       <div className="d">{w.detail}</div>
@@ -251,7 +252,7 @@ export function Home() {
                     const cat = t.categoryId ? cats.get(t.categoryId) : undefined;
                     const inflow = t.amountCents > 0 && t.kind !== 'transfer';
                     return (
-                      <button key={t.id} className="list-row" onClick={() => ui.openAdd({ editId: t.id })} aria-label={`Edit ${t.merchant || t.kind}`}>
+                      <button key={t.id} className={`list-row ${isFresh(t.id) ? 'fresh' : ''}`} onClick={() => ui.openAdd({ editId: t.id })} aria-label={`Edit ${t.merchant || t.kind}`}>
                         <span className={`cat-icon ${inflow ? 'inflow' : ''}`}><CategoryIcon name={t.kind === 'transfer' ? 'transfer' : t.kind === 'adjustment' ? 'adjustment' : cat?.icon} /></span>
                         <span style={{ minWidth: 0 }}>
                           <span className="title" style={{ display: 'block' }}>{t.kind === 'transfer' ? 'Transfer' : t.merchant || (t.kind === 'income' ? 'Income' : '—')}</span>

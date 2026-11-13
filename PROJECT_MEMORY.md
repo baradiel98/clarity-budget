@@ -108,3 +108,11 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Open]** After unlocking with the recovery key, the passphrase cannot be changed (change requires the current passphrase). Needs a separate, deliberate fix in WorkspaceStore + Settings.
 - **[Open]** The native mobile lock screen has not been redesigned to match.
 
+## Accounts and motion (Nov 2026)
+- **[Decision, user]** Wants email + password accounts with a server ("Real accounts + server"). This round shipped only a labelled, unconnected preview (`/preview/sign-in`) plus the plan in `docs/accounts-architecture.md` (zero-knowledge: client derives authKey/accountKEK from the password via Argon2id + HKDF; the server stores ciphertext only; existing data is migrated by adding an account key slot, with no re-encryption).
+- **[Verified]** The passphrase is the encryption secret (it wraps the master key); it is not a login. It must not be removed until the account slot exists. The unlock screen is unchanged and still the only way in.
+- **[Open, owner]** Optional vs required accounts; one password vs two secrets; own API vs managed auth; hosting and email budget; external security review.
+- **[Decision]** The motion system is CSS-only (no animation library). Numbers never count up; changed values fade in already correct. Reduced motion makes everything instant, including delays. Tests: `e2e/motion.spec.ts`, `e2e/account-preview.spec.ts`.
+- **[Lesson]** The reduced-motion rule must also zero `animation-delay`, or staggered items stay invisible during their delay.
+- **[Open]** Mobile jest failed twice in this session when run right after other heavy suites, and could not be reproduced in 11 isolated runs. Not investigated further; mobile code was unchanged in that round.
+

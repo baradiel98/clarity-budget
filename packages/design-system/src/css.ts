@@ -17,6 +17,11 @@ export function tokensCss(): string {
     `  --motion-base: ${motion.base}ms;`,
     `  --motion-slow: ${motion.slow}ms;`,
     `  --ease: ${motion.easing};`,
+    `  --ease-out: ${motion.easeOut};`,
+    `  --ease-in: ${motion.easeIn};`,
+    `  --motion-instant: ${motion.instant}ms;`,
+    `  --motion-chart: ${motion.chart}ms;`,
+    `  --motion-stagger: ${motion.stagger}ms;`,
     `  --glass-blur: ${glass.blur}px;`,
     `  --glass-saturate: ${glass.saturate};`,
   ].join('\n');

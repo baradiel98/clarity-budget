@@ -88,3 +88,24 @@ Before/after captures: `docs/screenshots/{before,after}/{desktop,mobile}-lock-{d
 **Unchanged:** `packages/security`, `packages/data` and the session's unlock/wipe logic (no diff). Covered by the existing e2e tests (wrong passphrase, recovery unlock, no plaintext in storage, backup/restore) plus 10 new ones in `e2e/lock.spec.ts`.
 
 **Known gap (not part of this redesign):** after unlocking with the recovery key you cannot set a new passphrase, because Settings → Change passphrase requires the current passphrase (`WorkspaceStore.changePassphrase` re-verifies it). The help text therefore does not promise a passphrase reset.
+
+## Motion system and account sign-in preview (Nov 2026)
+**Motion (functional, verified in Chromium):**
+- **Tokens** (`packages/design-system/src/tokens.ts` → CSS variables): instant 80, fast 140, base 220, slow 320, chart 700ms; stagger 45ms; easings for state changes, entrances and exits. Only opacity, transform and clip-path are animated.
+- **Pages:** fade in with a 6px rise. **Home:** sections enter 45ms apart; the forecast draws in left to right (again when the range changes); headline numbers fade in already correct when they change (they never count through other values); warning icons get one soft ring.
+- **Lists:** a transaction that was just added or edited is highlighted for about 2s (Home recent list and Transactions table).
+- **Budget:** meters fill on arrival, the month slides in the direction you moved, and "Over by" fades in when a category tips over.
+- **Reports:** bars grow, staggered.
+- **Overlays:** dialogs, sheets, drawers and toasts have quicker exits; segmented controls slide their selection; chart tooltips fade in.
+- **Buttons:** every busy button shows a spinner (save, import, encrypt, decrypt, backup, change passphrase).
+- **Loading screen:** logo plus a thin progress line.
+- **Reduced motion:** every animation and delay becomes instant and dialogs close at once (tested). Saving never waits for an animation.
+- **Not done, by choice:**
+  - no skeleton screens: after unlock all data is decrypted in memory at once, so there is no loading state to stand in for;
+  - native `<select>`/date pickers keep the system's own behaviour;
+  - no number count-up, because it would show wrong amounts.
+
+**Account sign-in (preview only):** `/preview/sign-in` (links on the unlock screen and in Settings → Privacy & data).
+- Screens: sign in, create account, forgot password, with validation, show/hide password, and loading/error states selectable for review.
+- It is labelled "Preview · not connected". Submitting explains that nothing was sent or created. Tests check that no network request is made and that neither the email nor the password reaches localStorage, sessionStorage or IndexedDB.
+- Real accounts need a server: see `docs/accounts-architecture.md`. The real way in is unchanged (passphrase or recovery key).

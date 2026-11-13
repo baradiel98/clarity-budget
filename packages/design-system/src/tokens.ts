@@ -135,11 +135,21 @@ export const space = { xxs: 2, xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24, x3
 /** One radius scale. Cards 20, sheets 26, inputs 12, chips 8; buttons and segmented controls are pills. */
 export const radius = { sm: 8, md: 12, lg: 20, xl: 26, pill: 999 } as const;
 
+/**
+ * Motion. Short and calm: most feedback is `fast`, things that appear use `base`,
+ * larger surfaces `slow`, charts drawing in `chart`. Movement is small (4–8px), never bouncy.
+ * Exits are quicker than entrances. Everything collapses to instant with reduced motion.
+ */
 export const motion = {
-  fast: 120,
-  base: 200,
-  slow: 320,
-  easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+  instant: 80, // press feedback
+  fast: 140, // hover, focus, small state changes, exits
+  base: 220, // things appearing: menus, tooltips, values changing
+  slow: 320, // dialogs, sheets, pages
+  chart: 700, // charts drawing in, progress filling
+  stagger: 45, // delay between sections appearing together
+  easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)', // standard: state changes
+  easeOut: 'cubic-bezier(0.16, 1, 0.3, 1)', // entrances: quick start, soft landing
+  easeIn: 'cubic-bezier(0.4, 0, 1, 1)', // exits
   spring: { damping: 22, stiffness: 260, mass: 1 },
 } as const;
 

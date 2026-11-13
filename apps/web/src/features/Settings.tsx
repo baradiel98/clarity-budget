@@ -19,6 +19,7 @@ import { ImportHistory } from './Import';
 import { DeleteEverything } from './Lock';
 import { PassphraseFields, passphraseValid } from './Passphrase';
 import { RecoveryKeyStep } from './RecoveryKey';
+import { Spinner } from '../ui/Spinner';
 
 const SECTIONS = [
   ['accounts', 'Accounts'], ['categories', 'Categories'], ['preferences', 'Preferences'], ['security', 'Security'],
@@ -139,6 +140,7 @@ export function Settings() {
             <h2 className="t-title2" style={{ marginBottom: 4 }}>Privacy & data</h2>
             <div className="kv"><div><div style={{ fontWeight: 500 }}>{TERMS.privacyCenter}</div><div className="hint">What is stored, where, and how it is protected.</div></div><button className="btn btn-secondary btn-sm" onClick={() => navigate('/privacy')}><ShieldCheck size={14} /> Open</button></div>
             <div className="kv"><div><div style={{ fontWeight: 500 }}>Diagnostics</div><div className="hint">Checks that calculations and encryption on this browser match the reference results.</div></div><button className="btn btn-secondary btn-sm" onClick={() => navigate('/dev/self-test')}><RefreshCw size={14} /> Run self-test</button></div>
+            <div className="kv"><div><div style={{ fontWeight: 500 }}>Account sign-in (preview)</div><div className="hint">See the planned email and password sign-in. It is not connected: nothing is sent or stored.</div></div><button className="btn btn-secondary btn-sm" onClick={() => navigate('/preview/sign-in')}>Open preview</button></div>
             <div className="kv"><div><div style={{ fontWeight: 500 }}>App version</div><div className="hint" data-testid="app-version">Version {buildId()}</div></div><button className="btn btn-secondary btn-sm" onClick={async () => {
               const r = await checkForUpdate();
               toast({ message: r === 'latest' ? 'You have the latest version.' : r === 'unavailable' ? 'Couldn’t check for updates right now (offline or not installed).' : 'A new version is downloading. A Reload button will appear when it’s ready.' });
@@ -197,8 +199,8 @@ function BackupRow({ disabled }: { disabled: boolean }) {
         downloadText(`clarity-${stamp()}${BACKUP_EXTENSION}`, text, 'application/json');
         setBusy(false);
         toast({ message: 'Encrypted backup saved to your downloads' });
-      }}>
-        <Download size={14} /> Download backup
+      }} aria-busy={busy}>
+        {busy ? <Spinner /> : <Download size={14} />} Download backup
       </button>
     </div>
   );
@@ -318,7 +320,7 @@ function PassphraseDialog({ onClose }: { onClose: () => void }) {
     }
   };
   return (
-    <Dialog title="Change passphrase" onClose={onClose} footer={<><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Change passphrase'}</button></>}>
+    <Dialog title="Change passphrase" onClose={onClose} footer={<><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={busy} aria-busy={busy} onClick={() => void save()}>{busy ? <><Spinner /> Saving…</> : 'Change passphrase'}</button></>}>
       <form className="stack" onSubmit={(e) => { e.preventDefault(); void save(); }}>
         <Field label="Current passphrase" error={error}>{(id) => <input id={id} className="input" type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} autoFocus />}</Field>
         <PassphraseFields pass={pass} confirm={confirm} setPass={setPass} setConfirm={setConfirm} showErrors={show} />
@@ -335,7 +337,7 @@ function RestoreDialog({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   return (
-    <Dialog title="Restore a backup" onClose={onClose} footer={<><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-danger" disabled={!file || !secret || busy} onClick={async () => { setBusy(true); setError(null); try { await session.restore(file!.text, useRecovery ? { recoveryKey: secret } : { passphrase: secret }); onClose(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } }}>Replace data on this device</button></>}>
+    <Dialog title="Restore a backup" onClose={onClose} footer={<><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-danger" disabled={!file || !secret || busy} aria-busy={busy} onClick={async () => { setBusy(true); setError(null); try { await session.restore(file!.text, useRecovery ? { recoveryKey: secret } : { passphrase: secret }); onClose(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } }}>{busy ? <><Spinner /> Decrypting…</> : 'Replace data on this device'}</button></>}>
       <div className="stack">
         <div className="callout warn">Everything currently on this device is replaced by the backup. Make a backup of the current data first if you might need it.</div>
         {file ? (

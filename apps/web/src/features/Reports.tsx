@@ -67,13 +67,13 @@ export function Reports() {
                 <div className="legend" style={{ marginTop: 0 }} aria-hidden><span><i className="in" /> Income</span><span><i className="spend" /> Spending</span></div>
               </div>
               <div className="bars" role="group" aria-label="Months. Choose one to see its categories.">
-                {series.map((p) => (
+                {series.map((p, i) => (
                   <button key={p.month} className="bar-col" aria-pressed={p.month === sel} onClick={() => setPicked(p.month)} data-testid={`bar-${p.month}`}
                     aria-label={`${formatMonthYear(`${p.month}-01`)}: income ${formatCents(p.incomeCents, cur)}, spending ${formatCents(p.spendingCents, cur)}`}
                     title={`${formatMonthYear(`${p.month}-01`)}\nIncome ${formatCents(p.incomeCents, cur)}\nSpending ${formatCents(p.spendingCents, cur)}`}>
                     <span className="bar-pair">
-                      <span className="bar in" style={{ height: `${(p.incomeCents * 100) / max}%` }} />
-                      <span className="bar out" style={{ height: `${(Math.max(0, p.spendingCents) * 100) / max}%` }} />
+                      <span className="bar in" style={{ height: `${(p.incomeCents * 100) / max}%`, ['--i' as string]: i }} />
+                      <span className="bar out" style={{ height: `${(Math.max(0, p.spendingCents) * 100) / max}%`, ['--i' as string]: i }} />
                     </span>
                   </button>
                 ))}

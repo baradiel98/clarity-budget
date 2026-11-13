@@ -14,6 +14,7 @@ import { Segmented } from '../ui/Segmented';
 import { useToast } from '../ui/Toast';
 import { AccountSelect, CategorySelect } from './AddTransaction';
 import { ImportClient, type Analysis } from './importClient';
+import { Spinner } from '../ui/Spinner';
 
 type Stage = 'choose' | 'map' | 'review' | 'done';
 interface Row extends ImportCandidate {
@@ -189,7 +190,7 @@ export function ImportPage() {
             <p className="t-headline">Drop a CSV statement here</p>
             <p className="t-callout muted">Download it from your bank's website (often under “Download transactions” or “Export”). Up to 10 MB.</p>
             <label className="btn btn-primary" style={{ marginTop: 8 }}>
-              <Upload size={15} /> {busy ? 'Reading…' : 'Choose file'}
+              {busy ? <><Spinner /> Reading…</> : <><Upload size={15} /> Choose file</>}
               <input type="file" accept=".csv,.tsv,.txt,text/csv" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); e.target.value = ''; }} data-testid="import-file" />
             </label>
             <p className="hint" style={{ marginTop: 14 }}>PDF, OFX/QFX and Excel statements are not supported yet.</p>
@@ -267,7 +268,7 @@ export function ImportPage() {
           </div>
           <div className="row" style={{ justifyContent: 'flex-end' }}>
             <span className="hint">{analysis.rowCount} lines in file</span>
-            <button className="btn btn-primary" disabled={!columns || !dateFormat || busy} onClick={() => void toReview()} data-testid="to-review">{busy ? 'Reading…' : 'Review transactions'}</button>
+            <button className="btn btn-primary" disabled={!columns || !dateFormat || busy} onClick={() => void toReview()} data-testid="to-review" aria-busy={busy}>{busy ? <><Spinner /> Reading…</> : 'Review transactions'}</button>
           </div>
         </div>
       )}
@@ -377,8 +378,8 @@ export function ImportPage() {
 
           <div className="row" style={{ justifyContent: 'flex-end' }}>
             {blocking.length > 0 && <span className="t-footnote warn">Choose the other account for {blocking.length} transfer{blocking.length > 1 ? 's' : ''}.</span>}
-            <button className="btn btn-primary btn-lg" disabled={busy || included.length === 0 || blocking.length > 0} onClick={() => void commit()} data-testid="commit-import">
-              Import {included.length} transaction{included.length === 1 ? '' : 's'}
+            <button className="btn btn-primary btn-lg" disabled={busy || included.length === 0 || blocking.length > 0} onClick={() => void commit()} data-testid="commit-import" aria-busy={busy}>
+              {busy && <Spinner />}Import {included.length} transaction{included.length === 1 ? '' : 's'}
             </button>
           </div>
         </div>

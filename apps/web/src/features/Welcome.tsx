@@ -6,6 +6,7 @@ import { useSession } from '../state/session';
 import { pickFile } from '../platform/files';
 import { Field } from '../ui/Field';
 import { PassphraseFields, passphraseValid } from './Passphrase';
+import { Spinner } from '../ui/Spinner';
 
 type Step = 'welcome' | 'passphrase' | 'restore';
 
@@ -63,7 +64,7 @@ export function Welcome() {
           </div>
           <div className="dialog-foot">
             <button type="button" className="btn btn-ghost" onClick={() => setStep('welcome')}>Back</button>
-            <button type="submit" className="btn btn-primary" disabled={busy}>{busy ? 'Encrypting…' : 'Continue'}</button>
+            <button type="submit" className="btn btn-primary" disabled={busy} aria-busy={busy}>{busy ? <><Spinner /> Encrypting…</> : 'Continue'}</button>
           </div>
         </form>
       </div>
@@ -153,7 +154,7 @@ function Restore({ onBack }: { onBack: () => void }) {
         {error && <p className="error-text" role="alert">{error}</p>}
         <div className="dialog-foot">
           <button type="button" className="btn btn-ghost" onClick={onBack}>Back</button>
-          <button type="submit" className="btn btn-primary" disabled={!file || !secret || busy}>{busy ? 'Decrypting…' : 'Restore'}</button>
+          <button type="submit" className="btn btn-primary" disabled={!file || !secret || busy} aria-busy={busy}>{busy ? <><Spinner /> Decrypting…</> : 'Restore'}</button>
         </div>
       </form>
     </div>

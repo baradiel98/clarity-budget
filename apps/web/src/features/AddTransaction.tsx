@@ -10,6 +10,7 @@ import { Dialog } from '../ui/Dialog';
 import { Field } from '../ui/Field';
 import { Segmented } from '../ui/Segmented';
 import { useToast } from '../ui/Toast';
+import { Spinner } from '../ui/Spinner';
 
 type Kind = TxInput['kind'];
 const KINDS: { value: Kind; label: string }[] = [
@@ -213,8 +214,8 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
             </button>
           )}
           <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button type="submit" form="tx-form" className="btn btn-primary" disabled={busy} data-testid="save-tx">
-            {duplicates.length && dupConfirmed ? 'Save anyway' : 'Save'} <kbd style={{ background: 'transparent', color: 'inherit', borderColor: 'currentColor', opacity: 0.6 }}>↵</kbd>
+          <button type="submit" form="tx-form" className="btn btn-primary" disabled={busy} aria-busy={busy} data-testid="save-tx">
+            {busy && <Spinner />}{duplicates.length && dupConfirmed ? 'Save anyway' : 'Save'} <kbd style={{ background: 'transparent', color: 'inherit', borderColor: 'currentColor', opacity: 0.6 }}>↵</kbd>
           </button>
         </>
       }

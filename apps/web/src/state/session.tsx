@@ -5,6 +5,7 @@ import { hasRecoveryKey, WrongSecretError } from '@clarity/security';
 import type { DexieAdapter } from '../platform/dexieAdapter';
 import { provider } from '../platform/crypto';
 import { requestPersistence } from '../platform/persistence';
+import { markFresh } from './fresh';
 
 type Phase =
   | { kind: 'loading' }
@@ -217,6 +218,7 @@ export function useRun() {
       try {
         const r = fn(store.ctx(Date.now(), today));
         const ops = Array.isArray(r) ? r : r.ops;
+        markFresh(ops.flatMap((o) => (o.t === 'put' && o.table === 'transactions' ? [o.value.id] : [])));
         await store.apply(ops, opts);
         return { ok: true };
       } catch (e) {
