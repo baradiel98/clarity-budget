@@ -83,6 +83,7 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
   - web biometrics.
 
 ## Lessons
+- **[Verified]** iPhone Safari stuck on "Loading Clarity…" (2026-11-13) was caused by the AdGuard content blocker blocking the site's scripts. Allow-listing the site fixed it. When the loading screen shows the version line but nothing else happens, suspect a content blocker first.
 - Bank CSV dates like 09/12/2026 are genuinely ambiguous. The app must ask, never guess (e2e covers this).
 - Playwright: wait for the dialog to close after Save. Saves are async (encryption), so shortcuts pressed earlier go to the dialog.
 - Testing Library 14 for React Native has an async `render`/`fireEvent`. Jest mock factories may only reference `mock*` variables.

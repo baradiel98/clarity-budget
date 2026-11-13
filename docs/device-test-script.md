@@ -78,7 +78,7 @@ This needs a Mac with Xcode. Alternatively, `eas build --profile development` ne
 ## Results
 | Platform / version | Device | Self-test (Argon2 ms) | Section 1 | Section 2/3 | Tester / date | Notes |
 |---|---|---|---|---|---|---|
-| iOS | | | | | | |
+| iOS (Safari) | iPhone 18 Pro Max | | | | owner, 2026-11-13 | Web app loads after allow-listing the site in AdGuard (content blocker blocked scripts). Native app not yet tested |
 | Android | | | | | | |
 | Safari macOS | | | | | | |
 | Chrome | ✅ automated (Playwright, Chromium 1243) | ✅ | ✅ (automated equivalents) | D1 partial (automated) | dev container, 2026-11-13 | |
