@@ -6,6 +6,7 @@ import { BACKUP_EXTENSION } from '@clarity/security';
 import { centsToDecimalString, NO_SYNC_NOTICE, parseAmountInput, TERMS, type Account, type AccountType } from '@clarity/shared';
 import { useRouter } from '../lib/router';
 import { downloadText, pickFile, stamp } from '../platform/files';
+import { buildId, checkForUpdate } from '../platform/update';
 import { useData, useRun, useSession, useStore } from '../state/session';
 import { AmountInput } from '../ui/AmountInput';
 import { Dialog } from '../ui/Dialog';
@@ -32,6 +33,7 @@ export function Settings() {
   const { navigate } = useRouter();
   const { demo } = useStore();
   const run = useRun();
+  const toast = useToast();
   const cur = data.settings.baseCurrency;
   const [dialog, setDialog] = useState<null | { kind: 'account'; account?: Account } | { kind: 'balance'; account: Account } | { kind: 'category' } | { kind: 'passphrase' } | { kind: 'recovery'; key?: string } | { kind: 'restore' } | { kind: 'csv' } | { kind: 'delete' }>(null);
   const [reserve, setReserve] = useState(centsToDecimalString(data.settings.minReserveCents));
@@ -137,6 +139,10 @@ export function Settings() {
             <h2 className="t-title2" style={{ marginBottom: 4 }}>Privacy & data</h2>
             <div className="kv"><div><div style={{ fontWeight: 500 }}>{TERMS.privacyCenter}</div><div className="hint">What is stored, where, and how it is protected.</div></div><button className="btn btn-secondary btn-sm" onClick={() => navigate('/privacy')}><ShieldCheck size={14} /> Open</button></div>
             <div className="kv"><div><div style={{ fontWeight: 500 }}>Diagnostics</div><div className="hint">Checks that calculations and encryption on this browser match the reference results.</div></div><button className="btn btn-secondary btn-sm" onClick={() => navigate('/dev/self-test')}><RefreshCw size={14} /> Run self-test</button></div>
+            <div className="kv"><div><div style={{ fontWeight: 500 }}>App version</div><div className="hint" data-testid="app-version">Version {buildId()}</div></div><button className="btn btn-secondary btn-sm" onClick={async () => {
+              const r = await checkForUpdate();
+              toast({ message: r === 'latest' ? 'You have the latest version.' : r === 'unavailable' ? 'Couldn’t check for updates right now (offline or not installed).' : 'A new version is downloading. A Reload button will appear when it’s ready.' });
+            }}><RefreshCw size={14} /> Check for updates</button></div>
             <div className="kv"><div><div style={{ fontWeight: 500 }} className="neg">Delete all data</div><div className="hint">Permanently removes everything on this device.</div></div><button className="btn btn-danger btn-sm" disabled={demo} onClick={() => setDialog({ kind: 'delete' })}><Trash2 size={14} /> Delete</button></div>
           </section>
         </div>

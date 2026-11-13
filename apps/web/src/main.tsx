@@ -6,9 +6,12 @@ import { ToastProvider } from './ui/Toast';
 import './styles/tokens.css';
 import './styles/base.css';
 import { captureInstallPrompt } from './platform/persistence';
+import { watchForUpdates } from './platform/update';
+import { UpdateBanner } from './ui/UpdateBanner';
 
 (window as unknown as { __clarityModuleLoaded?: boolean }).__clarityModuleLoaded = true;
 captureInstallPrompt();
+watchForUpdates();
 
 /** Any unexpected error shows a message with a way out, never a blank page. */
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
@@ -28,6 +31,7 @@ createRoot(document.getElementById('root')!).render(
       <SessionProvider>
         <ToastProvider>
           <App />
+          <UpdateBanner />
         </ToastProvider>
       </SessionProvider>
     </ErrorBoundary>

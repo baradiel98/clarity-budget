@@ -16,7 +16,7 @@ import { Screen } from '../../src/ui/Screen';
 import { Segmented } from '../../src/ui/Segmented';
 import { StatusBadge } from '../../src/ui/status';
 import { T } from '../../src/ui/Text';
-import { useTheme } from '../../src/ui/theme';
+import { ambientGlow, useTheme } from '../../src/ui/theme';
 
 const why = (ex: Explanation) => {
   setExplain(ex);
@@ -45,27 +45,31 @@ export default function Home() {
         </Pressable>
       )}
 
-      <Card title={TERMS.projectedMonthEnd}>
-        <Money cents={d.monthEnd.cents} currency={cur} variant="hero" color={d.monthEnd.cents < 0 ? 'negative' : 'text'} testID="month-end" />
-        <T variant="footnote" color="textSecondary">Based on your recorded balance, expected income, upcoming bills, and planned expenses.</T>
-        <LinkButton title={TERMS.whyThisNumber} onPress={() => why(d.monthEnd.explanation)} />
-      </Card>
+      <View style={{ gap: 16 }}>
+        {/* soft ambient blue light behind the headline cards (decorative) */}
+        <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ position: 'absolute', top: -40, left: 0, right: 0, bottom: -24, backgroundImage: ambientGlow(c) }} />
+        <Card title={TERMS.projectedMonthEnd} glow="hero">
+          <Money cents={d.monthEnd.cents} currency={cur} variant="hero" color={d.monthEnd.cents < 0 ? 'negative' : 'text'} testID="month-end" />
+          <T variant="footnote" color="textSecondary">Based on your recorded balance, expected income, upcoming bills, and planned expenses.</T>
+          <LinkButton title={TERMS.whyThisNumber} onPress={() => why(d.monthEnd.explanation)} />
+        </Card>
 
-      <View style={{ flexDirection: 'row', gap: 12 }}>
-        <Card title={TERMS.safeToSpend} style={{ flex: 1 }}>
-          {sts.cents < 0 ? (
-            <View><T variant="footnote" color="negative">{TERMS.shortBy}</T><Money cents={sts.shortfallCents} currency={cur} variant="title1" color="negative" /></View>
-          ) : (
-            <Money cents={sts.cents} currency={cur} variant="title1" testID="safe-to-spend" />
-          )}
-          <T variant="caption" color="textTertiary">Through {formatShortDate(sts.horizonEnd)}</T>
-          <LinkButton title={TERMS.whyThisNumber} onPress={() => why(sts.explanation)} />
-        </Card>
-        <Card title={TERMS.availableCash} style={{ flex: 1 }}>
-          <Money cents={d.balances.availableCashCents} currency={cur} variant="title1" />
-          <T variant="caption" color="textTertiary">{d.balances.cardOwedCents > 0 ? `Cards owe ${formatCents(d.balances.cardOwedCents, cur, { compact: true })}` : 'Spendable accounts'}</T>
-          <LinkButton title={TERMS.whyThisNumber} onPress={() => why(d.recordedBalanceExplanation)} />
-        </Card>
+        <View style={{ flexDirection: 'row', gap: 12 }}>
+          <Card title={TERMS.safeToSpend} style={{ flex: 1 }} glow="sts">
+            {sts.cents < 0 ? (
+              <View><T variant="footnote" color="negative">{TERMS.shortBy}</T><Money cents={sts.shortfallCents} currency={cur} variant="title1" color="negative" /></View>
+            ) : (
+              <Money cents={sts.cents} currency={cur} variant="title1" testID="safe-to-spend" />
+            )}
+            <T variant="caption" color="textTertiary">Through {formatShortDate(sts.horizonEnd)}</T>
+            <LinkButton title={TERMS.whyThisNumber} onPress={() => why(sts.explanation)} />
+          </Card>
+          <Card title={TERMS.availableCash} style={{ flex: 1 }}>
+            <Money cents={d.balances.availableCashCents} currency={cur} variant="title1" />
+            <T variant="caption" color="textTertiary">{d.balances.cardOwedCents > 0 ? `Cards owe ${formatCents(d.balances.cardOwedCents, cur, { compact: true })}` : 'Spendable accounts'}</T>
+            <LinkButton title={TERMS.whyThisNumber} onPress={() => why(d.recordedBalanceExplanation)} />
+          </Card>
+        </View>
       </View>
       <Button title={TERMS.canIAfford} kind="secondary" onPress={() => router.push('/afford')} />
 

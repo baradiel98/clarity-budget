@@ -2,6 +2,12 @@
 
 Nothing below could be tested in the development container: it has no iPhone or Android simulator, and no Safari or Edge. A platform is **not** considered supported until this script passes on it. Record results in the table at the end. Use a test passphrase and fictional numbers.
 
+## Which version am I running? (hosted web app)
+The web app works offline, so a phone or browser can keep showing the version it saved earlier. After a deploy:
+1. Open **Settings → Privacy & data → App version**. It shows `Version` plus the first 7 characters of the deployed git commit.
+2. Compare it with the latest commit on the deployed branch (`phase-1`) on GitHub, or with the commit shown in Render's deploy log.
+3. If it is older, tap **Check for updates**. When the new version has downloaded, a "A new version of Clarity is ready" banner appears; tap **Reload**. (Closing the tab completely and reopening also works.)
+
 ## 0. Run the apps
 **Web (desktop):**
 

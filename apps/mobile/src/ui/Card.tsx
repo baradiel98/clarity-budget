@@ -1,13 +1,16 @@
 import type { ReactNode } from 'react';
 import { View, type ViewStyle } from 'react-native';
 import { T } from './Text';
-import { radius, space, useTheme } from './theme';
+import { glowStyle, radius, space, useTheme } from './theme';
 
-/** Solid surface for information (glass is reserved for floating chrome). */
-export function Card({ title, right, children, style }: { title?: string; right?: ReactNode; children: ReactNode; style?: ViewStyle }) {
+/**
+ * Solid surface for information (glass is reserved for floating chrome).
+ * `glow` is only for the Home headline cards (projected month-end, Safe to Spend).
+ */
+export function Card({ title, right, children, style, glow }: { title?: string; right?: ReactNode; children: ReactNode; style?: ViewStyle; glow?: 'hero' | 'sts' }) {
   const { c } = useTheme();
   return (
-    <View style={[{ backgroundColor: c.surface, borderRadius: radius.lg, borderWidth: 1, borderColor: c.border, padding: space.xl }, style]}>
+    <View style={[{ backgroundColor: c.surface, borderRadius: radius.lg, borderWidth: 1, borderColor: c.border, padding: space.xl }, glow ? glowStyle(c, glow) : null, style]}>
       {(title || right) && (
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: space.sm }}>
           {title ? <T variant="footnote" color="textSecondary" style={{ fontFamily: 'Inter_600SemiBold' }} accessibilityRole="header">{title}</T> : <View />}
