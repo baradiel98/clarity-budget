@@ -798,3 +798,25 @@ tr.fresh > td:first-child { animation-name: fresh; }
 .auth-preview-bar p { display: flex; gap: 7px; align-items: flex-start; margin: 0; color: var(--c-text-tertiary); font-size: 12.5px; line-height: 18px; max-width: 360px; }
 .auth-preview-bar p svg { flex: none; margin-top: 2px; }
 .auth-preview-link { font-size: 12.5px; color: var(--c-text-tertiary); margin-top: -14px; }
+
+/* onboarding: paychecks */
+.choice-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.choice-grid legend { padding: 0; margin-bottom: 8px; font-size: 13px; font-weight: 600; color: var(--c-text-secondary); }
+.choice { position: relative; display: flex; align-items: center; justify-content: center; text-align: center; min-height: 44px; padding: 6px 10px; border: 1px solid var(--c-border-strong); border-radius: 12px; background: var(--c-surface); color: var(--c-text-secondary); font-size: 14px; line-height: 18px; font-weight: 600; cursor: pointer; transition: background var(--motion-fast) var(--ease), border-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease), transform var(--motion-instant) var(--ease); }
+.choice:hover { border-color: var(--c-text-tertiary); color: var(--c-text); }
+.choice:active { transform: scale(0.98); }
+.choice.on { border-color: var(--c-accent); background: var(--c-accent-soft); color: var(--c-accent); }
+.choice input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.choice:has(input:focus-visible) { outline: 2px solid var(--c-focus); outline-offset: 2px; }
+.pay-card { display: grid; gap: 16px; min-width: 0; }
+.pay-card.many { padding: 16px; border: 1px solid var(--c-border); border-radius: var(--radius-lg); background: var(--c-bg-elevated); animation: enter var(--motion-base) var(--ease-out); }
+.pay-card-head { display: flex; align-items: flex-start; gap: 8px; }
+.pay-card-head .grow { flex: 1; min-width: 0; }
+.pay-card-head .icon-btn { margin-top: 24px; }
+.pay-preview { margin: -6px 0 0; display: flex; flex-wrap: wrap; gap: 2px 8px; font-size: 13px; line-height: 19px; color: var(--c-text-secondary); }
+.pay-preview span { font-weight: 600; color: var(--c-text); }
+.add-pay { justify-self: start; }
+/* date fields: same look on every browser (iOS Safari otherwise centres the text and changes the height) */
+input[type='date'].input { -webkit-appearance: none; appearance: none; display: block; min-height: 40px; line-height: 38px; text-align: left; }
+input[type='date'].input::-webkit-date-and-time-value { text-align: left; }
+input[type='date'].input::-webkit-calendar-picker-indicator { opacity: 0.6; cursor: pointer; }

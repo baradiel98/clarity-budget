@@ -53,6 +53,26 @@ describe('onboarding → first overview', () => {
   });
 });
 
+describe('onboarding with two paychecks (shared account)', () => {
+  it('creates both income sources in the same account and counts both in the forecast', async () => {
+    const { store } = await WorkspaceStore.create(new MemoryAdapter(), noble, 'correct horse battery', { withRecoveryKey: false, now: NOW });
+    await store.apply(onboard(store.ctx(NOW, TODAY), {
+      checkingBalanceCents: 120000,
+      pays: [
+        { name: 'My paycheck', schedule: { freq: 'weekly', interval: 2, anchor: '2026-09-12' }, amountCents: 180000 },
+        { name: "Partner's paycheck", schedule: { freq: 'monthly', interval: 1, day: 25, anchor: '2026-09-25' }, amountCents: 200000 },
+      ],
+    }));
+    const d = store.data;
+    expect(d.recurring.map((r) => [r.name, r.kind, r.accountId])).toEqual([
+      ['My paycheck', 'income', d.accounts[0]!.id],
+      ["Partner's paycheck", 'income', d.accounts[0]!.id],
+    ]);
+    // Sep 3 → Sep 30: 1,200 + 1,800 (Sep 12) + 2,000 (Sep 25) + 1,800 (Sep 26) = 6,800
+    expect(buildDashboard(engineInput(d, TODAY)).monthEnd.cents).toBe(680000);
+  });
+});
+
 describe('persistence and encryption', () => {
   it('lock → unlock restores identical data; storage holds only ciphertext', async () => {
     const { store, adapter } = await fresh();

@@ -116,3 +116,9 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Lesson]** The reduced-motion rule must also zero `animation-delay`, or staggered items stay invisible during their delay.
 - **[Open]** Mobile jest failed twice in this session when run right after other heavy suites, and could not be reproduced in 11 isolated runs. Not investigated further; mobile code was unchanged in that round.
 
+## Onboarding pay step (Nov 2026)
+- **[Fixed, verified]** The five pay-frequency options were a single segmented control that overflowed on phones ("Irregular" outside the box, 54px of horizontal scroll at 390px). They are now a wrapping grid of radio choices; tested at 320/390/1440px.
+- **[Decision, user]** Several paychecks can go into the same account (for example a shared account with a partner): "Add another paycheck" (up to 4), each with its own name, schedule and amount. `OnboardingInput.pays` in `packages/data` (the old `pay` field still works; the mobile app uses it).
+- **[Added]** An "Upcoming paydays" preview shows the next three dates, worked out by the engine's `scheduleDates`. Date fields get consistent styling (`appearance: none`) because iOS Safari centres and resizes them; this is unverified on a real iPhone.
+- **[Open]** The native mobile app's onboarding still has the old single-paycheck segmented control (likely the same overflow). Not changed.
+

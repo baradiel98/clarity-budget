@@ -532,6 +532,8 @@ export interface OnboardingInput {
     /** null = "It varies" / skipped */
     amountCents: Cents | null;
   };
+  /** Several paychecks into the same account (for example a shared account with a partner). Created after `pay`. */
+  pays?: { name: string; schedule: Schedule; amountCents: Cents | null }[];
   bill?: { name: string; amountCents: Cents; date: ISODate; monthly: boolean };
   currency?: string;
 }
@@ -552,6 +554,13 @@ export function onboard(ctx: Ctx, input: OnboardingInput): Op[] {
     const { ops: pOps } = createRecurring(c(), {
       name: 'Paycheck', kind: 'income', accountId: account.id, categoryId: 'cat_paycheck', schedule: input.pay.schedule,
       amount: input.pay.amountCents === null ? { type: 'unknown' } : { type: 'fixed', cents: input.pay.amountCents },
+    });
+    step(pOps);
+  }
+  for (const p of input.pays ?? []) {
+    const { ops: pOps } = createRecurring(c(), {
+      name: p.name.trim() || 'Paycheck', kind: 'income', accountId: account.id, categoryId: 'cat_paycheck', schedule: p.schedule,
+      amount: p.amountCents === null ? { type: 'unknown' } : { type: 'fixed', cents: p.amountCents },
     });
     step(pOps);
   }
