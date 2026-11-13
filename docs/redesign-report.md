@@ -21,7 +21,7 @@ Scope: the desktop web app (`apps/web`), including its phone-width layout. Check
 
 ## What changed
 **Design system**
-- New tokens: warm neutral backgrounds, charcoal text, one deep-teal accent, restrained green/amber/red, 8 muted category hues, two shadow levels, radii 8/10/16/22. All text and status colors pass WCAG AA in both themes (automated test).
+- New tokens (revised after feedback, using copilot.money as the visual reference): cool blue-tinted backgrounds, white cards, navy text, one blue accent, green/orange/red status colors, 8 saturated category hues, soft blue-tinted shadows, radii 8/12/20/26 with pill buttons. The first version's warm neutrals and teal were dropped as "brownish". All text and status colors pass WCAG AA in both themes (automated test).
 - Typeface: the system font on Apple devices, self-hosted Inter elsewhere; tabular numerals for every amount.
 - One stylesheet rewritten from scratch: buttons, inputs, selects, segmented controls, badges, cards, tables, lists, dialogs, bottom sheets, drawer, toasts, empty states, progress meters, stepper, charts.
 - Glass is used only on the sidebar, the phone tab bar and toasts. Financial data sits on solid surfaces.

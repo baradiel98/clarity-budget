@@ -41,7 +41,7 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 
 ## Design
 - **[Decision]** Apple-inspired, restrained Liquid Glass. Glass is used only on floating chrome (navigation, sheets, toasts); data sits on solid surfaces.
-- Palette: one accent (deep teal), no purple gradients, no emoji, Lucide icons, Inter with tabular numerals.
+- Palette: one accent (blue), no purple gradients, no emoji, Lucide icons, Inter with tabular numerals.
 - **[Verified]** All text and semantic colors meet WCAG AA in light and dark (test).
 - **[Decision]** Reference images 2–3 (large orange/teal 3D gradient blobs) contradict the spec's "no excessive gradients". We borrow their layout, not the blobs.
 
@@ -62,7 +62,10 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Decision]** The owner asked for a product-wide redesign of the web app (Apple-inspired; Copilot Money and YNAB as quality references, not templates).
 - **[Decision]** Budget and Reports pages were added because the redesign brief describes them and lists budgeting in its definition of done. Savings goals were **not** built (no data model for them yet).
 - **[Verified]** Web navigation: Home, Transactions, Budget, Planning, Reports, Settings (keys 1–6), plus Import Statement. Phone width uses a bottom tab bar: Home, Transactions, Add, Planning, More.
-- **[Verified]** Tokens: warm neutral backgrounds, deep teal accent, system font on Apple devices with Inter elsewhere, radii 8/10/16/22. Category hues come from `categorical` tokens.
+- **[Superseded]** Warm neutral backgrounds with a deep teal accent. The user rejected this as "brownish, ugly" (Nov 2026).
+- **[Decision, user]** Visual reference is copilot.money: cool blue-tinted light background, white cards, navy text, a clear blue accent, soft blue shadows, pill buttons. Borrow the feel only, not their branding, logo, emoji, font (Matter, licensed) or layouts. The site is light-only, so Clarity's dark mode is our own cool navy version.
+- **[Verified]** Tokens now: bg #F2F6FC, text #12263F, accent #2559DB (Copilot's #437CEF fails AA for text, so it is deliberately deeper), dark bg #0A0F19 / accent #79A6FF. Radii 8/12/20/26, buttons and segmented controls are pills. `chartPositive` is a brighter green for fills only (never text). Spending bars use the accent blue. Category hues are saturated (blue, pink, teal, violet, orange, green, sky, rose). App icons regenerated in blue from `packages/design-system/icon.svg`.
+- **[Lesson]** Avoid warm/beige neutrals and earthy category hues: the user reads them as brown.
 - **[Verified]** `Category.budgetCents` (optional) stores a monthly budget. No migration needed. The mobile app ignores it for now.
 - **[Decision]** The dashboard chart marks the lowest point of the plotted projection (which includes estimated income). The "Lowest projected balance" tile stays conservative (fixed income only). They differ only when estimated income exists.
 - **[Open]** The native mobile app has the new colors (shared tokens) but not the new Budget and Reports screens or the new dashboard layout.

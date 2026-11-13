@@ -7,7 +7,7 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
-    "backgroundColor": "#F4F4F6",
+    "backgroundColor": "#F2F6FC",
     "updates": { "enabled": false },
     "ios": {
       "bundleIdentifier": "app.clarity.budget.dev",
@@ -18,7 +18,7 @@
     },
     "android": {
       "package": "app.clarity.budget.dev",
-      "adaptiveIcon": { "foregroundImage": "./assets/adaptive-icon.png", "backgroundColor": "#0F5F73" },
+      "adaptiveIcon": { "foregroundImage": "./assets/adaptive-icon.png", "backgroundColor": "#2559DB" },
       "allowBackup": false
     },
     "plugins": [
@@ -26,7 +26,7 @@
       "expo-sqlite",
       ["expo-secure-store", { "faceIDPermission": "Unlock Clarity with Face ID instead of typing your passphrase." }],
       ["expo-local-authentication", { "faceIDPermission": "Unlock Clarity with Face ID instead of typing your passphrase." }],
-      ["expo-splash-screen", { "image": "./assets/splash-icon.png", "imageWidth": 120, "backgroundColor": "#F4F4F6", "dark": { "backgroundColor": "#0C0D0F" } }],
+      ["expo-splash-screen", { "image": "./assets/splash-icon.png", "imageWidth": 120, "backgroundColor": "#F2F6FC", "dark": { "backgroundColor": "#0A0F19" } }],
       "expo-font",
       ["@react-native-community/datetimepicker", {}]
     ],

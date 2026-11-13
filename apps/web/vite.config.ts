@@ -79,8 +79,8 @@ export default defineConfig({
         name: 'Clarity — private budgeting',
         short_name: 'Clarity',
         description: 'Private, local-first budgeting. Your financial data stays on this device.',
-        theme_color: '#0F5F73',
-        background_color: '#F4F4F6',
+        theme_color: '#2559DB',
+        background_color: '#F2F6FC',
         display: 'standalone',
         start_url: '/',
         icons: [

@@ -3,7 +3,7 @@
  * Web consumes the generated CSS variables (apps/web/src/styles/tokens.css);
  * mobile imports these objects directly into StyleSheets.
  *
- * Principles: calm neutrals, one accent, semantic colors used sparingly,
+ * Principles: cool blue-tinted neutrals, navy text, one blue accent, semantic colors used sparingly,
  * glass only for floating chrome (navigation, sheets, toasts), solid surfaces for data.
  */
 
@@ -36,74 +36,78 @@ export interface ColorScheme {
   chartFill: string;
   chartGrid: string;
   chartNeutral: string;
+  /** Fills only (bars, markers), never text: brighter than `positive`. */
+  chartPositive: string;
   shadowSm: string;
   shadowMd: string;
 }
 
 export const light: ColorScheme = {
-  bg: '#F6F5F2',
-  bgElevated: '#FBFAF8',
+  bg: '#F2F6FC',
+  bgElevated: '#F8FAFE',
   surface: '#FFFFFF',
-  surfaceMuted: '#F1EFEB',
-  surfacePressed: '#E7E4DF',
-  text: '#1A1917',
-  textSecondary: '#57544E',
-  textTertiary: '#66635C',
-  border: 'rgba(26, 25, 23, 0.08)',
-  borderStrong: 'rgba(26, 25, 23, 0.16)',
-  accent: '#0A5A63',
+  surfaceMuted: '#EEF3FA',
+  surfacePressed: '#E2E9F4',
+  text: '#12263F',
+  textSecondary: '#4A5C75',
+  textTertiary: '#56677F',
+  border: 'rgba(18, 38, 63, 0.08)',
+  borderStrong: 'rgba(18, 38, 63, 0.15)',
+  accent: '#2559DB',
   accentText: '#FFFFFF',
-  accentSoft: 'rgba(10, 90, 99, 0.08)',
-  positive: '#1E6A45',
-  positiveSoft: 'rgba(30, 106, 69, 0.10)',
-  warning: '#85560A',
-  warningSoft: 'rgba(190, 130, 30, 0.14)',
-  negative: '#B3261E',
-  negativeSoft: 'rgba(179, 38, 30, 0.08)',
-  focus: '#2C7F8C',
-  glassFill: 'rgba(250, 249, 246, 0.74)',
-  glassBorder: 'rgba(255, 255, 255, 0.7)',
-  glassShadow: '0 10px 40px rgba(26, 25, 23, 0.10), 0 1px 2px rgba(26, 25, 23, 0.06)',
-  overlay: 'rgba(20, 19, 17, 0.36)',
-  chartLine: '#0A5A63',
-  chartFill: 'rgba(10, 90, 99, 0.10)',
-  chartGrid: 'rgba(26, 25, 23, 0.07)',
-  chartNeutral: '#8E8A81',
-  shadowSm: '0 1px 2px rgba(26, 25, 23, 0.05)',
-  shadowMd: '0 1px 2px rgba(26, 25, 23, 0.04), 0 8px 24px rgba(26, 25, 23, 0.06)',
+  accentSoft: 'rgba(37, 89, 219, 0.08)',
+  positive: '#0E7A45',
+  positiveSoft: 'rgba(14, 160, 90, 0.10)',
+  warning: '#B04A07',
+  warningSoft: 'rgba(234, 120, 20, 0.12)',
+  negative: '#CC2A22',
+  negativeSoft: 'rgba(225, 45, 35, 0.08)',
+  focus: '#3B7BF6',
+  glassFill: 'rgba(248, 251, 255, 0.72)',
+  glassBorder: 'rgba(255, 255, 255, 0.8)',
+  glassShadow: '0 12px 40px rgba(30, 70, 140, 0.12), 0 1px 3px rgba(18, 38, 63, 0.06)',
+  overlay: 'rgba(12, 24, 44, 0.32)',
+  chartLine: '#2559DB',
+  chartFill: 'rgba(59, 123, 246, 0.14)',
+  chartGrid: 'rgba(18, 38, 63, 0.07)',
+  chartNeutral: '#94A3B8',
+  chartPositive: '#1FAF62',
+  shadowSm: '0 1px 2px rgba(18, 38, 63, 0.04), 0 2px 10px rgba(40, 90, 180, 0.04)',
+  shadowMd: '0 1px 3px rgba(18, 38, 63, 0.05), 0 10px 30px rgba(40, 90, 180, 0.08)',
 };
 
 export const dark: ColorScheme = {
-  bg: '#0D0D0C',
-  bgElevated: '#131312',
-  surface: '#181817',
-  surfaceMuted: '#201F1D',
-  surfacePressed: '#2A2927',
-  text: '#F4F3EF',
-  textSecondary: '#ABA89F',
-  textTertiary: '#98958C',
-  border: 'rgba(255, 252, 245, 0.08)',
-  borderStrong: 'rgba(255, 252, 245, 0.15)',
-  accent: '#6CC5CB',
-  accentText: '#06292D',
-  accentSoft: 'rgba(108, 197, 203, 0.12)',
-  positive: '#6FCB9B',
-  positiveSoft: 'rgba(111, 203, 155, 0.12)',
-  warning: '#E6B566',
-  warningSoft: 'rgba(230, 181, 102, 0.13)',
-  negative: '#F28B82',
-  negativeSoft: 'rgba(242, 139, 130, 0.12)',
-  focus: '#86D2D7',
-  glassFill: 'rgba(28, 28, 26, 0.72)',
-  glassBorder: 'rgba(255, 252, 245, 0.09)',
-  glassShadow: '0 10px 40px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 252, 245, 0.04) inset',
-  overlay: 'rgba(0, 0, 0, 0.6)',
-  chartLine: '#6CC5CB',
-  chartFill: 'rgba(108, 197, 203, 0.14)',
-  chartGrid: 'rgba(255, 252, 245, 0.07)',
-  chartNeutral: '#7C7971',
+  bg: '#0A0F19',
+  bgElevated: '#0E1420',
+  surface: '#131A27',
+  surfaceMuted: '#1A2232',
+  surfacePressed: '#232D40',
+  text: '#EEF3FB',
+  textSecondary: '#A6B3C8',
+  textTertiary: '#8F9DB4',
+  border: 'rgba(200, 220, 255, 0.08)',
+  borderStrong: 'rgba(200, 220, 255, 0.15)',
+  accent: '#79A6FF',
+  accentText: '#06173A',
+  accentSoft: 'rgba(121, 166, 255, 0.13)',
+  positive: '#4FD394',
+  positiveSoft: 'rgba(79, 211, 148, 0.12)',
+  warning: '#F6B35C',
+  warningSoft: 'rgba(246, 179, 92, 0.13)',
+  negative: '#FF8A80',
+  negativeSoft: 'rgba(255, 138, 128, 0.12)',
+  focus: '#8FB5FF',
+  glassFill: 'rgba(19, 26, 39, 0.72)',
+  glassBorder: 'rgba(200, 220, 255, 0.09)',
+  glassShadow: '0 12px 40px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(200, 220, 255, 0.04) inset',
+  overlay: 'rgba(2, 6, 14, 0.6)',
+  chartLine: '#79A6FF',
+  chartFill: 'rgba(121, 166, 255, 0.16)',
+  chartGrid: 'rgba(200, 220, 255, 0.07)',
+  chartNeutral: '#6B7A92',
+  chartPositive: '#4FD394',
   shadowSm: '0 1px 2px rgba(0, 0, 0, 0.3)',
-  shadowMd: '0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.28)',
+  shadowMd: '0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 30px rgba(0, 0, 0, 0.32)',
 };
 
 export const fontFamily = {
@@ -128,8 +132,8 @@ export const type = {
 
 export const space = { xxs: 2, xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24, x3: 32, x4: 40, x5: 48, x6: 64 } as const;
 
-/** One radius scale. Cards 18, controls 12, chips 8, pills only for segmented controls/tab bar. */
-export const radius = { sm: 8, md: 10, lg: 16, xl: 22, pill: 999 } as const;
+/** One radius scale. Cards 20, sheets 26, inputs 12, chips 8; buttons and segmented controls are pills. */
+export const radius = { sm: 8, md: 12, lg: 20, xl: 26, pill: 999 } as const;
 
 export const motion = {
   fast: 120,
@@ -153,10 +157,10 @@ export const layout = {
   touchTarget: 44,
 } as const;
 
-/** Muted categorical hues for category dots and charts (never the only cue: always paired with a label). */
+/** Clean, saturated categorical hues for category dots and charts (never the only cue: always paired with a label). */
 export const categorical = {
-  light: ['#0A5A63', '#A8662F', '#55699F', '#84568F', '#3B7F62', '#A84F5A', '#6F7434', '#497596'],
-  dark: ['#6CC5CB', '#E0A26E', '#98A8E6', '#C89BD8', '#7FCBA9', '#E8929B', '#BCC077', '#8FBADE'],
+  light: ['#2F6BF0', '#D9307A', '#0D9488', '#7C4DEB', '#E0640F', '#18A04C', '#0B8FC4', '#E11D48'],
+  dark: ['#79A6FF', '#F472B6', '#2DD4BF', '#A78BFA', '#FB923C', '#4ADE80', '#38BDF8', '#FB7185'],
 } as const;
 
 export const tokens = { light, dark, fontFamily, type, space, radius, motion, glass, layout } as const;

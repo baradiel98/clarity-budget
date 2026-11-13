@@ -66,11 +66,11 @@
     probeIndexedDB(function (idb) {
       if (window.__clarityReady) return;
       var dark = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
-      var fg = dark ? '#F4F3EF' : '#1A1917';
-      var muted = dark ? '#ABA89F' : '#57544E';
+      var fg = dark ? '#EEF3FB' : '#12263F';
+      var muted = dark ? '#A6B3C8' : '#4A5C75';
       var box = el('div', null, {
         position: 'fixed', inset: '0', zIndex: '9999', overflow: 'auto', padding: '24px 18px',
-        background: dark ? '#0D0D0C' : '#F6F5F2', color: fg,
+        background: dark ? '#0A0F19' : '#F2F6FC', color: fg,
         font: '15px/1.45 -apple-system, BlinkMacSystemFont, system-ui, sans-serif'
       });
       box.id = 'clarity-diagnostics';
@@ -107,7 +107,7 @@
         inner.appendChild(el('p', 'No script errors were reported.', { fontSize: '13px', color: muted, margin: '16px 0 0' }));
       }
       var btns = el('div', null, { display: 'flex', gap: '10px', marginTop: '22px', flexWrap: 'wrap' });
-      var b1 = el('button', 'Repair and reload', { height: '44px', padding: '0 18px', borderRadius: '10px', border: '0', background: dark ? '#6CC5CB' : '#0A5A63', color: dark ? '#06292D' : '#fff', font: 'inherit', fontWeight: '600' });
+      var b1 = el('button', 'Repair and reload', { height: '44px', padding: '0 18px', borderRadius: '999px', border: '0', background: dark ? '#79A6FF' : '#2559DB', color: dark ? '#06173A' : '#fff', font: 'inherit', fontWeight: '600' });
       b1.addEventListener('click', repair);
       var b2 = el('button', 'Reload', { height: '44px', padding: '0 18px', borderRadius: '10px', border: '1px solid rgba(128,128,128,.4)', background: 'transparent', color: fg, font: 'inherit', fontWeight: '600' });
       b2.addEventListener('click', function () { location.reload(); });

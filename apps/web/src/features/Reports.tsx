@@ -64,7 +64,7 @@ export function Reports() {
             <section className="card" aria-labelledby="r-ie">
               <div className="card-head">
                 <h2 className="card-title" id="r-ie">Income and spending</h2>
-                <div className="legend" style={{ marginTop: 0 }} aria-hidden><span><i className="in" /> Income</span><span><i className="out" /> Spending</span></div>
+                <div className="legend" style={{ marginTop: 0 }} aria-hidden><span><i className="in" /> Income</span><span><i className="spend" /> Spending</span></div>
               </div>
               <div className="bars" role="group" aria-label="Months. Choose one to see its categories.">
                 {series.map((p) => (
