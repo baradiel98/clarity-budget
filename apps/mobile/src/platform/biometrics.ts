@@ -32,7 +32,12 @@ export async function biometricSupport(): Promise<BiometricSupport> {
 }
 
 export async function isBiometricEnabled(): Promise<boolean> {
-  return (await SecureStore.getItemAsync(FLAG)) === '1';
+  try {
+    return (await SecureStore.getItemAsync(FLAG)) === '1';
+  } catch {
+    // Secure storage unavailable or failing: fall back to passphrase unlock, never block startup.
+    return false;
+  }
 }
 
 export async function enableBiometric(masterKey: Uint8Array): Promise<void> {

@@ -54,7 +54,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void (async () => {
-      const [exists, support, enabled] = await Promise.all([WorkspaceStore.exists(adapter).catch(() => false), biometricSupport(), isBiometricEnabled()]);
+      const [exists, support, enabled] = await Promise.all([
+        WorkspaceStore.exists(adapter).catch(() => false),
+        biometricSupport().catch(() => ({ available: false, label: 'biometrics' })),
+        isBiometricEnabled().catch(() => false),
+      ]);
       setBio({ ...support, enabled: enabled && support.available });
       setPhase(exists ? { kind: 'locked' } : { kind: 'welcome' });
     })();
