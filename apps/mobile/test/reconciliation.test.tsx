@@ -102,8 +102,8 @@ it('Phase 4A.5.9: a +$200 difference with a $300 pending deposit is flagged as p
   mockData = withPendingRefund();
   const ui = await render(<UpdateBalancePanel account={chkOf(mockData)} onDone={jest.fn()} />);
   await act(async () => { fireEvent.changeText(ui.getByTestId('update-balance-input'), '3071.23'); });
-  expect(ui.getByText('Pending items could explain part of this difference')).toBeTruthy();
-  expect(ui.getByText(/If you record \+\$200\.00 now instead and that item clears later/)).toBeTruthy();
+  expect(ui.getByText('Pending items could explain some or all of this difference')).toBeTruthy();
+  expect(ui.getByText(/Clarity checks exact combinations of up to 3 items only/)).toBeTruthy();
   expect(ui.getByRole('button', { name: 'Record adjustment' }).props.accessibilityState.disabled).toBe(true);
   await act(async () => { fireEvent.press(ui.getByText(/The difference isn't related/)); });
   expect(ui.getByRole('button', { name: 'Record adjustment' }).props.accessibilityState.disabled).toBe(false);

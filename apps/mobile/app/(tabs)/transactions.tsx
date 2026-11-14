@@ -108,6 +108,7 @@ export default function Transactions() {
                   <T variant="caption" color="textTertiary">{t.splits?.length ? 'Split' : t.kind === 'transfer' ? 'Transfer' : cat?.name ?? 'Uncategorized'} · {accts.get(t.accountId)?.name}</T>
                   {hist && <Badge label={hist.kind === 'included' ? `${HISTORY_ONLY_BADGE} · ${formatShortDate(hist.asOf)}` : BEFORE_OPENING_BADGE} />}
                   {t.status === 'pending' && <Badge label="Pending" tone="warn" />}
+                  {t.statementMatch && <Badge label="Matched to statement" />}
                   {t.date > today && <Badge label="Planned" tone="accent" />}
                 </View>
                 {histReason ? <T variant="caption" color="textTertiary" testID="history-only">{histReason}</T> : null}

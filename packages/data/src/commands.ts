@@ -452,6 +452,7 @@ export function updateTransaction(ctx: Ctx, id: ID, input: TxInput): { ops: Op[]
   for (const t of txs) {
     const prev = legs.find((l) => l.id === t.id);
     if (prev?.provenance) t.provenance = prev.provenance;
+    if (prev?.statementMatch) t.statementMatch = prev.statementMatch; // Phase 4A.5.10: the link survives edits
   }
   // put after del for the same ids → final state is the put
   return { ops: [...ops.filter((o) => o.t === 'del' && !txs.some((t) => t.id === o.id)), ...txs.map((value): Op => ({ t: 'put', table: 'transactions', value }))], txs };
@@ -628,6 +629,12 @@ export interface ImportDecision {
   /** Required when kind is 'transfer'. */
   otherAccountId?: ID;
   linkOccurrence: boolean;
+  /**
+   * Phase 4A.5.10: required when the row has the same amount as a pending transaction (`candidate.duplicate.pending`).
+   * same = the row IS that transaction clearing: it is marked posted and linked; no new transaction.
+   * same = false: a different transaction; imported as well, and the decision is recorded.
+   */
+  pendingResolution?: { txId: ID; same: boolean };
 }
 
 export interface CommitImportInput {
@@ -656,8 +663,27 @@ export function commitImport(ctx: Ctx, input: CommitImportInput): { ops: Op[]; b
   const batchId = ctx.newId('imp');
   const ops: Op[] = [];
   const txs: Transaction[] = [];
+  const matchedIds = new Set<ID>();
   for (const d of input.decisions) {
     const c = d.candidate;
+    // Phase 4A.5.10: a row that may be a pending transaction clearing is never merged or added without a decision
+    if (c.duplicate?.pending) {
+      const found = ctx.data.transactions.find((t) => t.id === c.duplicate!.txId);
+      const name = found?.merchant || 'the pending transaction';
+      const res = d.pendingResolution && d.pendingResolution.txId === c.duplicate.txId ? d.pendingResolution : fail(`Row ${c.rowNumber}: choose whether this is the same transaction as “${name}” (pending) or a different one.`, 'pendingResolution');
+      if (res.same) {
+        const twin = found && found.accountId === account.id && found.amountCents === c.amountCents ? found : fail(`Row ${c.rowNumber}: “${name}” no longer matches this row; review it again.`, 'pendingResolution');
+        if (matchedIds.has(twin.id) || twin.statementMatch) fail(`Row ${c.rowNumber}: “${name}” is already matched to a statement row.`, 'pendingResolution');
+        matchedIds.add(twin.id);
+        const legs = twin.transferGroupId ? ctx.data.transactions.filter((t) => t.transferGroupId === twin.transferGroupId) : [twin];
+        for (const l of legs) {
+          const updated: Transaction = { ...l, status: 'confirmed', updatedAt: ctx.now };
+          if (l.id === twin.id) updated.statementMatch = { importBatchId: batchId, rowNumber: c.rowNumber, date: c.date, rawDescription: c.rawDescription, ...(c.externalId ? { externalId: c.externalId } : {}), previousStatus: twin.status };
+          ops.push({ t: 'put', table: 'transactions', value: updated });
+        }
+        continue;
+      }
+    }
     const provenance = {
       source: 'import' as const,
       importBatchId: batchId,
@@ -686,7 +712,8 @@ export function commitImport(ctx: Ctx, input: CommitImportInput): { ops: Op[]; b
     if (Math.sign(amount) !== Math.sign(c.amountCents)) fail(`Row ${c.rowNumber}: “${d.kind}” doesn't match the direction of the amount.`);
     const tx: Transaction = {
       id: ctx.newId('tx'), accountId: account.id, date: c.date, amountCents: amount, kind: d.kind, status: 'confirmed',
-      merchant: d.merchant.trim() || c.merchant || c.rawDescription || 'Imported transaction', categoryId: d.categoryId, notes: '', provenance,
+      merchant: d.merchant.trim() || c.merchant || c.rawDescription || 'Imported transaction', categoryId: d.categoryId, notes: '',
+      provenance: { ...provenance, ...(d.pendingResolution && !d.pendingResolution.same ? { separateFrom: d.pendingResolution.txId } : {}) },
       createdAt: ctx.now, updatedAt: ctx.now, ...occurrenceRef,
       // Phase 4A.5.8 (D6): a row dated before the account's confirmed balance date is already in that balance
       ...inclusionFor(ctx, account.id, c.date, 'confirmed', undefined, undefined),
@@ -738,7 +765,7 @@ export function commitImport(ctx: Ctx, input: CommitImportInput): { ops: Op[]; b
     mappingProfileId: input.settings.hasHeader ? profile.id : null,
     accountId: account.id,
     importedAt: ctx.now,
-    counts: { rows: input.totalRows, imported: input.decisions.length, excluded: input.excludedCount, duplicates: input.duplicateCount, errors: input.errorCount },
+    counts: { rows: input.totalRows, imported: input.decisions.length - matchedIds.size, ...(matchedIds.size ? { matched: matchedIds.size } : {}), excluded: input.excludedCount, duplicates: input.duplicateCount, errors: input.errorCount },
     reconciliation: input.reconciliation
       ? {
           statementBalanceCents: input.reconciliation.statementBalanceCents,
@@ -772,6 +799,18 @@ export function undoImportBatch(ctx: Ctx, batchId: ID): Op[] {
   }
   for (const t of ctx.data.transactions) {
     if (t.transferGroupId && groups.has(t.transferGroupId) && t.provenance.importBatchId !== batchId) ops.push({ t: 'del', table: 'transactions', id: t.id });
+  }
+  // Phase 4A.5.10: transactions this import matched (and marked posted) go back to how they were; the link is removed.
+  // One that was deleted since simply isn't there to restore.
+  for (const t of ctx.data.transactions) {
+    if (t.statementMatch?.importBatchId !== batchId) continue;
+    const prev = t.statementMatch.previousStatus;
+    const legs = t.transferGroupId ? ctx.data.transactions.filter((x) => x.transferGroupId === t.transferGroupId) : [t];
+    for (const l of legs) {
+      const restored: Transaction = { ...l, status: prev, updatedAt: ctx.now };
+      if (l.id === t.id) delete restored.statementMatch;
+      ops.push({ t: 'put', table: 'transactions', value: restored });
+    }
   }
   ops.push({ t: 'put', table: 'importBatches', value: { ...batch, undoneAt: ctx.now, updatedAt: ctx.now } });
   return ops;

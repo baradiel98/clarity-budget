@@ -52,8 +52,10 @@ test('Update balance: a +$200 difference with a $300 pending deposit is flagged 
   const u = page.getByRole('dialog');
   await u.getByLabel('Posted balance per bank').fill('3071.23');
   const m = u.getByTestId('pending-match');
-  await expect(m).toContainText('Pending items could explain part of this difference');
-  await expect(m).toContainText('If you record +$200.00 now instead and that item clears later, the part of it already in this adjustment is counted twice.');
+  // Phase 4A.5.10 wording: it never implies the search was exhaustive
+  await expect(m).toContainText('Pending items could explain some or all of this difference');
+  await expect(m).toContainText('Clarity checks exact combinations of up to 3 items only, so several of these together could also make up the whole difference.');
+  await expect(m).toContainText('If you record +$200.00 now instead and they clear later, the overlapping part is counted twice.');
   await expect(m).toContainText('Store return · Refund · pending');
   await expect(u.getByRole('button', { name: 'Record adjustment' })).toBeDisabled();
   await u.getByTestId('pending-unrelated').check();
@@ -63,6 +65,7 @@ test('Update balance: a +$200 difference with a $300 pending deposit is flagged 
 });
 
 test('import: a statement row that is a pending deposit clearing is left out and named; Mark posted reconciles without an adjustment', async ({ page }) => {
+  // (Phase 4A.5.10: the row now asks for an explicit decision; see phase4a510.spec.ts)
   await sample(page);
   await pendingRefund(page, '300', 'Store return');
   await page.getByRole('link', { name: 'Import Statement' }).click();
@@ -70,7 +73,7 @@ test('import: a statement row that is a pending deposit clearing is left out and
   await page.getByTestId('import-file').setInputFiles({ name: 'nov.csv', mimeType: 'text/csv', buffer: Buffer.from('Date,Description,Amount,Balance\n2026-11-13,AMAZON REFUND 8812,300.00,3171.23\n') });
   await page.getByTestId('to-review').click();
   await expect(page.getByTestId('import-count')).toHaveText('0 selected');
-  await expect(page.getByTestId('review-table')).toContainText('Same amount as “Store return”, still pending in Clarity (Nov 13). If this row is that transaction clearing, leave it out and mark “Store return” posted instead');
+  await expect(page.getByTestId('review-table')).toContainText('Same amount as “Store return”, still pending in Clarity (Nov 13). Is this row that transaction clearing?');
   const rc = page.getByTestId('reconciliation');
   await expect(rc).toContainText("Clarity's posted balance after this import");
   await expect(rc.getByTestId('import-pending-match')).toContainText('Store return');

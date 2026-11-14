@@ -460,6 +460,20 @@ The step-by-step checklist is in `docs/device-test-script.md`.
 - **Changed expectations:** 4 tests that encoded the old savings rule; 1 that encoded "partial match not flagged".
 - **Not verified:** physical devices, simulators, Safari, screen readers.
 
+## 7q. Phase 4A.5.10: statement-import duplicate protection
+
+| Sequence | Before | After |
+|---|---:|---:|
+| $300 pending deposit; statement row included anyway; then pending marked posted | $1,590 (counted twice) | refused without a decision |
+| Same, "Same transaction" chosen | — | $1,290; one deposit, posted once, linked |
+| Same, "Different transaction" chosen | — | both kept; $1,290 now, $1,590 when the second posts (two real deposits) |
+| Re-import after either decision | — | "Already matched" / "Already imported"; nothing added |
+| Undo an import with a match | — | the transaction returns to pending; link removed |
+| 4 pending deposits ($100+$50+$50+$50) vs a +$250 difference | asked (all named) | asked; wording no longer implies an exhaustive search |
+
+- **Tests:** data `import-reconciliation.test.ts` (+12: resolution flows, purchases, transfers, edit/delete/undo, re-import, multiple twins, 4+ item combinations, no cap); web `e2e/phase4a510.spec.ts` (2); wording updates in 4A.5.9 web/mobile tests.
+- **Not verified:** mobile import review rendering (component test not added; covered by shared data tests and type checks), devices, Safari.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

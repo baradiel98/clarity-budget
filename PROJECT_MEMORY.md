@@ -365,3 +365,9 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Known limitation]** If the user includes a statement row flagged as a pending item clearing AND later marks that pending item posted, it is counted twice; the row's note warns against exactly that.
 - **[Lesson]** Check the fixture before doubting the code: two "failures" this phase were my own inconsistent test data (a statement's running balance; an afford boundary that the per-account rule answers "move first").
 
+## Phase 4A.5.10 (2026-11-14): statement-import duplicate protection
+- **[Verified defect, fixed]** Including a statement row flagged as a pending transaction clearing, then marking the pending one posted, counted the deposit twice ($1,590 vs $1,290). Cause: the flag lived only in the transient import preview; `commitImport` wrote an independent transaction with no link, so nothing connected the two records afterwards.
+- **[Fix]** A flagged row needs an explicit `pendingResolution` (data layer refuses otherwise). "Same": no new transaction; the pending one (id kept) is posted once and records `Transaction.statementMatch` (undo restores it; edits keep it; re-import says "Already matched"). "Different": imported with `provenance.separateFrom`. Never automatic. Web and mobile review offer Same / Different / Leave out; matched transactions are labelled "Matched to statement".
+- **[Fixed]** Partial-match wording no longer implies an exhaustive search ("some or all … exact combinations of up to 3 items only"); every same-direction item is listed (no cap). Proof that 4+ item combinations can't pass silently is in calculation-rules.md.
+- **[Known limitation]** Statements imported before Phase 4A.5.10 that already contain such a duplicate are not detected retroactively.
+

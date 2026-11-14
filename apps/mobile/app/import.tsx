@@ -7,7 +7,7 @@ import {
   buildPreview, checkImportFile, csvParser, dataRowCount, guessMapping, headerSignature, NO_DATA_ROWS_MESSAGE, nonBlankRowCount, reconcilePreview, suggestSignConvention, type ImportCandidate, type ImportPreview,
   type MappingGuess, type RawTable,
 } from '@clarity/import';
-import { formatCents, formatShortDate, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, TERMS, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
+import { formatCents, formatShortDate, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, PENDING_TWIN_SAME, PENDING_TWIN_SEPARATE, PENDING_TWIN_SKIP, TERMS, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
 import { Check } from '../src/features/Welcome';
 import { pickTextFile } from '../src/platform/files';
 import { useData, useRun, useSession } from '../src/state/session';
@@ -28,6 +28,8 @@ interface Row extends ImportCandidate {
   otherAccountId: string;
   linkOccurrence: boolean;
   expanded: boolean;
+  /** Phase 4A.5.10: for a row that may be a pending transaction clearing: the user's explicit decision. */
+  pendingChoice: 'same' | 'separate' | null;
 }
 
 export default function ImportScreen() {
@@ -100,7 +102,7 @@ export default function ImportScreen() {
           account, accounts: data.accounts, transactions: data.transactions, recurring: data.recurring, exceptions: data.exceptions, importBatches: data.importBatches, fileHash: file.hash, today,
         });
         setPreview(p);
-        setRows(p.candidates.map((x) => ({ ...x, editKind: x.looksLikeTransfer ? 'transfer' : x.kind, editCategory: x.categoryId, otherAccountId: '', linkOccurrence: !!x.occurrenceMatch, expanded: false })));
+        setRows(p.candidates.map((x) => ({ ...x, editKind: x.looksLikeTransfer ? 'transfer' : x.kind, editCategory: x.categoryId, otherAccountId: '', linkOccurrence: !!x.occurrenceMatch, expanded: false, pendingChoice: null })));
         setStage('review');
       } catch (e) {
         setError((e as Error).message);
@@ -111,7 +113,9 @@ export default function ImportScreen() {
   };
 
   const included = rows.filter((r) => r.include);
-  const recon = useMemo(() => (preview && account ? reconcilePreview(preview, included, { account, transactions: data.transactions }) : null), [preview, included, account, data.transactions]);
+  // Phase 4A.5.10: rows confirmed as the same transaction aren't added; their pending transaction counts as posted
+  const sameIds = included.filter((r) => r.duplicate?.pending && r.pendingChoice === 'same').map((r) => r.duplicate!.txId);
+  const recon = useMemo(() => (preview && account ? reconcilePreview(preview, included.filter((r) => !(r.duplicate?.pending && r.pendingChoice === 'same')), { account, transactions: data.transactions, postedByMatch: sameIds }) : null), [preview, included, account, data.transactions, sameIds.join()]);
   const blocking = included.filter((r) => r.editKind === 'transfer' && !r.otherAccountId).length;
   // Phase 4A.5.9: pending items that could explain the statement difference (cleared at the bank, still pending here)
   const reconPending = recon && !recon.note && recon.differenceCents !== 0 ? [...new Map([...(recon.pendingMatches ?? []).flat(), ...(recon.pendingPartial ?? [])].map((t) => [t.id, t])).values()] : [];
@@ -126,7 +130,7 @@ export default function ImportScreen() {
       const res = commitImport(ctx, {
         accountId: account.id, fileName: file.name, fileHash: file.hash, parserId: 'csv', headerSignature: headerSignature(file.guess.headers), delimiter: file.table.delimiter,
         settings: { hasHeader: file.guess.hasHeader, columns: file.guess.columns!, dateFormat, decimalSeparator: decimal, signConvention: sign },
-        decisions: included.map((x) => ({ candidate: x, kind: x.editKind, categoryId: x.editKind === 'transfer' ? null : x.editCategory, merchant: x.merchant, ...(x.otherAccountId ? { otherAccountId: x.otherAccountId } : {}), linkOccurrence: x.linkOccurrence })),
+        decisions: included.map((x) => ({ candidate: x, kind: x.editKind, categoryId: x.editKind === 'transfer' ? null : x.editCategory, merchant: x.merchant, ...(x.otherAccountId ? { otherAccountId: x.otherAccountId } : {}), linkOccurrence: x.linkOccurrence, ...(x.duplicate?.pending && x.pendingChoice ? { pendingResolution: { txId: x.duplicate.txId, same: x.pendingChoice === 'same' } } : {}) })),
         totalRows: rows.length + preview.errors.length, excludedCount: rows.length - included.length, duplicateCount: rows.filter((x) => x.duplicate).length, errorCount: preview.errors.length,
         reconciliation: recon, applyAdjustment: applyAdj && (reconPending.length === 0 || reconUnrelated), adjustmentUnrelatedToPending: reconUnrelated,
       });
@@ -187,7 +191,7 @@ export default function ImportScreen() {
           <Card>
             {rows.map((r, i) => (
               <View key={r.rowNumber} style={{ borderBottomWidth: i === rows.length - 1 ? 0 : 1, borderBottomColor: c.border, paddingVertical: 10, opacity: r.include ? 1 : 0.55 }}>
-                <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: r.include }} onPress={() => setRow(i, { include: !r.include })} onLongPress={() => setRow(i, { expanded: !r.expanded })} style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+                <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: r.include }} onPress={() => { if (!r.duplicate?.pending) setRow(i, { include: !r.include }); }} accessibilityHint={r.duplicate?.pending ? 'Choose below whether this is the pending transaction or a different one' : undefined} onLongPress={() => setRow(i, { expanded: !r.expanded })} style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
                   <View style={{ width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: r.include ? c.accent : c.borderStrong, backgroundColor: r.include ? c.accent : 'transparent' }} />
                   <View style={{ flex: 1 }}>
                     <T numberOfLines={1} style={{ fontFamily: 'Inter_500Medium' }}>{r.merchant || r.rawDescription || 'No description'}</T>
@@ -200,6 +204,13 @@ export default function ImportScreen() {
                     {r.duplicate && <Badge label={r.duplicate.level === 'exact' ? 'Already imported' : 'Possible duplicate'} tone={r.duplicate.level === 'exact' ? 'neg' : 'warn'} />}
                     {r.occurrenceMatch && <Check label={`Pays ${r.occurrenceMatch.name}`} value={r.linkOccurrence} onChange={(v) => setRow(i, { linkOccurrence: v })} />}
                     <T variant="caption" color="textSecondary">{[r.duplicate?.reason, ...r.reasons].filter(Boolean).join(' ')}</T>
+                    {r.duplicate?.pending && (
+                      <View accessibilityRole="radiogroup" testID={`pending-choice-${r.rowNumber}`} style={{ gap: 6 }}>
+                        {([['same', PENDING_TWIN_SAME(data.transactions.find((t) => t.id === r.duplicate!.txId)?.merchant || 'the pending transaction')], ['separate', PENDING_TWIN_SEPARATE], [null, PENDING_TWIN_SKIP]] as const).map(([v, label]) => (
+                          <Check key={String(v)} label={label} value={r.pendingChoice === v} onChange={() => setRow(i, { pendingChoice: v, include: v !== null })} />
+                        ))}
+                      </View>
+                    )}
                   </View>
                 )}
                 <Pressable onPress={() => setRow(i, { expanded: !r.expanded })} accessibilityRole="button" style={{ marginLeft: 32, marginTop: 4 }}><T variant="caption" color="accent">{r.expanded ? 'Done' : 'Change type or category'}</T></Pressable>

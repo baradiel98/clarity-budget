@@ -92,8 +92,12 @@ export const PENDING_MATCH_TITLE = 'This difference matches pending items';
 export const PENDING_MATCH_NOTE =
   "If one of them has cleared at your bank, mark it posted and Clarity will recalculate. Recording the difference as an adjustment instead would count it twice once the item posts.";
 /** Phase 4A.5.9: a pending item in the same direction could explain part of the difference. */
-export const PENDING_PARTIAL_TITLE = 'Pending items could explain part of this difference';
+export const PENDING_PARTIAL_TITLE = 'Pending items could explain some or all of this difference';
 export const PENDING_PARTIAL_NOTE = (difference: string) =>
-  `If one of them has cleared at your bank (perhaps for a different amount), mark it posted and Clarity will recalculate. If you record ${difference} now instead and that item clears later, the part of it already in this adjustment is counted twice.`;
+  `If one or more of them has cleared at your bank (perhaps for a different amount), mark it posted and Clarity will recalculate. Clarity checks exact combinations of up to 3 items only, so several of these together could also make up the whole difference. If you record ${difference} now instead and they clear later, the overlapping part is counted twice.`;
+/** Phase 4A.5.10: a statement row with the same amount as a pending transaction needs an explicit decision. */
+export const PENDING_TWIN_SAME = (merchant: string) => `Same transaction: mark “${merchant}” posted (nothing new is added)`;
+export const PENDING_TWIN_SEPARATE = 'Different transaction: import it as well';
+export const PENDING_TWIN_SKIP = 'Leave it out';
 export const PENDING_MATCH_UNRELATED = "The difference isn't related to these pending items; record the adjustment and keep them pending";
 export const RECONCILED_MESSAGE = (account: string, date: string) => `${account} matches your bank's posted balance as of ${date}. No adjustment needed.`;

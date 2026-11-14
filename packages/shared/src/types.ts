@@ -52,6 +52,25 @@ export interface Provenance {
   externalId?: string;
   /** Original statement description (import) or the user's own words (capture), preserved exactly. */
   rawDescription?: string;
+  /**
+   * Phase 4A.5.10: an imported row the user confirmed is a DIFFERENT transaction from this pending one
+   * (it had the same amount and a nearby date). Kept for the record; both are counted.
+   */
+  separateFrom?: ID;
+}
+
+/**
+ * Phase 4A.5.10: a statement row the user confirmed is this (previously pending) transaction clearing. No second
+ * transaction was created; this transaction was marked posted. Undoing the import restores `previousStatus`.
+ */
+export interface StatementMatch {
+  importBatchId: ID;
+  rowNumber: number;
+  /** The date and description on the statement (the bank's posting date may differ from this transaction's). */
+  date: ISODate;
+  rawDescription: string;
+  externalId?: string;
+  previousStatus: TxStatus;
 }
 
 export interface OccurrenceRef {
@@ -85,6 +104,8 @@ export interface Transaction {
   includedInBalance?: boolean;
   /** Phase 4A.5.8: the confirmed balance date this transaction is already included in ("as of Nov 20"). */
   includedAsOf?: ISODate;
+  /** Phase 4A.5.10: the statement row this transaction was matched to (see StatementMatch). */
+  statementMatch?: StatementMatch;
   provenance: Provenance;
   createdAt: number;
   updatedAt: number;
@@ -237,7 +258,7 @@ export interface ImportBatch {
   mappingProfileId: ID | null;
   accountId: ID;
   importedAt: number;
-  counts: { rows: number; imported: number; excluded: number; duplicates: number; errors: number };
+  counts: { rows: number; imported: number; excluded: number; duplicates: number; errors: number; /** Phase 4A.5.10: rows confirmed as a pending transaction clearing (linked, not added). */ matched?: number };
   reconciliation: ReconciliationResult | null;
   undoneAt: number | null;
   createdAt: number;

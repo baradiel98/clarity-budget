@@ -343,6 +343,7 @@ export function Transactions() {
         {t.kind === 'adjustment' && <span className="badge" title={t.adjustmentReason}>Adjustment</span>}
         {t.splits?.length ? <span className="badge">Split</span> : null}
         {t.provenance.source === 'import' && <span className="badge hide-mobile" title={t.provenance.rawDescription}>Imported</span>}
+        {t.statementMatch && <span className="badge" data-testid="statement-match" title={`Matched to the statement row “${t.statementMatch.rawDescription}” on ${formatShortDate(t.statementMatch.date)}; posted then. No second transaction was added.`}>Matched to statement</span>}
         {t.date > today && <span className="badge accent">Planned</span>}
       </>
     );

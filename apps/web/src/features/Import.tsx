@@ -4,7 +4,7 @@ import { commitImport, markTransactionPosted, undoImportBatch as undoImport, typ
 import {
   checkImportFile, dataRowCount, DATE_FORMATS, headerSignature, NO_DATA_ROWS_MESSAGE, reconcilePreview, type ImportCandidate, type ImportPreview, type ImportSettings,
 } from '@clarity/import';
-import { formatShortDate, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, TERMS, type ColumnMapping, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
+import { formatShortDate, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, PENDING_TWIN_SAME, PENDING_TWIN_SEPARATE, PENDING_TWIN_SKIP, TERMS, type ColumnMapping, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
 import { useRouter } from '../lib/router';
 import { sha256Hex } from '../platform/files';
 import { useData, useRun, useSession } from '../state/session';
@@ -22,6 +22,8 @@ interface Row extends ImportCandidate {
   editCategory: string | null;
   otherAccountId: string;
   linkOccurrence: boolean;
+  /** Phase 4A.5.10: for a row that may be a pending transaction clearing: the user's explicit decision. */
+  pendingChoice: 'same' | 'separate' | null;
 }
 
 export function ImportPage() {
@@ -112,7 +114,7 @@ export function ImportPage() {
         importBatches: data.importBatches, fileHash: file.hash, today,
       });
       setPreview(p);
-      setRows(p.candidates.map((c) => ({ ...c, editKind: c.looksLikeTransfer ? 'transfer' : c.kind, editCategory: c.categoryId, otherAccountId: '', linkOccurrence: !!c.occurrenceMatch })));
+      setRows(p.candidates.map((c) => ({ ...c, editKind: c.looksLikeTransfer ? 'transfer' : c.kind, editCategory: c.categoryId, otherAccountId: '', linkOccurrence: !!c.occurrenceMatch, pendingChoice: null })));
       setStage('review');
     } catch (e) {
       setError((e as Error).message);
@@ -122,7 +124,9 @@ export function ImportPage() {
   };
 
   const included = rows.filter((r) => r.include);
-  const recon = useMemo(() => (preview && account ? reconcilePreview(preview, included, { account, transactions: data.transactions }) : null), [preview, included, account, data.transactions]);
+  // Phase 4A.5.10: rows confirmed as the same transaction aren't added; their pending transaction counts as posted
+  const sameIds = included.filter((r) => r.duplicate?.pending && r.pendingChoice === 'same').map((r) => r.duplicate!.txId);
+  const recon = useMemo(() => (preview && account ? reconcilePreview(preview, included.filter((r) => !(r.duplicate?.pending && r.pendingChoice === 'same')), { account, transactions: data.transactions, postedByMatch: sameIds }) : null), [preview, included, account, data.transactions, sameIds.join()]);
   const blocking = included.filter((r) => r.editKind === 'transfer' && !r.otherAccountId);
   // Phase 4A.5.9: pending items that could explain the statement difference (cleared at the bank, still pending here)
   const reconPending = recon && !recon.note && recon.differenceCents !== 0 ? [...new Map([...(recon.pendingMatches ?? []).flat(), ...(recon.pendingPartial ?? [])].map((t) => [t.id, t])).values()] : [];
@@ -136,7 +140,7 @@ export function ImportPage() {
       const res = commitImport(ctx, {
         accountId: account.id, fileName: file.name, fileHash: file.hash, parserId: 'csv', headerSignature: headerSignature(analysis.guess.headers), delimiter: analysis.delimiter,
         settings: { hasHeader, columns, dateFormat, decimalSeparator: decimal, signConvention: sign },
-        decisions: included.map((x) => ({ candidate: x, kind: x.editKind, categoryId: x.editKind === 'transfer' ? null : x.editCategory, merchant: x.merchant, ...(x.otherAccountId ? { otherAccountId: x.otherAccountId } : {}), linkOccurrence: x.linkOccurrence })),
+        decisions: included.map((x) => ({ candidate: x, kind: x.editKind, categoryId: x.editKind === 'transfer' ? null : x.editCategory, merchant: x.merchant, ...(x.otherAccountId ? { otherAccountId: x.otherAccountId } : {}), linkOccurrence: x.linkOccurrence, ...(x.duplicate?.pending && x.pendingChoice ? { pendingResolution: { txId: x.duplicate.txId, same: x.pendingChoice === 'same' } } : {}) })),
         totalRows: rows.length + preview.errors.length, excludedCount: rows.length - included.length, duplicateCount: rows.filter((x) => x.duplicate).length, errorCount: preview.errors.length,
         reconciliation: recon, applyAdjustment: applyAdj && (reconPending.length === 0 || reconUnrelated), adjustmentUnrelatedToPending: reconUnrelated,
       });
@@ -293,7 +297,7 @@ export function ImportPage() {
               {rows.some((r) => r.confidence !== 'high') && <span className="badge warn">{rows.filter((r) => r.confidence !== 'high').length} to check</span>}
               {preview.errors.length > 0 && <span className="badge neg">{preview.errors.length} could not be read</span>}
               <span className="spacer" />
-              <button className="btn btn-ghost btn-sm" onClick={() => setRows(rows.map((r) => ({ ...r, include: !(r.editKind === 'transfer' && !r.otherAccountId) })))}>Select all</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setRows(rows.map((r) => ({ ...r, include: !(r.editKind === 'transfer' && !r.otherAccountId) && !(r.duplicate?.pending && !r.pendingChoice) })))}>Select all</button>
               <button className="btn btn-ghost btn-sm" onClick={() => setRows(rows.map((r) => ({ ...r, include: false })))}>Select none</button>
             </div>
           </div>
@@ -307,7 +311,7 @@ export function ImportPage() {
                 <tbody>
                   {rows.map((r, i) => (
                     <tr key={r.rowNumber} className={r.include ? '' : 'excluded'}>
-                      <td className="w-check"><input type="checkbox" aria-label={`Import row ${r.rowNumber}`} checked={r.include} onChange={(e) => setRow(i, { include: e.target.checked })} /></td>
+                      <td className="w-check"><input type="checkbox" aria-label={`Import row ${r.rowNumber}`} checked={r.include} disabled={!!r.duplicate?.pending} title={r.duplicate?.pending ? 'Choose below whether this is the pending transaction or a different one' : undefined} onChange={(e) => setRow(i, { include: e.target.checked })} /></td>
                       <td className="num" style={{ whiteSpace: 'nowrap' }}>{formatShortDate(r.date)}</td>
                       <td>
                         <div style={{ fontWeight: 500 }}>{r.merchant || <span className="faint">No description</span>}</div>
@@ -342,6 +346,16 @@ export function ImportPage() {
                           )}
                         </div>
                         {(r.duplicate || r.reasons.length > 0) && <div className="hint" style={{ marginTop: 4 }}>{[r.duplicate?.reason, ...r.reasons].filter(Boolean).join(' ')}</div>}
+                        {r.duplicate?.pending && (
+                          <div role="radiogroup" aria-label={`Row ${r.rowNumber}: is this the pending transaction?`} className="stack" style={{ gap: 2, marginTop: 6 }} data-testid={`pending-choice-${r.rowNumber}`}>
+                            {([['same', PENDING_TWIN_SAME(data.transactions.find((t) => t.id === r.duplicate!.txId)?.merchant || 'the pending transaction')], ['separate', PENDING_TWIN_SEPARATE], [null, PENDING_TWIN_SKIP]] as const).map(([v, label]) => (
+                              <label key={String(v)} className="check" style={{ fontSize: 12.5 }}>
+                                <input type="radio" name={`pending-${r.rowNumber}`} checked={r.pendingChoice === v} onChange={() => setRow(i, { pendingChoice: v, include: v !== null })} />
+                                <span>{label}</span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
                       </td>
                       <td className={`right num ${r.amountCents > 0 ? 'pos' : ''}`} style={{ fontWeight: 600 }}><Money cents={r.amountCents} currency={cur} sign="always" /></td>
                     </tr>

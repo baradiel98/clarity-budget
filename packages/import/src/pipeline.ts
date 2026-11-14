@@ -30,7 +30,8 @@ export interface ImportCandidate {
   categorySource: CategorySource;
   confidence: Confidence;
   reasons: string[];
-  duplicate: { level: 'exact' | 'likely'; txId: ID; reason: string } | null;
+  /** `pending` (Phase 4A.5.10): `txId` is a PENDING transaction this row may be clearing; needs an explicit decision. */
+  duplicate: { level: 'exact' | 'likely'; txId: ID; reason: string; pending?: boolean } | null;
   repeatInFile: boolean;
   occurrenceMatch: { key: string; recurringId: ID; originalDate: ISODate; name: string } | null;
   /** Default decision for the review screen. The user can change it. */
@@ -249,19 +250,24 @@ export function buildPreview(table: RawTable, s: ImportSettings, ctx: PreviewCon
       (t) =>
         !consumed.has(t.id) &&
         ((p.externalId && t.provenance.externalId === p.externalId) ||
-          (t.provenance.source === 'import' && t.date === p.date && t.amountCents === p.amountCents && normalizeDescription(t.provenance.rawDescription ?? '') === norm)),
+          (t.provenance.source === 'import' && t.date === p.date && t.amountCents === p.amountCents && normalizeDescription(t.provenance.rawDescription ?? '') === norm) ||
+          // Phase 4A.5.10: a statement row already matched to an existing transaction in an earlier import
+          (!!t.statementMatch && ((!!p.externalId && t.statementMatch.externalId === p.externalId) || (t.statementMatch.date === p.date && t.amountCents === p.amountCents && normalizeDescription(t.statementMatch.rawDescription) === norm)))),
     );
     // Phase 4A.5.9: a statement row is usually a pending transaction clearing (often days later, with the bank's own
     // description). Same account and amount, dated 3 days before to 10 days after it: flagged and left out by default.
     // Never posted automatically; the user decides.
     const pendingTwin = exact ? undefined : acctTx.find((t) => !consumed.has(t.id) && t.status === 'pending' && t.amountCents === p.amountCents && diffDays(p.date, t.date) >= -3 && diffDays(p.date, t.date) <= 10);
-    if (exact) {
+    if (exact?.statementMatch && !(p.externalId && exact.provenance.externalId === p.externalId)) {
+      consumed.add(exact.id);
+      duplicate = { level: 'exact', txId: exact.id, reason: `Already matched to “${exact.merchant || 'a transaction'}” from a previous statement.` };
+    } else if (exact) {
       consumed.add(exact.id);
       duplicate = { level: 'exact', txId: exact.id, reason: p.externalId && exact.provenance.externalId === p.externalId ? 'Same transaction ID was already imported.' : 'Already imported from a previous statement.' };
     } else if (pendingTwin) {
       consumed.add(pendingTwin.id);
       const n = pendingTwin.merchant || 'a transaction';
-      duplicate = { level: 'likely', txId: pendingTwin.id, reason: `Same amount as “${n}”, still pending in Clarity (${formatShortDate(pendingTwin.date)}). If this row is that transaction clearing, leave it out and mark “${n}” posted instead, so it isn't counted twice.` };
+      duplicate = { level: 'likely', txId: pendingTwin.id, pending: true, reason: `Same amount as “${n}”, still pending in Clarity (${formatShortDate(pendingTwin.date)}). Is this row that transaction clearing? Choose “Same transaction” to mark “${n}” posted (nothing new is added), or “Different transaction” to import it as well.` };
     } else {
       const likely = acctTx.find(
         (t) =>
@@ -314,8 +320,15 @@ export function buildPreview(table: RawTable, s: ImportSettings, ctx: PreviewCon
 /**
  * Compare the statement's closing balance with what the app's balance would be after importing
  * the included rows. Never applies an adjustment itself.
+ * `postedByMatch` (Phase 4A.5.10): pending transactions the user confirmed a statement row matches; they are treated
+ * as posted (the rows themselves are not added).
  */
-export function reconcilePreview(preview: ImportPreview, included: readonly ImportCandidate[], ctx: Pick<PreviewContext, 'account' | 'transactions'>): ReconciliationPreview | null {
+export function reconcilePreview(preview: ImportPreview, included: readonly ImportCandidate[], ctx: Pick<PreviewContext, 'account' | 'transactions'> & { postedByMatch?: readonly ID[] }): ReconciliationPreview | null {
+  if (ctx.postedByMatch?.length) {
+    const ids = new Set(ctx.postedByMatch);
+    const groups = new Set(ctx.transactions.filter((t) => ids.has(t.id) && t.transferGroupId).map((t) => t.transferGroupId!));
+    ctx = { ...ctx, transactions: ctx.transactions.map((t) => (ids.has(t.id) || (t.transferGroupId && groups.has(t.transferGroupId)) ? { ...t, status: 'confirmed' as const } : t)) };
+  }
   const withBal = preview.candidates.filter((c) => c.balanceCents !== null);
   if (withBal.length === 0) return null;
   const ascending = withBal[0]!.date <= withBal[withBal.length - 1]!.date;

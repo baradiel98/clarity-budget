@@ -108,10 +108,12 @@ export function pendingMatches(account: Account, transactions: readonly Transact
 /**
  * Phase 4A.5.9: pending items that could explain PART of a difference: same direction as the difference (a deposit
  * for a positive one, a purchase for a negative one) but not part of an exact match. Linear in the number of pending
- * items (no combination search); the `limit` closest in amount are returned. A combination of more than 3 items that
- * adds up exactly isn't detected as exact, but each of its items still appears here, so nothing passes silently.
+ * items (no combination search); all of them are returned, closest in amount first (Phase 4A.5.10: no cap). Any
+ * combination of pending items, of ANY size, that adds up to a positive difference contains at least one deposit
+ * (and to a negative one, at least one purchase), and every such item not in an exact set is listed here: so a
+ * combination too large for the exact search (more than 3 items) can never pass as "nothing could explain it".
  */
-export function pendingPartialMatches(account: Account, transactions: readonly Transaction[], asOf: ISODate, differenceCents: Cents, exact: readonly Transaction[][] = [], limit = 5): Transaction[] {
+export function pendingPartialMatches(account: Account, transactions: readonly Transaction[], asOf: ISODate, differenceCents: Cents, exact: readonly Transaction[][] = [], limit = Infinity): Transaction[] {
   if (differenceCents === 0) return [];
   const inExact = new Set(exact.flat().map((t) => t.id));
   return pendingItems(account, transactions, asOf)
