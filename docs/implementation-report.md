@@ -372,6 +372,28 @@ The step-by-step checklist is in `docs/device-test-script.md`.
 - **Changed tests:** five unit tests, one e2e assertion and one mobile assertion that encoded the Phase 4A.5 timing now carry Policy B values.
 - **Not verified:** physical devices, Safari, real statement due dates (not modelled).
 
+## 7m. Phase 4A.5.4: card credits are not payments
+
+| Scenario (Nov 13, horizon Dec 31) | Phase 4A.5.2 | Now |
+|---|---:|---:|
+| $500, $400 debt, $200 refund Dec 10 | $300 | **$100** |
+| Same + $1,000 paycheck Dec 4 | $300 | **$100** |
+| Refund Dec 1, paycheck Dec 10 | $300 | **$100** |
+| $600 refund against $400 | $500 | **$100** |
+| $400 refund Jan 20 (after the forecast) | $500 | **$100** |
+| Two $100 refunds | $300 | **$100** |
+| Fixed $50 cashback Nov 15, Dec 15 | $200 | **$100** |
+| Visa $400 + $200 refund, Amex $200, $1,000 | $600 | **$400** |
+| $300 purchase and $300 refund same day | $500 | **$200** |
+| $200 purchase, $50 refund later | $350 | **$300** |
+| $200 purchase and $50 refund both posted | $350 | $350 |
+| $400 debt, $200 posted refund, $200 payment later | $300 | $300 (owner's table said $100; $100 would count the refunded $200 twice) |
+| $400 debt, $200 pending refund, no payment | $300 | **$100** |
+
+- **Tests:** `packages/engine/test/card-credits.test.ts` (27). Two earlier tests that encoded the defect are corrected.
+- **Random comparison:** 500 scenarios, all equal to an independent reference model.
+- **Not verified:** physical devices, Safari.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

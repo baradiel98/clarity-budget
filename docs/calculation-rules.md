@@ -149,7 +149,7 @@ Events in the timeline:
 - **Card liability (Phase 4A.5 → Policy B in Phase 4A.5.2, owner decisions).** Card debt is counted even when no payment is scheduled. Card debt that no payment the user scheduled covers is **owed now**; a scheduled payment (or refund) sets when the debt it covers is counted. Clarity stores no statement due dates: a scheduled payment's date is the user's planned date, never presented as a verified due date.
   - **Per day, per base-currency card (archived included), at the day's low point (after the day's money going out):**
     - *owed* = what the card owes then (`max(0, −balance)`; a card in credit owes nothing and its credit is never spendable);
-    - *covering* = payments and refunds credited to the card after that point: later that day, later in the forecast, and within 62 days after it (the existing lookahead);
+    - *covering* = **payments** (money moved into the card from another account, scheduled or recorded ahead of time) after that point: later that day, later in the forecast, and within 62 days after it (the existing lookahead). A payment more than 62 days after the forecast ends doesn't count, so that debt is owed now;
     - *uncovered* = `max(0, owed − covering)`, reserved that day. Payments pay the oldest debt first, so a later payment always covers debt that already exists before any later purchase, and never a purchase that hasn't happened yet.
     - The planned cash-advance part stays borrowed until repaid (Phase 4A.4); because payments go to purchases first, an uncovered amount is the advance first. Reserved per card: `max(uncovered, advance still owed)`. Never both.
   - **Safe to Spend** = min over the days of (low − reserved) and of (cash at the end of the forecast − card debt still owed then) − reserve.
@@ -160,7 +160,8 @@ Events in the timeline:
     - *multiple or partial payments:* their total covers the oldest debt; any remainder is reserved now (warning "Visa: $300.00 of $400.00 isn't covered by a scheduled payment");
     - *purchases:* owed from their date; one after the last payment is reserved from that date;
     - *cash advances:* as purchases, plus the borrowed-money rule;
-    - *refunds:* cover like a payment;
+    - *refunds, cashback and other card credits (Phase 4A.5.4):* **not payments.** They lower what the card owes only from the day they arrive, never earlier, so a future refund can't make money spendable today (audit 4A.5.3: a $200 refund planned for Dec 10 used to raise Safe to Spend from $100 to $300). Estimated or unknown-amount credits are never counted;
+    - *pending refunds and credits (Phase 4A.5.4):* the recorded balance still includes them (unchanged rule for pending transactions), but for card debt they are added back until they post. A pending transfer (a payment already made from an account) is not a credit of this kind and stays counted once;
     - *archived cards:* same;
     - *payment after the forecast ends:* covers the debt, which is then set aside at the end of the forecast (unchanged boundary rule);
     - *payments and same-day income:* payments come first (unchanged).
@@ -171,7 +172,7 @@ Events in the timeline:
     - $100 partial payment Nov 25 → $100 (Phase 4A.5: $400);
     - two cards, Visa $300 paid Nov 20 and Amex $200 paid Dec 20, $400 checking → $100 (Phase 4A.5: $400); Amex unscheduled → −$100;
     - payment Jan 15 → $500 with the paycheck, $100 without;
-    - $50 refund → $150;
+    - $50 refund Dec 10 → $100 (Phase 4A.5.2: $150; corrected in 4A.5.4);
     - same-day paycheck and payment with $100 checking → −$300;
     - forecast end moving to a Feb 1 paycheck: $100 on both days (Phase 4A.5: $100 → $500);
     - sample data + a card owing $250 with no payment → $2,177.17.

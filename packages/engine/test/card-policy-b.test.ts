@@ -112,9 +112,10 @@ describe('Purchases, cash advances and refunds on their dates', () => {
     const i = input({ today: TODAY, accounts: [chk(30000), visa(0)], recurring: [move('adv', 'visa', 'chk', '2026-11-20', 100000), once('rent', 'bill', '2026-12-01', 120000), fullPay('visa', '2026-12-15')] });
     expect(sts(i)).toBe(-90000);
   });
-  it('a $50 refund on Dec 10 covers $50 of the $400; the other $350 is owed now → $150', () => {
+  it('a $50 refund on Dec 10 is not a payment: the $400 is owed now until it arrives → $100 (Phase 4A.5.4; was $150)', () => {
     const i = input({ today: TODAY, accounts: [chk(50000), visa(40000)], transactions: [tx({ accountId: 'visa', date: '2026-12-10', amountCents: 5000, kind: 'refund', merchant: 'Refund' })] });
-    expect(sts(i)).toBe(15000);
+    // audit 4A.5.3 D3: the refund lowers the debt only from Dec 10 (to 350): today 500 − 400 = 100
+    expect(sts(i)).toBe(10000);
   });
   it('a card in credit creates no spendable money: owes $100, pays $300 → $200', () => {
     expect(sts(base([move('p', 'chk', 'visa', '2026-11-20', 30000)], [chk(50000), visa(10000)]))).toBe(20000);

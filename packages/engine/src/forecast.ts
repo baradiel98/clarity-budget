@@ -150,7 +150,16 @@ export interface ForecastDay {
    * the planned cash-advance part of that, and payments/refunds credited to it after the low point that day and
    * over the whole day. Used to decide which card debt a later payment covers (Policy B).
    */
-  cards: Record<ID, { owedAtLowCents: Cents; advanceAtLowCents: Cents; creditsAfterLowCents: Cents; creditsCents: Cents }>;
+  cards: Record<ID, {
+    /** Owed at the low point, plus pending card credits (a pending refund is not counted until it posts; Phase 4A.5.4). */
+    owedAtLowCents: Cents;
+    advanceAtLowCents: Cents;
+    /** Payments (money moved into the card from another account) after the low point that day / over the whole day. */
+    paymentsAfterLowCents: Cents;
+    paymentsCents: Cents;
+    /** Refunds, cashback and other credits that arrive that day: they lower the debt from that day, never earlier. */
+    otherCreditsCents: Cents;
+  }>;
   events: ForecastEvent[];
 }
 
@@ -176,6 +185,8 @@ export interface Forecast {
   cashAdvances: CashAdvance[];
   /** Transfers between accounts in different currencies: only the money leaving is counted (Phase 4A.4.2). */
   currencyConflicts: CurrencyConflict[];
+  /** Pending refunds/credits on base-currency cards, not counted against card debt until they post (Phase 4A.5.4). */
+  pendingCardCredits: Record<ID, Cents>;
 }
 
 function legsForOccurrence(o: Occurrence, amount: Cents): Leg[] {
@@ -326,6 +337,16 @@ export function buildForecast(input: ForecastInput): Forecast {
   /** Per card: planned cash-advance money still owed (never more than the card's projected balance owed). */
   const advanceOwed = new Map<ID, Cents>();
   const baseCards = new Set(accounts.filter((a) => a.type === 'credit_card' && a.currency === baseCurrency).map((a) => a.id));
+  // Pending refunds and other pending credits already in a card's recorded balance (Phase 4A.5.4): the recorded
+  // balance is unchanged, but for card debt they are not counted until they post. Pending transfers (payments
+  // already made from an account) are not credits of this kind and stay counted.
+  const pendingCredits = new Map<ID, Cents>();
+  for (const t of transactions) {
+    if (!baseCards.has(t.accountId) || t.status !== 'pending' || t.amountCents <= 0 || t.date > today || t.transferGroupId || t.kind === 'transfer') continue;
+    const acct = accountById.get(t.accountId);
+    if (acct && t.date < acct.openingDate) continue;
+    pendingCredits.set(t.accountId, (pendingCredits.get(t.accountId) ?? 0) + t.amountCents);
+  }
   const total = diffDays(horizonEnd, today);
   for (let i = 0; i <= total; i++) {
     const date = addDays(today, i);
@@ -352,14 +373,17 @@ export function buildForecast(input: ForecastInput): Forecast {
     //  3. afternoon: income and card cash advances arrive.
     //  4. evening: transfers out of non-spendable accounts, capped at what the account holds by then.
     // The combined low point is unchanged: the day's money going out, before any money coming in.
-    // Credits (payments, refunds) to base-currency cards, split at the day's low point (Phase 4A.5.2).
+    // Money into base-currency cards (Phase 4A.5.2/4A.5.4). Only PAYMENTS (transfer legs from another account)
+    // can cover existing card debt ahead of their date; refunds, cashback and other credits only lower the debt on
+    // the day they arrive. Payments are split at the day's low point.
     let afterLow = false;
-    const creditsBefore = new Map<ID, Cents>();
-    const creditsAfter = new Map<ID, Cents>();
-    const apply = (id: ID, d: Cents) => {
+    const paymentsBefore = new Map<ID, Cents>();
+    const paymentsAfter = new Map<ID, Cents>();
+    const otherCredits = new Map<ID, Cents>();
+    const apply = (id: ID, d: Cents, isPayment = false) => {
       balances.set(id, (balances.get(id) ?? 0) + d);
       if (d > 0 && baseCards.has(id)) {
-        const m = afterLow ? creditsAfter : creditsBefore;
+        const m = !isPayment ? otherCredits : afterLow ? paymentsAfter : paymentsBefore;
         m.set(id, (m.get(id) ?? 0) + d);
       }
     };
@@ -411,7 +435,7 @@ export function buildForecast(input: ForecastInput): Forecast {
       const srcType = typeOf(t.src.accountId);
       if (cashIds.has(t.src.accountId) || (srcType === 'credit_card' && typeOf(t.dst.accountId) === 'credit_card')) {
         apply(t.src.accountId, t.src.deltaCents);
-        apply(t.dst.accountId, t.dst.deltaCents);
+        apply(t.dst.accountId, t.dst.deltaCents, true);
         noteOut(t.src.accountId, e.label);
       } else if (srcType === 'credit_card') {
         advances.push({ e, src: t.src.accountId, dst: t.dst.accountId, cents: t.dst.deltaCents });
@@ -444,7 +468,7 @@ export function buildForecast(input: ForecastInput): Forecast {
     const owedAtLow = owedTotal();
     const cardsAtLow: ForecastDay['cards'] = {};
     for (const id of baseCards) {
-      cardsAtLow[id] = { owedAtLowCents: Math.max(0, -(balances.get(id) ?? 0)), advanceAtLowCents: advanceOwed.get(id) ?? 0, creditsAfterLowCents: 0, creditsCents: 0 };
+      cardsAtLow[id] = { owedAtLowCents: Math.max(0, -((balances.get(id) ?? 0) - (pendingCredits.get(id) ?? 0))), advanceAtLowCents: advanceOwed.get(id) ?? 0, paymentsAfterLowCents: 0, paymentsCents: 0, otherCreditsCents: 0 };
     }
     afterLow = true;
     // 2. account check (spendable accounts; non-spendable ones never go below zero here)
@@ -456,7 +480,7 @@ export function buildForecast(input: ForecastInput): Forecast {
     for (const e of new Set(incoming)) for (const l of e.legs) if (l.deltaCents > 0) apply(l.accountId, l.deltaCents);
     for (const a of advances) {
       apply(a.src, -a.cents);
-      apply(a.dst, a.cents);
+      apply(a.dst, a.cents, true);
       // Borrowed against the spendable accounts only when the card is in the base currency (Phase 4A.4.4):
       // a card in another currency can't be subtracted from a base-currency total.
       if (typeOf(a.dst) !== 'credit_card' && accountById.get(a.src)?.currency === baseCurrency) {
@@ -489,7 +513,7 @@ export function buildForecast(input: ForecastInput): Forecast {
             const sh = shares[k]!;
             if (sh <= 0) return;
             apply(m.src, -sh);
-            apply(m.dst, sh);
+            apply(m.dst, sh, true);
             m.funded += sh;
             progress = true;
           });
@@ -502,7 +526,7 @@ export function buildForecast(input: ForecastInput): Forecast {
       const short = m.requested - m.funded;
       if (m.cls === 0) {
         // A card payment is an obligation: the part savings can't pay has to come from the spendable accounts.
-        apply(m.dst, short);
+        apply(m.dst, short, true);
         m.e.legs = [{ accountId: m.src, deltaCents: -m.funded }, { accountId: m.dst, deltaCents: m.requested }];
         m.e.coverCents = short;
         covered.push({ eventId: m.e.id, label: m.e.label, date, accountId: m.src, requestedCents: m.requested, fundedCents: m.funded, coveredCents: short, accountBalanceCents: sourceBalance.get(m.src) ?? 0 });
@@ -531,8 +555,9 @@ export function buildForecast(input: ForecastInput): Forecast {
     events.sort((a, b) => a.cashDeltaCents - b.cashDeltaCents);
     for (const id of baseCards) {
       const c = cardsAtLow[id]!;
-      c.creditsAfterLowCents = creditsAfter.get(id) ?? 0;
-      c.creditsCents = (creditsBefore.get(id) ?? 0) + c.creditsAfterLowCents;
+      c.paymentsAfterLowCents = paymentsAfter.get(id) ?? 0;
+      c.paymentsCents = (paymentsBefore.get(id) ?? 0) + c.paymentsAfterLowCents;
+      c.otherCreditsCents = otherCredits.get(id) ?? 0;
     }
     days.push({ date, startCashCents: start, lowCashCents: low, endCashCents: cash, advanceOwedAtLowCents: owedAtLow, advanceOwedEndCents: owedTotal(), cards: cardsAtLow, events });
   }
@@ -551,6 +576,7 @@ export function buildForecast(input: ForecastInput): Forecast {
     coveredPayments: covered,
     cashAdvances: advanceList,
     currencyConflicts: conflicts,
+    pendingCardCredits: Object.fromEntries(pendingCredits),
   };
 }
 
@@ -571,6 +597,7 @@ export interface LowPoint {
   /** Phase 4A.5.2: card debt at a daily low point (owed now / covered by a scheduled payment). */
   cardReserves?: {
     accountId: ID; owedCents: Cents; uncoveredCents: Cents; advanceCents: Cents; advanceTotalCents: Cents; coveredCents: Cents; paymentDate: ISODate | null;
+    pendingCreditCents: Cents; nextCredit: { date: ISODate; cents: Cents } | null;
   }[];
 }
 

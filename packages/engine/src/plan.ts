@@ -213,8 +213,12 @@ export interface CardReserve {
   advanceTotalCents: Cents;
   /** Covered by a later scheduled payment (or refund); counted on that payment's date. */
   coveredCents: Cents;
-  /** Date of the next payment/refund the user scheduled for this card, if any (planned, not a statement due date). */
+  /** Date of the next payment the user scheduled for this card, if any (planned, not a statement due date). */
   paymentDate: ISODate | null;
+  /** Pending refunds/credits not counted until they post (Phase 4A.5.4). */
+  pendingCreditCents: Cents;
+  /** The next refund/cashback/credit expected after the low point within the forecast: not counted until it arrives. */
+  nextCredit: { date: ISODate; cents: Cents } | null;
 }
 
 /** "Why this number?" lines for card debt at the low point (Phase 4A.5.2): card, amount, owed now or covered, date. */
@@ -227,11 +231,23 @@ function cardLines(low: LowPoint, input: EngineInput, horizonEnd: ISODate, nextA
     const advance = Math.min(r.advanceTotalCents, r.uncoveredCents) + r.advanceCents;
     const ownDebt = r.uncoveredCents - Math.min(r.advanceTotalCents, r.uncoveredCents);
     if (advance > 0) lines.push({ kind: 'out', label: 'Cash advance still owed', cents: -advance, note: `borrowed from ${name(r.accountId)}; not counted as your money until it's paid back` });
+    const plannedPayment = (date: ISODate | null) =>
+      !date ? 'a payment you planned'
+        : date > horizonEnd ? `your planned payment on ${formatShortDate(date)}, which is after the forecast ends, so that part is set aside on ${formatShortDate(horizonEnd)}`
+          : `your planned payment on ${formatShortDate(date)}`;
     if (ownDebt > 0) {
-      lines.push({ kind: 'out', label: `${name(r.accountId)}: owed now`, cents: -ownDebt, note: r.coveredCents > 0 ? `not covered by a payment you've scheduled; the other ${formatCents(r.coveredCents, cur)} is covered by your planned payment on ${r.paymentDate ? formatShortDate(r.paymentDate) : '—'}` : 'no payment is scheduled for it, so it is counted as owed now' });
+      lines.push({ kind: 'out', label: `${name(r.accountId)}: owed now`, cents: -ownDebt, note: r.coveredCents > 0 ? `not covered by a payment you've scheduled; the other ${formatCents(r.coveredCents, cur)} is covered by ${plannedPayment(r.paymentDate)}` : 'no payment is scheduled for it, so it is counted as owed now' });
     }
     if (r.coveredCents > 0 && r.uncoveredCents === 0) {
-      lines.push({ kind: 'info', label: `${name(r.accountId)}: ${formatCents(r.coveredCents, cur)} owed`, note: `covered by the payment you planned for ${r.paymentDate ? formatShortDate(r.paymentDate) : '—'} (a date you entered, not a statement due date); counted on that day` });
+      lines.push({ kind: 'info', label: `${name(r.accountId)}: ${formatCents(r.coveredCents, cur)} owed`, note: r.paymentDate && r.paymentDate > horizonEnd
+        ? `covered by the payment you planned for ${formatShortDate(r.paymentDate)} (a date you entered, not a statement due date); that is after the forecast ends, so it is set aside on ${formatShortDate(horizonEnd)}`
+        : `covered by the payment you planned for ${r.paymentDate ? formatShortDate(r.paymentDate) : '—'} (a date you entered, not a statement due date); counted on that day` });
+    }
+    if (r.pendingCreditCents > 0) {
+      lines.push({ kind: 'info', label: `${name(r.accountId)}: ${formatCents(r.pendingCreditCents, cur)} pending refund or credit`, note: "not counted until it posts; it is included in what's owed above" });
+    }
+    if (r.nextCredit) {
+      lines.push({ kind: 'info', label: `${name(r.accountId)}: ${formatCents(r.nextCredit.cents, cur)} refund or credit expected ${formatShortDate(r.nextCredit.date)}`, note: "not a payment; it lowers what's owed only from the day it arrives" });
     }
   }
   for (const x of low.cardsOwed ?? []) {
@@ -245,7 +261,7 @@ function cardLines(low: LowPoint, input: EngineInput, horizonEnd: ISODate, nextA
 function projectedCardDebt(input: EngineInput, f: Forecast): { accountId: ID; cents: Cents }[] {
   return input.accounts
     .filter((a) => a.type === 'credit_card' && a.currency === input.baseCurrency)
-    .map((a) => ({ accountId: a.id, cents: Math.max(0, -(f.endBalances[a.id] ?? 0)) }))
+    .map((a) => ({ accountId: a.id, cents: Math.max(0, -((f.endBalances[a.id] ?? 0) - (f.pendingCardCredits[a.id] ?? 0))) }))
     .filter((x) => x.cents > 0);
 }
 
@@ -277,8 +293,10 @@ export function computeSafeToSpend(input: EngineInput, hypotheticals?: readonly 
   const f = forecastTo(input, h.end, false, hypotheticals);
   if (!f.days.length) throw new Error('Forecast produced no days');
   // Phase 4A.5.2 (Policy B): card debt that no later payment or refund covers is owed now. Payments pay the oldest
-  // debt first, so on each day the debt a card already owes is covered by the credits still to come (later that day
+  // debt first, so on each day the debt a card already owes is covered by the PAYMENTS still to come (later that day
   // after the low point, later in the forecast, or within the lookahead after it); the rest is reserved that day.
+  // Phase 4A.5.4: refunds, cashback and other credits are not payments: they lower the debt only on the day they
+  // arrive (already in the day's balance), and pending ones are added back until they post.
   // A planned cash advance stays borrowed until repaid (Phase 4A.4): reserve max(uncovered, advance) per card.
   const ext = forecastTo(input, addDays(h.end, INCOME_LOOKAHEAD_DAYS), false, hypotheticals);
   const cardIds = input.accounts.filter((a) => a.type === 'credit_card' && a.currency === input.baseCurrency).map((a) => a.id);
@@ -288,23 +306,30 @@ export function computeSafeToSpend(input: EngineInput, hypotheticals?: readonly 
     let acc = 0;
     for (let i = ext.days.length - 1; i >= 0; i--) {
       after[i] = acc;
-      acc += ext.days[i]!.cards[id]?.creditsCents ?? 0;
+      acc += ext.days[i]!.cards[id]?.paymentsCents ?? 0;
     }
     creditsFrom.set(id, after);
   }
   const nextCreditDate = (id: ID, i: number): ISODate | null => {
-    if ((ext.days[i]?.cards[id]?.creditsAfterLowCents ?? 0) > 0) return ext.days[i]!.date;
-    for (let j = i + 1; j < ext.days.length; j++) if ((ext.days[j]!.cards[id]?.creditsCents ?? 0) > 0) return ext.days[j]!.date;
+    if ((ext.days[i]?.cards[id]?.paymentsAfterLowCents ?? 0) > 0) return ext.days[i]!.date;
+    for (let j = i + 1; j < ext.days.length; j++) if ((ext.days[j]!.cards[id]?.paymentsCents ?? 0) > 0) return ext.days[j]!.date;
     return null;
   };
   const reserveOn = (i: number): CardReserve[] =>
     cardIds.flatMap((id) => {
       const c = f.days[i]!.cards[id];
       if (!c || (c.owedAtLowCents === 0 && c.advanceAtLowCents === 0)) return [];
-      const covering = c.creditsAfterLowCents + (creditsFrom.get(id)![i] ?? 0);
+      const covering = c.paymentsAfterLowCents + (creditsFrom.get(id)![i] ?? 0);
       const uncovered = Math.max(0, c.owedAtLowCents - covering);
       const advanceOnly = Math.max(0, c.advanceAtLowCents - uncovered);
-      return [{ accountId: id, owedCents: c.owedAtLowCents, uncoveredCents: uncovered, advanceCents: advanceOnly, advanceTotalCents: c.advanceAtLowCents, coveredCents: c.owedAtLowCents - uncovered, paymentDate: nextCreditDate(id, i) }];
+      const nextCredit = (() => {
+        for (let j = i; j < f.days.length; j++) {
+          const cr = f.days[j]!.cards[id]?.otherCreditsCents ?? 0;
+          if (cr > 0) return { date: f.days[j]!.date, cents: cr };
+        }
+        return null;
+      })();
+      return [{ accountId: id, owedCents: c.owedAtLowCents, uncoveredCents: uncovered, advanceCents: advanceOnly, advanceTotalCents: c.advanceAtLowCents, coveredCents: c.owedAtLowCents - uncovered, paymentDate: nextCreditDate(id, i), pendingCreditCents: f.pendingCardCredits[id] ?? 0, nextCredit }];
     });
   let best = 0;
   const own = (i: number) => f.days[i]!.lowCashCents - reserveOn(i).reduce((s, r) => s + r.uncoveredCents + r.advanceCents, 0);
@@ -327,7 +352,7 @@ export function computeSafeToSpend(input: EngineInput, hypotheticals?: readonly 
   const cardsOwed = projectedCardDebt(input, f);
   const endIdx = f.days.length - 1;
   const nextAfterEnd = (id: ID): ISODate | null => {
-    for (let j = endIdx + 1; j < ext.days.length; j++) if ((ext.days[j]!.cards[id]?.creditsCents ?? 0) > 0) return ext.days[j]!.date;
+    for (let j = endIdx + 1; j < ext.days.length; j++) if ((ext.days[j]!.cards[id]?.paymentsCents ?? 0) > 0) return ext.days[j]!.date;
     return null;
   };
   const lastDay = f.days[f.days.length - 1]!;
@@ -400,7 +425,7 @@ export function computeSafeToSpend(input: EngineInput, hypotheticals?: readonly 
       assumptions: [
         ...ASSUMPTIONS_BASE,
         'Only income with a fixed amount is counted. Estimated or unknown income is listed but not counted.',
-        "Credit card debt that no payment you've scheduled covers is counted as owed now. Debt a scheduled payment covers is counted on that payment's date (a date you entered, not a statement due date).",
+        "Credit card debt that no payment you've scheduled covers is counted as owed now. Debt a scheduled payment covers is counted on that payment's date (a date you entered, not a statement due date); a payment more than 62 days after the forecast ends doesn't count. Refunds and other card credits are not payments: they lower what's owed only from the day they arrive, and pending ones only once they post.",
         'Combines your spendable accounts. It assumes you can move money between them; a bill paid from an account that would run short is flagged.',
         'A transfer from savings counts only up to what that account is projected to hold. A bill paid from savings that savings can\'t cover is counted against your spendable accounts.',
         ...(f.cashAdvances.some((a) => a.date <= h.end)
@@ -747,7 +772,12 @@ export function buildDashboard(input: EngineInput): Dashboard {
         id: `card-unscheduled:${line.accountId}`,
         severity: 'warning',
         title: `${formatCents(-line.balanceCents, cur)} on ${line.name} with no payment scheduled`,
-        detail: `No payment is scheduled, so Safe to Spend counts the ${formatCents(-line.balanceCents, cur)} as owed now.${line.archived ? ` ${line.name} is archived; archiving doesn't clear what it owes.` : ''}`,
+        detail: (() => {
+          const r = sts.cardDebtToday.find((x) => x.accountId === line.accountId);
+          const reserved = r ? r.uncoveredCents + r.advanceCents : -line.balanceCents;
+          const pending = r?.pendingCreditCents ?? 0;
+          return `No payment is scheduled, so Safe to Spend counts the ${formatCents(reserved, cur)} as owed now.${pending > 0 ? ` That includes ${formatCents(pending, cur)} of pending refunds, which aren't counted until they post.` : ''}${line.archived ? ` ${line.name} is archived; archiving doesn't clear what it owes.` : ''}`;
+        })(),
         accountId: line.accountId,
       });
     }

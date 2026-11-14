@@ -317,3 +317,16 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Presentation fixed]** "Why this number?" always names the card debt at the low point, and planned dates are marked as user-entered.
 - **[Changed tests, by decision]** Five unit tests, one e2e assertion and one mobile assertion that encoded the Phase 4A.5 timing were updated with hand-derived values. Sample data is still $2,427.17.
 - **[Limitation]** Statement due dates, interest, fees and card limits are not modelled. A user-entered payment date is trusted as the expected date.
+
+## Phase 4A.5.4 (2026-11-14): card credits are not payments (audit 4A.5.3)
+- **[Verified defect, fixed]** Every positive amount reaching a card counted as "covering" its debt, so future refunds, fixed cashback and refunds after the horizon raised today's Safe to Spend. Examples:
+  - $200 refund Dec 10: $300 → $100;
+  - $600 refund: $500 → $100;
+  - refund Jan 20: $500 → $100.
+- **[Fix]** `apply(..., isPayment)` in forecast.ts. Only transfer legs into a card (payments) count as coverage (`paymentsCents`). Refunds and credits lower the balance on their day (`otherCreditsCents`).
+- **[Fix]** Pending non-transfer credits on base cards (`Forecast.pendingCardCredits`) are added back to card debt until they post. The recorded balance is unchanged.
+- **[Fix]** The warning amount equals what is reserved. Refunds are never called payments. "Why this number?" names pending credits and the next expected credit. A payment after the horizon says "set aside on Dec 31".
+- **[Changed tests]** Two tests that encoded the defect are now $100 and $300.
+  - The owner's table value "$400 debt, $200 posted refund, later $200 payment → $100" is $300 by arithmetic. $100 would count the refunded $200 twice; tested at $300 and reported.
+- **[Verified]** 500 random scenarios now equal an independent reference model (250 with refunds).
+- **[Kept]** The 62-day lookahead is unchanged and documented.

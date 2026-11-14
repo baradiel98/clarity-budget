@@ -61,10 +61,11 @@ describe('Card debt is set aside even when no payment is scheduled', () => {
     expect(warns(later).some((w) => w.id.startsWith('card-projected'))).toBe(false); // a payment after Dec 31 is scheduled
   });
 
-  it('purchases and a refund on their dates: $200 purchase Dec 5, $50 refund Dec 10 → 500 − 150 = $350', () => {
+  it('purchases and a refund on their dates: $200 purchase Dec 5, $50 refund Dec 10 → $300 (Phase 4A.5.4; was $350)', () => {
     const i = input({ today: TODAY, accounts: [chk(50000), card(0)], recurring: [once('buy', 'bill', '2026-12-05', 20000, { accountId: 'card', name: 'Jacket' })],
       transactions: [tx({ accountId: 'card', date: '2026-12-10', amountCents: 5000, kind: 'refund', merchant: 'Jacket refund' })] });
-    expect(sts(i)).toBe(35000);
+    // audit 4A.5.3 D3: the $50 refund lowers the debt only from Dec 10: Dec 5 low 500 − 200 = 300 (was $350)
+    expect(sts(i)).toBe(30000);
     expect(ends(i).card).toBe(-15000);
   });
 
