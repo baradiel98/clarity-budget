@@ -38,8 +38,8 @@ test('"Same transaction": the pending refund is posted once, nothing is added, a
   await pendingRefund(page);
   await importRow(page);
   await expect(page.getByLabel('Import row 2')).toBeDisabled(); // no silent include: a decision is required
-  const choice = page.getByTestId('pending-choice-2');
-  await choice.getByLabel('Same transaction: mark “Store return” posted (nothing new is added)').check();
+  const choice = page.getByTestId('match-choice-2'); // Phase 4A.5.12 wording
+  await choice.getByLabel(/^It's this one: Nov 13 · Store return · \+\$300\.00 · Everyday Checking · pending$/).check();
   await expect(page.getByTestId('reconciliation')).toContainText('Matches');
   await page.getByTestId('commit-import').click();
   await expect(page.getByTestId('import-done')).toBeVisible();
@@ -56,7 +56,7 @@ test('"Different transaction": both are kept; the pending one stays pending (not
   await sample(page);
   await pendingRefund(page);
   await importRow(page);
-  await page.getByTestId('pending-choice-2').getByLabel('Different transaction: import it as well').check();
+  await page.getByTestId('match-choice-2').getByLabel('Different transaction: not this one. Import it as new').check();
   await expect(page.getByTestId('reconciliation')).toContainText('Matches');
   await page.getByTestId('commit-import').click();
   await expect(page.getByTestId('import-done')).toBeVisible();

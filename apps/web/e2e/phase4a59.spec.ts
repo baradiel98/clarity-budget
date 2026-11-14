@@ -73,12 +73,17 @@ test('import: a statement row that is a pending deposit clearing is left out and
   await page.getByTestId('import-file').setInputFiles({ name: 'nov.csv', mimeType: 'text/csv', buffer: Buffer.from('Date,Description,Amount,Balance\n2026-11-13,AMAZON REFUND 8812,300.00,3171.23\n') });
   await page.getByTestId('to-review').click();
   await expect(page.getByTestId('import-count')).toHaveText('0 selected');
-  await expect(page.getByTestId('review-table')).toContainText('Same amount as “Store return”, still pending in Clarity (Nov 13). Is this row that transaction clearing?');
+  // Phase 4A.5.12: the row lists the transactions it could be; the balance check points to the row (one place to decide)
+  await expect(page.getByTestId('review-table')).toContainText("Could be a transaction already in Clarity. Choose which one it is, or that it's a different transaction.");
   const rc = page.getByTestId('reconciliation');
   await expect(rc).toContainText("Clarity's posted balance after this import");
   await expect(rc.getByTestId('import-pending-match')).toContainText('Store return');
-  await rc.getByRole('button', { name: 'Mark Store return posted' }).click();
+  await expect(rc.getByTestId('import-pending-match')).toContainText('resolve it in row 2 above');
+  await expect(rc.getByRole('button', { name: 'Mark Store return posted' })).toHaveCount(0);
+  await page.getByTestId('match-choice-2').getByLabel(/^It's this one: Nov 13 · Store return · \+\$300\.00 · Everyday Checking · pending$/).check();
   await expect(rc).toContainText('Matches');
+  await page.getByTestId('commit-import').click();
+  await expect(page.getByTestId('import-done')).toBeVisible();
   await go(page, '/');
   await expect(page.getByTestId('safe-to-spend')).toHaveText('$2,727.17'); // +300 once
 });

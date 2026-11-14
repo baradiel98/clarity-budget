@@ -53,10 +53,10 @@ export interface Provenance {
   /** Original statement description (import) or the user's own words (capture), preserved exactly. */
   rawDescription?: string;
   /**
-   * Phase 4A.5.10: an imported row the user confirmed is a DIFFERENT transaction from this pending one
-   * (it had the same amount and a nearby date). Kept for the record; both are counted.
+   * Phase 4A.5.10/12: an imported row the user confirmed is a DIFFERENT transaction from every existing transaction it
+   * could have been (the candidates they reviewed). Kept for the record; all are counted.
    */
-  separateFrom?: ID;
+  separateFrom?: ID[];
 }
 
 /**

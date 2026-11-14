@@ -1,10 +1,10 @@
 import { AlertTriangle, CheckCircle2, CopyCheck, FileUp, Link2, ListChecks, ShieldCheck, Upload } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { commitImport, markTransactionPosted, undoImportBatch as undoImport, type ImportDecision } from '@clarity/data';
+import { commitImport, describeImportUndo, markTransactionPosted, undoImportBatch as undoImport, type ImportDecision } from '@clarity/data';
 import {
-  checkImportFile, dataRowCount, DATE_FORMATS, headerSignature, NO_DATA_ROWS_MESSAGE, reconcilePreview, type ImportCandidate, type ImportPreview, type ImportSettings,
+  candidateLabel, checkImportFile, dataRowCount, DATE_FORMATS, findMatchCandidates, headerSignature, NO_DATA_ROWS_MESSAGE, reconcilePreview, type ImportCandidate, type ImportPreview, type ImportSettings,
 } from '@clarity/import';
-import { formatShortDate, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, PENDING_TWIN_SAME, PENDING_TWIN_SEPARATE, PENDING_TWIN_SKIP, TERMS, type ColumnMapping, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
+import { formatCents, formatShortDate, IMPORT_BUTTON, MATCH_AMOUNT_NOTE, MATCH_CHOICE_TITLE, MATCH_NONE_LABEL, MATCH_PENDING_NOTE, MATCH_POSTED_NOTE, MATCH_SKIP_LABEL, MATCH_TAKEN, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, TERMS, type ColumnMapping, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
 import { useRouter } from '../lib/router';
 import { sha256Hex } from '../platform/files';
 import { useData, useRun, useSession } from '../state/session';
@@ -22,8 +22,8 @@ interface Row extends ImportCandidate {
   editCategory: string | null;
   otherAccountId: string;
   linkOccurrence: boolean;
-  /** Phase 4A.5.10: for a row that may be a pending transaction clearing: the user's explicit decision. */
-  pendingChoice: 'same' | 'separate' | null;
+  /** Phase 4A.5.12: for a row that could be an existing transaction: the id the user picked, 'none', or undecided. */
+  matchChoice: string | null;
 }
 
 export function ImportPage() {
@@ -114,7 +114,7 @@ export function ImportPage() {
         importBatches: data.importBatches, fileHash: file.hash, today,
       });
       setPreview(p);
-      setRows(p.candidates.map((c) => ({ ...c, editKind: c.looksLikeTransfer ? 'transfer' : c.kind, editCategory: c.categoryId, otherAccountId: '', linkOccurrence: !!c.occurrenceMatch, pendingChoice: null })));
+      setRows(p.candidates.map((c) => ({ ...c, editKind: c.looksLikeTransfer ? 'transfer' : c.kind, editCategory: c.categoryId, otherAccountId: '', linkOccurrence: !!c.occurrenceMatch, matchChoice: null })));
       setStage('review');
     } catch (e) {
       setError((e as Error).message);
@@ -125,11 +125,18 @@ export function ImportPage() {
 
   const included = rows.filter((r) => r.include);
   // Phase 4A.5.10: rows confirmed as the same transaction aren't added; their pending transaction counts as posted
-  const sameIds = included.filter((r) => r.duplicate?.pending && r.pendingChoice === 'same').map((r) => r.duplicate!.txId);
-  const recon = useMemo(() => (preview && account ? reconcilePreview(preview, included.filter((r) => !(r.duplicate?.pending && r.pendingChoice === 'same')), { account, transactions: data.transactions, postedByMatch: sameIds }) : null), [preview, included, account, data.transactions, sameIds.join()]);
-  const blocking = included.filter((r) => r.editKind === 'transfer' && !r.otherAccountId);
+  // Phase 4A.5.12: candidates are recomputed from the CURRENT data on every render (a status change elsewhere shows at
+  // once); those listed when the review was built stay, so nothing disappears silently.
+  const liveOf = (r: Row) => (account ? findMatchCandidates(r, account, data.transactions, { alsoIds: r.matchCandidates.map((m) => m.txId) }) : []);
+  const linked = (r: Row) => r.matchChoice !== null && r.matchChoice !== 'none';
+  const sameIds = included.filter(linked).map((r) => r.matchChoice!);
+  const recon = useMemo(() => (preview && account ? reconcilePreview(preview, included.filter((r) => !linked(r)), { account, transactions: data.transactions, postedByMatch: sameIds }) : null), [preview, included, account, data.transactions, sameIds.join()]);
+  // a row linked to an existing transaction (e.g. an existing transfer) creates nothing, so it needs no other account
+  const blocking = included.filter((r) => r.editKind === 'transfer' && !r.otherAccountId && !linked(r));
   // Phase 4A.5.9: pending items that could explain the statement difference (cleared at the bank, still pending here)
   const reconPending = recon && !recon.note && recon.differenceCents !== 0 ? [...new Map([...(recon.pendingMatches ?? []).flat(), ...(recon.pendingPartial ?? [])].map((t) => [t.id, t])).values()] : [];
+  // a pending item that is a candidate of a row is resolved in that row only (one place to decide)
+  const rowFor = (txId: string) => rows.find((r) => liveOf(r).some((m) => m.txId === txId));
   const [reconUnrelated, setReconUnrelated] = useState(false);
 
   const commit = async () => {
@@ -140,7 +147,7 @@ export function ImportPage() {
       const res = commitImport(ctx, {
         accountId: account.id, fileName: file.name, fileHash: file.hash, parserId: 'csv', headerSignature: headerSignature(analysis.guess.headers), delimiter: analysis.delimiter,
         settings: { hasHeader, columns, dateFormat, decimalSeparator: decimal, signConvention: sign },
-        decisions: included.map((x) => ({ candidate: x, kind: x.editKind, categoryId: x.editKind === 'transfer' ? null : x.editCategory, merchant: x.merchant, ...(x.otherAccountId ? { otherAccountId: x.otherAccountId } : {}), linkOccurrence: x.linkOccurrence, ...(x.duplicate?.pending && x.pendingChoice ? { pendingResolution: { txId: x.duplicate.txId, same: x.pendingChoice === 'same' } } : {}) })),
+        decisions: included.map((x) => ({ candidate: x, kind: x.editKind, categoryId: x.editKind === 'transfer' ? null : x.editCategory, merchant: x.merchant, ...(x.otherAccountId ? { otherAccountId: x.otherAccountId } : {}), linkOccurrence: x.linkOccurrence, ...(x.matchChoice === 'none' ? { match: { none: true as const, seen: liveOf(x).map((m) => m.txId) } } : x.matchChoice ? { match: { txId: x.matchChoice } } : {}) })),
         totalRows: rows.length + preview.errors.length, excludedCount: rows.length - included.length, duplicateCount: rows.filter((x) => x.duplicate).length, errorCount: preview.errors.length,
         reconciliation: recon, applyAdjustment: applyAdj && (reconPending.length === 0 || reconUnrelated), adjustmentUnrelatedToPending: reconUnrelated,
       });
@@ -297,7 +304,7 @@ export function ImportPage() {
               {rows.some((r) => r.confidence !== 'high') && <span className="badge warn">{rows.filter((r) => r.confidence !== 'high').length} to check</span>}
               {preview.errors.length > 0 && <span className="badge neg">{preview.errors.length} could not be read</span>}
               <span className="spacer" />
-              <button className="btn btn-ghost btn-sm" onClick={() => setRows(rows.map((r) => ({ ...r, include: !(r.editKind === 'transfer' && !r.otherAccountId) && !(r.duplicate?.pending && !r.pendingChoice) })))}>Select all</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setRows(rows.map((r) => ({ ...r, include: !(r.editKind === 'transfer' && !r.otherAccountId && !r.matchChoice) && !(liveOf(r).length && !r.matchChoice) })))}>Select all</button>
               <button className="btn btn-ghost btn-sm" onClick={() => setRows(rows.map((r) => ({ ...r, include: false })))}>Select none</button>
             </div>
           </div>
@@ -311,7 +318,7 @@ export function ImportPage() {
                 <tbody>
                   {rows.map((r, i) => (
                     <tr key={r.rowNumber} className={r.include ? '' : 'excluded'}>
-                      <td className="w-check"><input type="checkbox" aria-label={`Import row ${r.rowNumber}`} checked={r.include} disabled={!!r.duplicate?.pending} title={r.duplicate?.pending ? 'Choose below whether this is the pending transaction or a different one' : undefined} onChange={(e) => setRow(i, { include: e.target.checked })} /></td>
+                      <td className="w-check"><input type="checkbox" aria-label={`Import row ${r.rowNumber}`} checked={r.include} disabled={liveOf(r).length > 0} title={liveOf(r).length ? 'Choose below which transaction this is, or that it is a different one' : undefined} onChange={(e) => setRow(i, { include: e.target.checked })} /></td>
                       <td className="num" style={{ whiteSpace: 'nowrap' }}>{formatShortDate(r.date)}</td>
                       <td>
                         <div style={{ fontWeight: 500 }}>{r.merchant || <span className="faint">No description</span>}</div>
@@ -346,16 +353,27 @@ export function ImportPage() {
                           )}
                         </div>
                         {(r.duplicate || r.reasons.length > 0) && <div className="hint" style={{ marginTop: 4 }}>{[r.duplicate?.reason, ...r.reasons].filter(Boolean).join(' ')}</div>}
-                        {r.duplicate?.pending && (
-                          <div role="radiogroup" aria-label={`Row ${r.rowNumber}: is this the pending transaction?`} className="stack" style={{ gap: 2, marginTop: 6 }} data-testid={`pending-choice-${r.rowNumber}`}>
-                            {([['same', PENDING_TWIN_SAME(data.transactions.find((t) => t.id === r.duplicate!.txId)?.merchant || 'the pending transaction')], ['separate', PENDING_TWIN_SEPARATE], [null, PENDING_TWIN_SKIP]] as const).map(([v, label]) => (
-                              <label key={String(v)} className="check" style={{ fontSize: 12.5 }}>
-                                <input type="radio" name={`pending-${r.rowNumber}`} checked={r.pendingChoice === v} onChange={() => setRow(i, { pendingChoice: v, include: v !== null })} />
-                                <span>{label}</span>
-                              </label>
-                            ))}
-                          </div>
-                        )}
+                        {liveOf(r).length > 0 && (() => {
+                          const live = liveOf(r);
+                          const chosen = live.find((m) => m.txId === r.matchChoice);
+                          return (
+                            <div role="radiogroup" aria-label={`Row ${r.rowNumber}: ${MATCH_CHOICE_TITLE}`} className="stack" style={{ gap: 2, marginTop: 6 }} data-testid={`match-choice-${r.rowNumber}`}>
+                              <strong style={{ fontSize: 12.5 }}>{MATCH_CHOICE_TITLE}</strong>
+                              {live.map((m) => {
+                                const taken = rows.find((o) => o !== r && o.include && o.matchChoice === m.txId);
+                                return (
+                                  <label key={m.txId} className="check" style={{ fontSize: 12.5 }}>
+                                    <input type="radio" name={`match-${r.rowNumber}`} checked={r.matchChoice === m.txId} disabled={!!taken} onChange={() => setRow(i, { matchChoice: m.txId, include: true })} />
+                                    <span>It's this one: {candidateLabel(m, data.accounts.find((a) => a.id === m.accountId)?.name ?? '', cur)}{taken ? ` (${MATCH_TAKEN(taken.rowNumber)})` : ''}</span>
+                                  </label>
+                                );
+                              })}
+                              <label className="check" style={{ fontSize: 12.5 }}><input type="radio" name={`match-${r.rowNumber}`} checked={r.matchChoice === 'none'} onChange={() => setRow(i, { matchChoice: 'none', include: true })} /><span>{MATCH_NONE_LABEL(live.length)}</span></label>
+                              <label className="check" style={{ fontSize: 12.5 }}><input type="radio" name={`match-${r.rowNumber}`} checked={r.matchChoice === null} onChange={() => setRow(i, { matchChoice: null, include: false })} /><span>{MATCH_SKIP_LABEL}</span></label>
+                              {chosen && <div className="hint" data-testid={`match-note-${r.rowNumber}`}>{chosen.status === 'pending' ? MATCH_PENDING_NOTE : MATCH_POSTED_NOTE}{chosen.differenceCents !== 0 ? ` ${MATCH_AMOUNT_NOTE(formatCents(chosen.amountCents, cur, { sign: 'always' }), formatCents(r.amountCents, cur, { sign: 'always' }), formatCents(chosen.differenceCents, cur, { sign: 'always' }))}` : ''}</div>}
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td className={`right num ${r.amountCents > 0 ? 'pos' : ''}`} style={{ fontWeight: 600 }}><Money cents={r.amountCents} currency={cur} sign="always" /></td>
                     </tr>
@@ -396,7 +414,7 @@ export function ImportPage() {
                             <span>{formatShortDate(t.date)}</span>
                             <span>{t.merchant || 'Pending'} · {t.kind} · pending</span>
                             <span className="num"><Money cents={t.amountCents} currency={cur} sign="always" /></span>
-                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => void run((ctx) => markTransactionPosted(ctx, t.id), { undoLabel: 'Marked posted' })} aria-label={`Mark ${t.merchant || 'pending item'} posted`}>Mark posted</button>
+                            {rowFor(t.id) ? <span className="hint">resolve it in row {rowFor(t.id)!.rowNumber} above</span> : <button type="button" className="btn btn-ghost btn-sm" onClick={() => void run((ctx) => markTransactionPosted(ctx, t.id), { undoLabel: 'Marked posted' })} aria-label={`Mark ${t.merchant || 'pending item'} posted`}>Mark posted</button>}
                           </li>
                         ))}
                       </ul>
@@ -417,7 +435,7 @@ export function ImportPage() {
           <div className="row" style={{ justifyContent: 'flex-end' }}>
             {blocking.length > 0 && <span className="t-footnote warn">Choose the other account for {blocking.length} transfer{blocking.length > 1 ? 's' : ''}.</span>}
             <button className="btn btn-primary btn-lg" disabled={busy || included.length === 0 || blocking.length > 0} onClick={() => void commit()} data-testid="commit-import" aria-busy={busy}>
-              {busy && <Spinner />}Import {included.length} transaction{included.length === 1 ? '' : 's'}
+              {busy && <Spinner />}{IMPORT_BUTTON(included.filter((r) => !linked(r)).length, included.filter(linked).length)}
             </button>
           </div>
         </div>
@@ -429,7 +447,7 @@ export function ImportPage() {
           <div className="t-title2">Imported {result.count} transaction{result.count === 1 ? '' : 's'}</div>
           <div className="t-callout">Your balances and forecast are updated. The statement file was not kept.</div>
           <div className="row" style={{ marginTop: 8 }}>
-            <button className="btn btn-secondary" onClick={async () => { const r = await run((ctx) => undoImport(ctx, result.batchId)); if (r.ok) { toast({ message: 'Import undone' }); setStage('choose'); } }}>Undo import</button>
+            <button className="btn btn-secondary" onClick={async () => { const msg = describeImportUndo(data, result.batchId); const r = await run((ctx) => undoImport(ctx, result.batchId)); if (r.ok) { toast({ message: msg }); setStage('choose'); } }}>Undo import</button>
             <button className="btn btn-primary" onClick={() => navigate('/transactions')}>View transactions</button>
           </div>
         </div>
@@ -455,7 +473,7 @@ export function ImportHistory() {
               <div className="t-callout" style={{ fontWeight: 500 }}>{b.fileName} {b.undoneAt && <span className="badge">Undone</span>}</div>
               <div className="hint">{new Date(b.importedAt).toLocaleString()} · {data.accounts.find((a) => a.id === b.accountId)?.name} · {b.counts.imported} imported, {b.counts.excluded} excluded, {b.counts.errors} unreadable</div>
             </div>
-            {!b.undoneAt && <button className="btn btn-secondary btn-sm" onClick={async () => { const r = await run((ctx) => undoImport(ctx, b.id)); toast({ message: r.ok ? `Removed transactions from ${b.fileName}` : 'Could not undo' }); }}>Undo</button>}
+            {!b.undoneAt && <button className="btn btn-secondary btn-sm" onClick={async () => { const msg = describeImportUndo(data, b.id); const r = await run((ctx) => undoImport(ctx, b.id)); toast({ message: r.ok ? msg : 'Could not undo' }); }}>Undo</button>}
           </div>
         ))}
       </div>

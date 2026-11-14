@@ -10,6 +10,7 @@ import { CARD_PAYMENT_RE, REFUND_RE, TRANSFER_RE, suggestCategory, type Category
 import { dataRows } from './mapping';
 import { parseStatementAmount, parseStatementDate } from './normalize';
 import { MAX_IMPORT_ROWS, type RawTable } from './parsers';
+import { findMatchCandidates, type MatchCandidate } from './matching';
 
 export type CandidateKind = 'expense' | 'income' | 'refund' | 'transfer';
 export type Confidence = 'high' | 'medium' | 'low';
@@ -30,8 +31,12 @@ export interface ImportCandidate {
   categorySource: CategorySource;
   confidence: Confidence;
   reasons: string[];
-  /** `pending` (Phase 4A.5.10): `txId` is a PENDING transaction this row may be clearing; needs an explicit decision. */
-  duplicate: { level: 'exact' | 'likely'; txId: ID; reason: string; pending?: boolean } | null;
+  duplicate: { level: 'exact' | 'likely'; txId: ID; reason: string } | null;
+  /**
+   * Phase 4A.5.12: existing transactions this row could be (see findMatchCandidates), best first. Non-empty means the
+   * row can't be imported until the user picks one (linked, nothing added) or confirms it's a different transaction.
+   */
+  matchCandidates: MatchCandidate[];
   repeatInFile: boolean;
   occurrenceMatch: { key: string; recurringId: ID; originalDate: ISODate; name: string } | null;
   /** Default decision for the review screen. The user can change it. */
@@ -148,7 +153,7 @@ export function buildPreview(table: RawTable, s: ImportSettings, ctx: PreviewCon
   const balanceDate = balanceAsOfDate(account, ctx.transactions);
   const flip = s.signConvention === 'invert' ? -1 : 1;
   const errors: ImportRowError[] = [];
-  const parsed: Omit<ImportCandidate, 'kind' | 'looksLikeTransfer' | 'categoryId' | 'categorySource' | 'confidence' | 'reasons' | 'duplicate' | 'repeatInFile' | 'occurrenceMatch' | 'include'>[] = [];
+  const parsed: Omit<ImportCandidate, 'kind' | 'looksLikeTransfer' | 'categoryId' | 'categorySource' | 'confidence' | 'reasons' | 'duplicate' | 'matchCandidates' | 'repeatInFile' | 'occurrenceMatch' | 'include'>[] = [];
   let skippedBlank = 0;
   const rows = dataRows(table, s.hasHeader);
   const truncated = rows.length > MAX_IMPORT_ROWS;
@@ -254,24 +259,22 @@ export function buildPreview(table: RawTable, s: ImportSettings, ctx: PreviewCon
           // Phase 4A.5.10: a statement row already matched to an existing transaction in an earlier import
           (!!t.statementMatch && ((!!p.externalId && t.statementMatch.externalId === p.externalId) || (t.statementMatch.date === p.date && t.amountCents === p.amountCents && normalizeDescription(t.statementMatch.rawDescription) === norm)))),
     );
-    // Phase 4A.5.9: a statement row is usually a pending transaction clearing (often days later, with the bank's own
-    // description). Same account and amount, dated 3 days before to 10 days after it: flagged and left out by default.
-    // Never posted automatically; the user decides.
-    const pendingTwin = exact ? undefined : acctTx.find((t) => !consumed.has(t.id) && t.status === 'pending' && t.amountCents === p.amountCents && diffDays(p.date, t.date) >= -3 && diffDays(p.date, t.date) <= 10);
+    // Phase 4A.5.12: every existing transaction this row could be (pending items of any amount in the same direction,
+    // posted transfer legs of the same amount), all listed, none chosen: the user picks one or says it's different.
+    // Not "consumed" by an earlier row, so the file's order never decides which row is paired with which item.
+    const matchCandidates = exact ? [] : findMatchCandidates(p, account, acctTx);
+    const candidateIds = new Set(matchCandidates.map((m) => m.txId));
     if (exact?.statementMatch && !(p.externalId && exact.provenance.externalId === p.externalId)) {
       consumed.add(exact.id);
       duplicate = { level: 'exact', txId: exact.id, reason: `Already matched to “${exact.merchant || 'a transaction'}” from a previous statement.` };
     } else if (exact) {
       consumed.add(exact.id);
       duplicate = { level: 'exact', txId: exact.id, reason: p.externalId && exact.provenance.externalId === p.externalId ? 'Same transaction ID was already imported.' : 'Already imported from a previous statement.' };
-    } else if (pendingTwin) {
-      consumed.add(pendingTwin.id);
-      const n = pendingTwin.merchant || 'a transaction';
-      duplicate = { level: 'likely', txId: pendingTwin.id, pending: true, reason: `Same amount as “${n}”, still pending in Clarity (${formatShortDate(pendingTwin.date)}). Is this row that transaction clearing? Choose “Same transaction” to mark “${n}” posted (nothing new is added), or “Different transaction” to import it as well.` };
     } else {
       const likely = acctTx.find(
         (t) =>
           !consumed.has(t.id) &&
+          !candidateIds.has(t.id) &&
           t.amountCents === p.amountCents &&
           Math.abs(diffDays(t.date, p.date)) <= 2 &&
           (t.kind === 'transfer' || similarity(t.merchant, p.rawDescription) >= 0.5 || similarity(t.provenance.rawDescription ?? t.merchant, p.rawDescription) >= 0.5 || (norm !== '' && normalizeDescription(t.merchant) !== '' && norm.includes(normalizeDescription(t.merchant)))),
@@ -281,6 +284,9 @@ export function buildPreview(table: RawTable, s: ImportSettings, ctx: PreviewCon
         duplicate = { level: 'likely', txId: likely.id, reason: `Possible duplicate of “${likely.merchant || 'a transaction'}” on ${likely.date}.` };
       }
     }
+    if (matchCandidates.length) {
+      reasons.push(`Could be ${matchCandidates.length === 1 ? 'a transaction' : `one of ${matchCandidates.length} transactions`} already in Clarity. Choose which one it is, or that it's a different transaction.`);
+    }
 
     const k = `${p.date}|${p.amountCents}|${norm}`;
     const repeatInFile = (fileKeyCount.get(k) ?? 0) > 1;
@@ -288,8 +294,9 @@ export function buildPreview(table: RawTable, s: ImportSettings, ctx: PreviewCon
     const occ = suggestOccurrenceMatch({ accountId: account.id, date: p.date, amountCents: p.amountCents, merchant: p.merchant }, occurrences.filter((o) => !usedOcc.has(o.key)));
     if (occ) usedOcc.add(occ.key);
 
-    const include = !duplicate && confidence !== 'low' && !looksLikeTransfer;
-    if (looksLikeTransfer && !duplicate) reasons.push('Not selected until you confirm the other account.');
+    // Phase 4A.5.12: a row with possible matches is never selected until the user decides
+    const include = !duplicate && !matchCandidates.length && confidence !== 'low' && !looksLikeTransfer;
+    if (looksLikeTransfer && !duplicate && !matchCandidates.length) reasons.push('Not selected until you confirm the other account.');
     return {
       ...p,
       kind,
@@ -299,6 +306,7 @@ export function buildPreview(table: RawTable, s: ImportSettings, ctx: PreviewCon
       confidence,
       reasons,
       duplicate,
+      matchCandidates,
       repeatInFile,
       occurrenceMatch: occ ? { key: occ.key, recurringId: occ.recurringId, originalDate: occ.originalDate, name: occ.name } : null,
       include,

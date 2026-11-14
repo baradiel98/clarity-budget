@@ -474,6 +474,21 @@ The step-by-step checklist is in `docs/device-test-script.md`.
 - **Tests:** data `import-reconciliation.test.ts` (+12: resolution flows, purchases, transfers, edit/delete/undo, re-import, multiple twins, 4+ item combinations, no cap); web `e2e/phase4a510.spec.ts` (2); wording updates in 4A.5.9 web/mobile tests.
 - **Not verified:** mobile import review rendering (component test not added; covered by shared data tests and type checks), devices, Safari.
 
+## 7r. Phase 4A.5.12: statement matching, duplicate prevention, transfer integrity
+
+| Audit case (4A.5.11) | Truth | Before | After |
+|---|---:|---:|---:|
+| F1: two pending $300 refunds; the row is B; A offered | $1,300 | $1,600 | **$1,300** (both listed, user picks B) |
+| F2: unrelated $300 row paired first (oldest-first file) | $1,600 | $1,900 | **$1,600** (both rows list the refund) |
+| F3: pending $300 deposit clears as $290 | $1,290 | $1,590 | **$1,290** (listed, −$10 difference shown and recorded) |
+| F6: pending $50 dinner clears as $60 | $940 | $890 | **$940** |
+| F4: existing transfer, savings statement 3+ days later | savings $600 | $700 | **$600** (linked to the leg) |
+| F5: other side of a matched transfer | $900 / $600 | $800 / $700 | **$900 / $600** |
+
+- **Rules:** see calculation-rules.md, "Statement matching (Phase 4A.5.12)": windows (pending −3/+10 days, transfer legs −3/+7 days, `MATCH_WINDOWS`), same direction, no amount tolerance, ordering, explicit choice, authoritative data-layer re-check.
+- **Tests:** data `statement-matching.test.ts` (24, incl. 400-run randomized comparison: 380 runs with statement rows, 380 correct, 0 incorrect; 421 ambiguous rows); `import-reconciliation.test.ts` updated to the candidate model; web `e2e/phase4a512.spec.ts` (3, with screenshots) and updated 4A.5.9/4A.5.10 specs; mobile `test/import-matching.test.tsx` (2, the real import screen with the file picker mocked).
+- **Not verified:** physical devices, simulators, Safari.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

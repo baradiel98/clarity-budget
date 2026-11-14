@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { accountBalance, computeSafeToSpend, historyStatus, balanceAsOfDate } from '@clarity/engine';
-import { buildPreview, csvParser, guessMapping, reconcilePreview, suggestSignConvention, type ImportCandidate, type ReconciliationPreview } from '@clarity/import';
+import { buildPreview, csvParser, findMatchCandidates, guessMapping, reconcilePreview, suggestSignConvention, type ImportCandidate, type ReconciliationPreview } from '@clarity/import';
 import type { WorkspaceData } from '@clarity/shared';
 import {
   addTransaction, adjustBalance, applyOps, CommandError, commitImport, createAccount, defaultSettings, deleteTransaction, emptyWorkspace, engineInput,
@@ -28,24 +28,37 @@ class W {
   rec(id: string) { return accountBalance(this.a(id), this.data.transactions, this.today); }
   sts() { return computeSafeToSpend(engineInput(this.data, this.today)).cents; }
   /** The review: rows as the import selects them by default (unless `pick` overrides), and the balance check. */
-  /** `decide`: the user's explicit decision for rows flagged as a pending transaction clearing (true = same). */
-  review(accountId: string, csv: string, pick?: (c: ImportCandidate) => boolean, decide: Record<string, boolean> = {}) {
+  /**
+   * `decide`: the user's explicit decision for rows that could be an existing transaction (Phase 4A.5.12):
+   * a transaction id = "it's this one"; true = the single same-amount candidate (the test fails if there isn't
+   * exactly one); false = "a different transaction" (every candidate shown was reviewed).
+   */
+  review(accountId: string, csv: string, pick?: (c: ImportCandidate) => boolean, decide: Record<string, boolean | string> = {}) {
     const table = csvParser.parse(csv);
     const g = guessMapping(table);
     const base = { hasHeader: g.hasHeader, columns: g.columns!, dateFormat: g.dateFormats[0]!, decimalSeparator: g.decimalSeparator };
     const settings = { ...base, signConvention: suggestSignConvention(table, base, this.a(accountId)).convention };
     const preview = buildPreview(table, settings, { account: this.a(accountId), accounts: this.data.accounts, transactions: this.data.transactions, recurring: [], exceptions: [], importBatches: this.data.importBatches, fileHash: csv, today: this.today });
-    const decided = (c: ImportCandidate) => c.duplicate?.pending && decide[c.rawDescription] !== undefined;
+    const live = (c: ImportCandidate) => findMatchCandidates(c, this.a(accountId), this.data.transactions, { alsoIds: c.matchCandidates.map((m) => m.txId) });
+    const decided = (c: ImportCandidate) => decide[c.rawDescription] !== undefined && (c.matchCandidates.length > 0 || live(c).length > 0);
+    const matchOf = (c: ImportCandidate): { txId: string } | { none: true; seen: string[] } => {
+      const v = decide[c.rawDescription]!;
+      if (typeof v === 'string') return { txId: v };
+      if (v === false) return { none: true, seen: live(c).map((m) => m.txId) };
+      const exact = live(c).filter((m) => m.differenceCents === 0);
+      if (exact.length !== 1) throw new Error(`test setup: ${c.rawDescription} has ${exact.length} same-amount candidates`);
+      return { txId: exact[0]!.txId };
+    };
     const chosen = () => preview.candidates.filter((c) => decided(c) || (pick ?? ((x: ImportCandidate) => x.include))(c));
-    // rows confirmed as the same transaction aren't added; their pending transaction counts as posted
-    const sameIds = () => preview.candidates.filter((c) => decided(c) && decide[c.rawDescription]).map((c) => c.duplicate!.txId);
-    const recon = () => reconcilePreview(preview, chosen().filter((c) => !(decided(c) && decide[c.rawDescription])), { account: this.a(accountId), transactions: this.data.transactions, postedByMatch: sameIds() })!;
-    return { preview, settings, chosen, recon, decide };
+    // rows confirmed as an existing transaction aren't added; that transaction counts as posted
+    const sameIds = () => chosen().filter((c) => decided(c) && 'txId' in matchOf(c)).map((c) => (matchOf(c) as { txId: string }).txId);
+    const recon = () => reconcilePreview(preview, chosen().filter((c) => !(decided(c) && 'txId' in matchOf(c))), { account: this.a(accountId), transactions: this.data.transactions, postedByMatch: sameIds() })!;
+    return { preview, settings, chosen, recon, decide, decided, matchOf };
   }
   commit(accountId: string, r: ReturnType<W['review']>, opts: { applyAdjustment?: boolean; unrelated?: boolean; other?: Record<string, string> } = {}) {
     const res = commitImport(this.ctx(), {
       accountId, fileName: 'statement.csv', fileHash: String(++seq), parserId: 'csv', headerSignature: 'h', delimiter: ',', settings: r.settings,
-      decisions: r.chosen().map((c) => ({ candidate: c, kind: opts.other?.[c.rawDescription] ? 'transfer' : c.kind, categoryId: null, merchant: c.merchant, linkOccurrence: false, ...(opts.other?.[c.rawDescription] ? { otherAccountId: opts.other[c.rawDescription]! } : {}), ...(c.duplicate?.pending && r.decide[c.rawDescription] !== undefined ? { pendingResolution: { txId: c.duplicate.txId, same: r.decide[c.rawDescription]! } } : {}) })),
+      decisions: r.chosen().map((c) => ({ candidate: c, kind: opts.other?.[c.rawDescription] ? 'transfer' : c.kind, categoryId: null, merchant: c.merchant, linkOccurrence: false, ...(opts.other?.[c.rawDescription] ? { otherAccountId: opts.other[c.rawDescription]! } : {}), ...(r.decided(c) ? { match: r.matchOf(c) } : {}) })),
       totalRows: 0, excludedCount: 0, duplicateCount: 0, errorCount: 0, reconciliation: r.recon(), applyAdjustment: opts.applyAdjustment ?? true, adjustmentUnrelatedToPending: opts.unrelated,
     });
     this.data = applyOps(this.data, res.ops);
@@ -72,7 +85,9 @@ describe('statement import: pending items are never counted twice', () => {
   it('a pending purchase NOT on the statement stays counted: $870 before and after it posts (was $990: a +$120 adjustment cancelled it)', () => {
     const { w, c } = setup();
     const p = pendingPurchase(w, c, 12000);
-    const r = w.review(c, H + '09/06/2026,COFFEE,-10.00,990.00\n');
+    // Phase 4A.5.12: the $10 coffee could be the $120 purchase clearing for a different amount → the user says it isn't
+    const r = w.review(c, H + '09/06/2026,COFFEE,-10.00,990.00\n', undefined, { COFFEE: false });
+    expect(r.preview.candidates[0]!.matchCandidates.map((m) => [m.txId, m.differenceCents])).toEqual([[p.id, 11000]]);
     expect(r.recon().differenceCents).toBe(0);
     w.commit(c, r);
     expect(w.sts()).toBe(87000);
@@ -84,7 +99,8 @@ describe('statement import: pending items are never counted twice', () => {
     const dep = pendingDeposit(w, c, 30000);
     const r = w.review(c, H + '09/09/2026,AMAZON REFUND,300.00,1290.00\n09/06/2026,COFFEE,-10.00,990.00\n');
     const row = r.preview.candidates.find((x) => x.rawDescription === 'AMAZON REFUND')!;
-    expect([row.include, row.duplicate?.txId, row.duplicate?.pending, row.duplicate?.reason]).toEqual([false, dep.id, true, 'Same amount as “Store return”, still pending in Clarity (Sep 5). Is this row that transaction clearing? Choose “Same transaction” to mark “Store return” posted (nothing new is added), or “Different transaction” to import it as well.']);
+    expect([row.include, row.duplicate, row.matchCandidates.map((m) => [m.txId, m.differenceCents, m.status, m.daysApart])]).toEqual([false, null, [[dep.id, 0, 'pending', 4]]]);
+    expect(row.reasons).toContain("Could be a transaction already in Clarity. Choose which one it is, or that it's a different transaction.");
     expect([r.recon().differenceCents, names(r.recon())]).toEqual([30000, ['Store return']]);
     expect(errorOf(() => w.commit(c, r))).toMatchObject({ field: 'pending_match' }); // nothing posted automatically
     expect(w.data.transactions.find((t) => t.id === dep.id)!.status).toBe('pending');
@@ -96,7 +112,7 @@ describe('statement import: pending items are never counted twice', () => {
   it('a pending purchase that cleared: the same; Mark posted → $870, one purchase, no adjustment', () => {
     const { w, c } = setup();
     const p = pendingPurchase(w, c, 12000);
-    const r = w.review(c, H + '09/08/2026,POS SHOP 1234,-120.00,870.00\n09/06/2026,COFFEE,-10.00,990.00\n');
+    const r = w.review(c, H + '09/08/2026,POS SHOP 1234,-120.00,870.00\n09/06/2026,COFFEE,-10.00,990.00\n', undefined, { COFFEE: false });
     expect([r.recon().differenceCents, names(r.recon())]).toEqual([-12000, ['Groceries run']]);
     w.post(p.id);
     w.commit(c, r);
@@ -106,7 +122,7 @@ describe('statement import: pending items are never counted twice', () => {
     const { w, c } = setup();
     pendingDeposit(w, c, 30000);
     const r = w.review(c, H + '09/09/2026,AMAZON REFUND,300.00,1290.00\n09/06/2026,COFFEE,-10.00,990.00\n', () => true);
-    expect(errorOf(() => w.commit(c, r))).toMatchObject({ field: 'pendingResolution', message: 'Row 2: choose whether this is the same transaction as “Store return” (pending) or a different one.' });
+    expect(errorOf(() => w.commit(c, r))).toMatchObject({ field: 'match', message: "Row 2: this could be “Store return” (Sep 5, +$300.00). Choose which one, or confirm it's a different transaction." });
     expect(w.data.transactions.length).toBe(1); // nothing written
   });
   it('several pending items: $300 cleared (left out, named), $200 deposit and $50 purchase still pending; Mark posted → reconciles; spendable $1,240', () => {
@@ -114,10 +130,14 @@ describe('statement import: pending items are never counted twice', () => {
     const d300 = pendingDeposit(w, c, 30000);
     pendingDeposit(w, c, 20000, '2026-09-06', 'Gift');
     pendingPurchase(w, c, 5000, '2026-09-07', 'Pharmacy');
-    const r = w.review(c, H + '09/08/2026,TRANSFER IN,300.00,1290.00\n09/06/2026,COFFEE,-10.00,990.00\n');
-    const rc = r.recon();
+    const csv = H + '09/08/2026,TRANSFER IN,300.00,1290.00\n09/06/2026,COFFEE,-10.00,990.00\n';
+    const before = w.review(c, csv, undefined, { COFFEE: false }); // the coffee could be the $50 Pharmacy purchase; it isn't
+    const rc = before.recon();
     expect([rc.differenceCents, (rc.pendingMatches ?? []).map((s) => s.map((t) => t.merchant)), (rc.pendingPartial ?? []).map((t) => t.merchant)]).toEqual([30000, [['Store return']], ['Gift']]);
-    w.post(d300.id);
+    // Phase 4A.5.12: every candidate is listed: the $300 row could be the $300 deposit (same amount) or the $200 Gift
+    expect(before.preview.candidates[0]!.matchCandidates.map((m) => [m.merchant, m.differenceCents])).toEqual([['Store return', 0], ['Gift', 10000]]);
+    const r = w.review(c, csv, undefined, { 'TRANSFER IN': d300.id, COFFEE: false });
+    expect(r.recon().differenceCents).toBe(0);
     w.commit(c, r);
     // recorded 1,000 + 300 + 200 (pending) − 50 (pending) − 10 = 1,440; spendable = 1,440 − 200 pending deposit = 1,240
     expect([w.rec(c), w.sts()]).toEqual([144000, 124000]);
@@ -264,7 +284,7 @@ describe('Phase 4A.5.10: a statement row and a pending transaction — the user 
     expect(r.recon().differenceCents).toBe(0);
     w.commit(c, r);
     const imported = w.data.transactions.find((x) => x.provenance.source === 'import' && x.amountCents === 30000)!;
-    expect([imported.provenance.separateFrom, count(w, 30000), w.rec(c), w.sts()]).toEqual([dep.id, 2, 159000, 129000]);
+    expect([imported.provenance.separateFrom, count(w, 30000), w.rec(c), w.sts()]).toEqual([[dep.id], 2, 159000, 129000]);
     w.post(dep.id);
     expect([w.rec(c), w.sts()]).toEqual([159000, 159000]);
   });
@@ -283,19 +303,20 @@ describe('Phase 4A.5.10: a statement row and a pending transaction — the user 
       expect(w.adjust(c, 129000)).toBeNull(); // repeated reconciliation: matches
     }
   });
-  it('two pending deposits of $300 and two $300 rows: each row is paired with a different pending deposit; both confirmed same → both posted, nothing added', () => {
+  it('two pending deposits of $300 and two $300 rows: each row lists both; the user pairs them explicitly → both posted, nothing added', () => {
     const { w, c } = setup();
     const a = pendingDeposit(w, c, 30000, '2026-09-05', 'Refund A');
     const b = pendingDeposit(w, c, 30000, '2026-09-06', 'Refund B');
-    const r = w.review(c, H + '09/09/2026,CREDIT X,300.00,1600.00\n09/08/2026,CREDIT Y,300.00,1300.00\n', undefined, { 'CREDIT X': true, 'CREDIT Y': true });
-    expect(new Set(r.preview.candidates.map((x) => x.duplicate?.txId))).toEqual(new Set([a.id, b.id]));
+    const r = w.review(c, H + '09/09/2026,CREDIT X,300.00,1600.00\n09/08/2026,CREDIT Y,300.00,1300.00\n', undefined, { 'CREDIT X': a.id, 'CREDIT Y': b.id });
+    // Phase 4A.5.12: each row lists BOTH deposits (closest first); nothing is paired by file order
+    expect(r.preview.candidates.map((x) => x.matchCandidates.map((m) => m.txId))).toEqual([[b.id, a.id], [b.id, a.id]]);
     w.commit(c, r);
     expect([count(w, 30000), w.rec(c), w.sts(), w.data.transactions.every((t) => t.status === 'confirmed')]).toEqual([2, 160000, 160000, true]);
   });
   it('a purchase: "Same transaction" posts the pending purchase once ($870); undoing the import puts it back to pending and removes the link', () => {
     const { w, c } = setup();
     const p = pendingPurchase(w, c, 12000);
-    const res = w.commit(c, w.review(c, H + '09/08/2026,POS SHOP 1234,-120.00,870.00\n09/06/2026,COFFEE,-10.00,990.00\n', undefined, { 'POS SHOP 1234': true }));
+    const res = w.commit(c, w.review(c, H + '09/08/2026,POS SHOP 1234,-120.00,870.00\n09/06/2026,COFFEE,-10.00,990.00\n', undefined, { 'POS SHOP 1234': true, COFFEE: false }));
     expect([count(w, -12000), w.rec(c), w.sts()]).toEqual([1, 87000, 87000]);
     w.data = applyOps(w.data, undoImportBatch(w.ctx(), res.batch.id));
     const t = w.data.transactions.find((x) => x.id === p.id)!;
@@ -315,7 +336,7 @@ describe('Phase 4A.5.10: a statement row and a pending transaction — the user 
     const { w, c } = setup();
     const dep = pendingDeposit(w, c, 30000);
     w.commit(c, w.review(c, STMT, undefined, { 'AMAZON REFUND': false }));
-    const imported = w.data.transactions.find((x) => x.provenance.separateFrom === dep.id)!;
+    const imported = w.data.transactions.find((x) => x.provenance.separateFrom?.includes(dep.id))!;
     w.data = applyOps(w.data, deleteTransaction(w.ctx(), imported.id));
     expect([w.data.transactions.find((x) => x.id === dep.id)!.status, w.rec(c), w.sts()]).toEqual(['pending', 129000, 99000]);
   });
@@ -338,7 +359,7 @@ describe('Phase 4A.5.10: a statement row and a pending transaction — the user 
     const other = pendingDeposit(w, c, 30000, '2026-09-20', 'Later refund');
     const r = w.review(c, STMT, undefined, { 'AMAZON REFUND': true });
     const bad = { ...r, decide: {} };
-    expect(errorOf(() => commitImport(w.ctx(), { accountId: c, fileName: 'f', fileHash: 'x', parserId: 'csv', headerSignature: 'h', delimiter: ',', settings: r.settings, decisions: r.chosen().map((x) => ({ candidate: x, kind: x.kind, categoryId: null, merchant: x.merchant, linkOccurrence: false, ...(x.duplicate?.pending ? { pendingResolution: { txId: other.id, same: true } } : {}) })), totalRows: 0, excludedCount: 0, duplicateCount: 0, errorCount: 0, reconciliation: null, applyAdjustment: false }))).toMatchObject({ field: 'pendingResolution' });
+    expect(errorOf(() => commitImport(w.ctx(), { accountId: c, fileName: 'f', fileHash: 'x', parserId: 'csv', headerSignature: 'h', delimiter: ',', settings: r.settings, decisions: r.chosen().map((x) => ({ candidate: x, kind: x.kind, categoryId: null, merchant: x.merchant, linkOccurrence: false, ...(x.matchCandidates.length ? { match: { txId: other.id } } : {}) })), totalRows: 0, excludedCount: 0, duplicateCount: 0, errorCount: 0, reconciliation: null, applyAdjustment: false }))).toMatchObject({ field: 'match', message: expect.stringMatching(/“Later refund” \(Sep 20, \+\$300\.00\) is no longer a possible match for this row/) });
     void bad;
   });
 });

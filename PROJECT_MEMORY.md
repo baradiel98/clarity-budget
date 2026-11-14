@@ -371,3 +371,17 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Fixed]** Partial-match wording no longer implies an exhaustive search ("some or all … exact combinations of up to 3 items only"); every same-direction item is listed (no cap). Proof that 4+ item combinations can't pass silently is in calculation-rules.md.
 - **[Known limitation]** Statements imported before Phase 4A.5.10 that already contain such a duplicate are not detected retroactively.
 
+## Phase 4A.5.12 (2026-11-14): statement matching, duplicate prevention, transfer integrity (audit 4A.5.11 F1–F6)
+- **[Verified defects, fixed]**
+  - F1/F2: only the first same-amount pending item was offered, in file order, and could not be changed; truthful answers still double-counted ($1,600 vs $1,300; $1,900 vs $1,600).
+  - F3/F6: an item clearing for a different amount was never detected ($1,590 vs $1,290; $890 vs $940).
+  - F4/F5: the other account's statement row became new income or a second transfer ($700 vs $600 savings; $800/$700 vs $900/$600).
+- **[Fix]** `packages/import/src/matching.ts`: `findMatchCandidates` + `MATCH_WINDOWS` (pending −3/+10 days, any amount, same direction; posted transfer legs −3/+7 days, exact amount; earlier candidates kept). The review lists all (closest first), pre-selects nothing; `ImportDecision.match` = { txId } | { none, seen }; the data layer re-checks against current data. Different amounts are never merged or changed automatically. A posted transfer leg is linked, never duplicated.
+- **[Fix]** One workflow: rows decide; the balance check points to the row; live candidates (status changes show at once); undo message (`describeImportUndo`); button "Link N to existing".
+- **[Found while testing, fixed]** The same review committed twice imported the row as new once its candidate was linked; now refused.
+- **[Verified]** 380 randomized runs vs a bank ledger with a truthful user: 380 correct, 0 incorrect (421 rows with several candidates, 477 with different-amount candidates, 146 with transfer candidates).
+- **[Known limitations]**
+  - Different-amount candidates can list several unrelated pending items in the same direction (no tolerance by design); the user rules them out.
+  - A statement whose rows all share one date is read oldest-first (pre-existing).
+  - Duplicates created by imports before Phase 4A.5.10 aren't detected retroactively.
+

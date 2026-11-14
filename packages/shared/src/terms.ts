@@ -95,9 +95,17 @@ export const PENDING_MATCH_NOTE =
 export const PENDING_PARTIAL_TITLE = 'Pending items could explain some or all of this difference';
 export const PENDING_PARTIAL_NOTE = (difference: string) =>
   `If one or more of them has cleared at your bank (perhaps for a different amount), mark it posted and Clarity will recalculate. Clarity checks exact combinations of up to 3 items only, so several of these together could also make up the whole difference. If you record ${difference} now instead and they clear later, the overlapping part is counted twice.`;
-/** Phase 4A.5.10: a statement row with the same amount as a pending transaction needs an explicit decision. */
-export const PENDING_TWIN_SAME = (merchant: string) => `Same transaction: mark “${merchant}” posted (nothing new is added)`;
-export const PENDING_TWIN_SEPARATE = 'Different transaction: import it as well';
-export const PENDING_TWIN_SKIP = 'Leave it out';
+/** Phase 4A.5.12: a statement row that could be an existing transaction needs an explicit choice. */
+export const MATCH_CHOICE_TITLE = 'Is this row one of these transactions already in Clarity?';
+export const MATCH_NONE_LABEL = (n: number) => (n === 1 ? 'Different transaction: not this one. Import it as new' : `Different transaction: none of these ${n}. Import it as new`);
+export const MATCH_SKIP_LABEL = 'Leave it out';
+export const MATCH_PENDING_NOTE = 'It will be marked posted and linked to this row. Nothing new is added.';
+export const MATCH_POSTED_NOTE = 'Already posted in Clarity: this row will be linked to it. Nothing new is added.';
+export const MATCH_AMOUNT_NOTE = (clarity: string, statement: string, difference: string) =>
+  `Clarity has ${clarity}; the statement shows ${statement} (difference ${difference}). If they're the same event (a tip, a fee, a partial deposit), Clarity keeps the original amount; the balance check below shows the ${difference} so you can record it or edit the transaction.`;
+export const MATCH_TAKEN = (row: number) => `already chosen for row ${row}`;
+/** Phase 4A.5.12: the import button says what it will do (rows linked to existing transactions add nothing). */
+export const IMPORT_BUTTON = (added: number, linked: number) =>
+  [added || !linked ? `Import ${added} transaction${added === 1 ? '' : 's'}` : '', linked ? `${added ? 'link' : 'Link'} ${linked} to existing` : ''].filter(Boolean).join(' and ');
 export const PENDING_MATCH_UNRELATED = "The difference isn't related to these pending items; record the adjustment and keep them pending";
 export const RECONCILED_MESSAGE = (account: string, date: string) => `${account} matches your bank's posted balance as of ${date}. No adjustment needed.`;
