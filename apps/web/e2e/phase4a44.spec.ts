@@ -55,7 +55,9 @@ test('archiving a card that still owes money keeps its warning, and the review s
   await expect(page.getByRole('dialog').getByTestId('archive-balance-note')).toContainText('Store card still owes $250.00.');
   await page.getByRole('dialog').getByTestId('archive-confirm').click();
   await go(page, '/');
-  await expect(page.getByTestId('safe-to-spend')).toHaveText('$2,427.17'); // card debt counts only through a payment, as before
+  // Phase 4A.5: the $250 the card still owes is set aside at the end of the forecast (Dec 31), where the sample's
+  // projected cash is $7,785.28 → 7,535.28, still above the Dec 1 low (2,627.17), so Safe to Spend stays $2,427.17.
+  await expect(page.getByTestId('safe-to-spend')).toHaveText('$2,427.17');
   const w = page.getByTestId('warnings');
   await expect(w).toContainText('$250.00 on Store card with no payment scheduled');
   await expect(w).toContainText("Store card is archived; archiving doesn't clear what it owes.");

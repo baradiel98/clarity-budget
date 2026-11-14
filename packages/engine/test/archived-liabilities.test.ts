@@ -91,7 +91,8 @@ describe('2. An archived credit card keeps its debt warning', () => {
     expect(ws.map((w) => w.title)).toEqual(['$1,000.00 on Visa with no payment scheduled']);
     expect(ws[0]!.detail).toContain("Visa is archived; archiving doesn't clear what it owes.");
     expect(buildDashboard(i).balances.cardOwedCents).toBe(100000);
-    expect(sts(i)).toBe(100000); // unchanged: card debt is counted only through a scheduled payment
+    // Phase 4A.5 (owner decision): the $1,000 still owed is set aside: 1,000 − 1,000. (Phase 4A.4.4: $1,000.)
+    expect(sts(i)).toBe(0);
   });
   it('paid off, payment scheduled, or unarchived: the right warning or none', () => {
     expect(warns(input({ today: TODAY, accounts: [chk(100000), card(true, 0)] })).filter((w) => w.id.includes('card'))).toEqual([]);
@@ -100,7 +101,7 @@ describe('2. An archived credit card keeps its debt warning', () => {
     expect(warns(scheduled).some((w) => w.id.startsWith('card-unscheduled'))).toBe(false);
     expect(sts(scheduled)).toBe(100000); // 2,000 − 1,000 paid on Nov 25
     const active = warns(input({ today: TODAY, accounts: [chk(100000), card(false)] })).find((w) => w.id.startsWith('card-unscheduled'))!;
-    expect(active.detail).toBe('This balance is not deducted from Safe to Spend until you schedule a card payment.');
+    expect(active.detail).toBe('No payment is scheduled. Safe to Spend sets aside what Visa is projected to still owe on Dec 31 ($1,000.00).'); // Phase 4A.5 wording
   });
 });
 
@@ -147,20 +148,21 @@ describe('4. Cash advance vs card payments and later purchases', () => {
   it('purchases ON the payment date: same day, purchases count first → $100', () => {
     expect(sts(S('2026-12-21'))).toBe(10000);
   });
-  it('purchases AFTER the payment (Dec 22): the payment really repays the advance → $190, and the unpaid card balance is now disclosed', () => {
+  it('purchases AFTER the payment (Dec 22): the payment repays the advance; the $90 of later purchase debt is set aside → $100 (Phase 4A.5)', () => {
     // Dec 21: card owed only the $90 advance; the $400 payment repays it and leaves a $310 credit.
     // Dec 22: $400 purchases use the $310 credit and leave $90 of purchase debt, which (like all card purchases)
     // is counted only when a payment is scheduled. Real cash: 500 + 90 − 400 = 190.
     const i = S('2026-12-22');
-    expect(sts(i)).toBe(19000);
+    // Phase 4A.5 (owner decision): end of forecast: cash 190, card owes 90 → 100. (Phase 4A.4.4: $190.)
+    expect(sts(i)).toBe(10000);
     expect(forecastOf(i).endBalances.card).toBe(-9000);
     expect(warning(i, 'advance:')!.detail).not.toContain('not paid back');
     const w = warning(i, 'card-projected:card')!;
     expect(w.title).toBe('Visa is projected to owe $90.00 on Dec 31, and no payment is scheduled for it');
   });
-  it('the same $90 of unpaid purchase debt appears without any advance (it is the card rule, not borrowed money)', () => {
+  it('the same $90 of unpaid purchase debt appears without any advance, and is set aside too (Phase 4A.5)', () => {
     const i = S('2026-12-22', [], false, 49000); // $490 of purchases after a $400 payment
-    expect(sts(i)).toBe(10000); // 500 − 400
+    expect(sts(i)).toBe(1000); // 500 − 400 − 90 still owed (Phase 4A.4.4: $100)
     expect(warning(i, 'card-projected:card')!.title).toBe('Visa is projected to owe $90.00 on Dec 31, and no payment is scheduled for it');
   });
   it('a later scheduled payment pays it: no projected-debt warning', () => {

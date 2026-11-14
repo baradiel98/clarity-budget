@@ -56,13 +56,15 @@ describe('credit cards', () => {
     expect(b.netCents).toBe(70000);
   });
 
-  it('a recurring bill charged to the card does not reduce cash unless a card payment is scheduled', () => {
+  it('a recurring bill charged to the card does not reduce cash until paid, but Safe to Spend sets the card debt aside (Phase 4A.5)', () => {
     const netflix = rec({ id: 'netflix', kind: 'bill', accountId: 'card', schedule: { freq: 'monthly', interval: 1, day: 10, anchor: '2026-09-10' }, amount: { type: 'fixed', cents: 1599 } });
     const i = input({ today: '2026-09-03', accounts: [chk, card], recurring: [netflix] });
-    expect(computeSafeToSpend(i).lowPoint.cents).toBe(100000);
+    // Phase 4A.5 (owner decision): card debt counts without a payment. Horizon Oct 31: the card owes 300.00 + 15.99 (Sep 10)
+    // + 15.99 (Oct 10) = 331.98 at the end → 1,000.00 − 331.98. (Before Phase 4A.5: 1,000.00.)
+    expect(computeSafeToSpend(i).lowPoint.cents).toBe(100000 - 30000 - 2 * 1599);
     const d = buildDashboard(i);
     expect(d.monthEnd.cents).toBe(100000);
-    expect(d.warnings.some((w) => /card/i.test(w.title))).toBe(true); // the user is told card spending isn't deducted
+    expect(d.warnings.some((w) => /card/i.test(w.title))).toBe(true); // the user is told no card payment is scheduled
     const withPayment = input({ today: '2026-09-03', accounts: [chk, card], recurring: [netflix, rec({ id: 'pay', kind: 'transfer', toAccountId: 'card', schedule: { freq: 'once', date: '2026-09-25' }, amount: { type: 'card_full_balance' } })] });
     // full balance on Sep 25 = 300.00 opening + 15.99 Netflix
     expect(buildDashboard(withPayment).monthEnd.cents).toBe(100000 - 30000 - 1599);

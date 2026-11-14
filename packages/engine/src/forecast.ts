@@ -536,6 +536,11 @@ export interface LowPoint {
   incomeBefore: ForecastEvent[];
   /** Borrowed (cash-advance) money still owed at the low point, already subtracted from `cents` (own-money lows only). */
   advanceOwedCents: Cents;
+  /**
+   * Phase 4A.5: the low is the end of the forecast after setting aside what the cards are projected to still owe
+   * then (already subtracted from `cents`). Per card, in the base currency.
+   */
+  cardsOwed?: { accountId: ID; cents: Cents }[];
 }
 
 /**

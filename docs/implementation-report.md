@@ -336,6 +336,22 @@ The step-by-step checklist is in `docs/device-test-script.md`.
 - **Generated scenarios (600, scratch probe):** archiving no longer raises Safe to Spend except through the archived account's own capped transfers out.
 - **Not verified:** physical devices, Safari, rendering of the routed mobile archive screen.
 
+## 7k. Phase 4A.5: card liability and archived transfers (owner decisions)
+
+| Scenario (Nov 13, horizon Dec 31) | Before | After |
+|---|---|---|
+| Checking $1,000; Visa owes $1,000; nothing scheduled | $1,000 | **$0** |
+| Same + full-balance payment Nov 25 | $0 | $0 (counted once) |
+| $500; $90 advance; $400 payment Dec 21; $400 purchases Dec 22 | $190 | **$100** (Dec 20 / Dec 21: $100, unchanged) |
+| $500; $200 card purchase Dec 5; $50 refund Dec 10 | $500 | $350 |
+| Sample data + archived card owing $250 | $2,427.17 | $2,427.17 (covered by later income before Dec 31) |
+| EUR card owing money | not mentioned | named; "Can I afford this?" qualified |
+| Archived $300 → Checking $500 | $300 counted, $200 flagged | unchanged (owner decision) |
+
+- **Tests:** `packages/engine/test/card-liability.test.ts` (21).
+- **Changed tests:** 5 existing tests and 1 e2e comment that encoded the previous card rule now carry hand-derived values.
+- **Not verified:** physical devices, Safari, real card statement due dates (not modelled).
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

@@ -292,3 +292,13 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Fixed]** Repeated dates of one schedule are one warning with every date.
 - **[Documented, tested]** The existing pause/resume rule is stated in both archive reviews (`PAUSE_NOTE`).
 - **[Decision open]** Archiving caps the archived account's own scheduled transfers out. This is the only remaining way archiving raises Safe to Spend (600 generated scenarios).
+
+## Phase 4A.5 (2026-11-14): card liability and archived transfers (owner decisions)
+- **[Owner decision, implemented]** Card debt counts without a scheduled payment.
+  - At the horizon, what each base-currency card still owes (all activity on its date; archived cards included) is set aside from the end-of-horizon cash.
+  - Safe to Spend = min(daily own-money low, end cash − card debt) − reserve.
+  - Assumption: the debt must be covered by the end of the forecast, so in-horizon income can cover it. This makes paying on Dec 31 and paying after the horizon give the same result.
+- **[Owner decision, kept]** Transfers out of archived accounts are capped at their balance; the unfunded part is flagged. Regression tests were added.
+- **[Changed tests, by decision]** Five existing tests and one e2e comment encoded the old rule, "card debt only through a scheduled payment"; updated with hand-derived values.
+  - Sample data is unchanged ($2,427.17): its card is paid in full on Dec 31.
+- **[New]** Unreliable cards (another currency, or unknown amounts) are warned about, and "Can I afford this?" is qualified "— not counting X".

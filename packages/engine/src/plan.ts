@@ -103,6 +103,10 @@ export interface SafeToSpend {
   cashAdvances: CashAdvance[];
   /** Scheduled items with no amount through the horizon: not counted (the forecast can't know them). */
   unknownAmounts: ForecastEvent[];
+  /** Phase 4A.5: what each base-currency card is projected to still owe at the horizon (set aside). */
+  cardsOwedAtHorizon: { accountId: ID; cents: Cents }[];
+  /** Phase 4A.5: cards whose balance can't be included reliably (named in warnings and affordability answers). */
+  unreliableCards: { accountId: ID; name: string; reason: string }[];
 }
 
 const ASSUMPTIONS_BASE = [
@@ -195,12 +199,53 @@ function excludedLine(e: ForecastEvent): ExplainLine {
   return { kind: 'excluded', label: e.label, date: e.date, note, ...(e.occurrence?.amountCents ? { cents: e.occurrence.amountCents } : {}) };
 }
 
+/** Base-currency cards projected to owe money at the end of forecast `f` (Phase 4A.5). */
+function projectedCardDebt(input: EngineInput, f: Forecast): { accountId: ID; cents: Cents }[] {
+  return input.accounts
+    .filter((a) => a.type === 'credit_card' && a.currency === input.baseCurrency)
+    .map((a) => ({ accountId: a.id, cents: Math.max(0, -(f.endBalances[a.id] ?? 0)) }))
+    .filter((x) => x.cents > 0);
+}
+
+/**
+ * Cards whose balance can't be included reliably (Phase 4A.5): a card in another currency that owes money or has
+ * scheduled activity, or a base-currency card with scheduled activity of unknown amount.
+ */
+function unreliableCards(input: EngineInput, f: Forecast, horizonEnd: ISODate): { accountId: ID; name: string; reason: string }[] {
+  const out: { accountId: ID; name: string; reason: string }[] = [];
+  for (const a of input.accounts) {
+    if (a.type !== 'credit_card') continue;
+    const touches = (id?: ID) => id === a.id;
+    if (a.currency !== input.baseCurrency) {
+      const owes = (f.endBalances[a.id] ?? 0) < 0;
+      const active = f.occurrences.some((o) => o.date <= horizonEnd && (touches(o.accountId) || touches(o.toAccountId)));
+      if (owes || active) out.push({ accountId: a.id, name: a.name, reason: `it's in ${a.currency}, and Clarity doesn't convert currencies` });
+      continue;
+    }
+    if (f.excludedEvents.some((e) => e.excluded === 'unknown_amount' && e.date <= horizonEnd && (touches(e.occurrence?.accountId) || touches(e.occurrence?.toAccountId)))) {
+      out.push({ accountId: a.id, name: a.name, reason: 'something scheduled on it has no amount' });
+    }
+  }
+  return out;
+}
+
 /** Safe to Spend = lowest projected available cash between today and the horizon − minimum reserve. */
 export function computeSafeToSpend(input: EngineInput, hypotheticals?: readonly Hypothetical[]): SafeToSpend {
   const h = horizonFor(input);
   const f = forecastTo(input, h.end, false, hypotheticals);
-  const low = lowestBetween(f, input.today, h.end, { ownMoney: true });
-  if (!low) throw new Error('Forecast produced no days');
+  const dayLow = lowestBetween(f, input.today, h.end, { ownMoney: true });
+  if (!dayLow) throw new Error('Forecast produced no days');
+  // Phase 4A.5 (owner decision): card debt is counted even without a scheduled payment. At the end of the forecast,
+  // what every base-currency card is projected to still owe (purchases, cash advances, refunds and payments all on
+  // their dates; archived cards included) is set aside from the spendable cash. Scheduled payments already reduced
+  // both the cash and the card balance, so nothing is counted twice; a card in credit counts as owing nothing.
+  const cardsOwed = projectedCardDebt(input, f);
+  const lastDay = f.days[f.days.length - 1]!;
+  const endOwn = lastDay.endCashCents - cardsOwed.reduce((s, x) => s + x.cents, 0);
+  const allEvents = f.days.flatMap((d) => d.events);
+  const low: LowPoint = cardsOwed.length && endOwn < dayLow.cents
+    ? { cents: endOwn, date: h.end, obligations: allEvents.filter((e) => e.cashDeltaCents < 0), incomeBefore: allEvents.filter((e) => e.cashDeltaCents > 0), advanceOwedCents: 0, cardsOwed }
+    : dayLow;
   const reserve = input.minReserveCents;
   const cents = low.cents - reserve;
   const excludedIncome = f.excludedEvents.filter((e) => e.date <= low.date || e.excluded === 'overdue_income');
@@ -220,6 +265,7 @@ export function computeSafeToSpend(input: EngineInput, hypotheticals?: readonly 
     ...low.incomeBefore.map((e) => eventLine(e, cur)),
     ...low.obligations.map((e) => eventLine(e, cur)),
     ...(low.advanceOwedCents > 0 ? [{ kind: 'out' as const, label: 'Cash advance still owed', cents: -low.advanceOwedCents, note: "borrowed from a credit card; not counted as your money until it's paid back" }] : []),
+    ...(low.cardsOwed ?? []).map((x): ExplainLine => ({ kind: 'out', label: `${input.accounts.find((a) => a.id === x.accountId)?.name ?? 'Card'} still owed on ${formatShortDate(h.end)}`, cents: -x.cents, note: 'card balance after scheduled payments; set aside even though no payment covers it yet' })),
     { kind: 'info', label: `Lowest point: ${formatShortDate(low.date)}`, cents: low.cents },
     ...afterEvents.map((e): ExplainLine => ({ ...eventLine(e, cur), note: [eventLine(e, cur).note, `after the lowest point, doesn't lower it`].filter(Boolean).join('; ') })),
     { kind: 'reserve', label: 'Minimum cash reserve', cents: -reserve },
@@ -265,7 +311,7 @@ export function computeSafeToSpend(input: EngineInput, hypotheticals?: readonly 
       assumptions: [
         ...ASSUMPTIONS_BASE,
         'Only income with a fixed amount is counted. Estimated or unknown income is listed but not counted.',
-        'Credit card purchases only reduce cash when a card payment is scheduled.',
+        'Credit card balances are counted: what each card is projected to still owe at the end of the forecast, after scheduled payments, is set aside.',
         'Combines your spendable accounts. It assumes you can move money between them; a bill paid from an account that would run short is flagged.',
         'A transfer from savings counts only up to what that account is projected to hold. A bill paid from savings that savings can\'t cover is counted against your spendable accounts.',
         ...(f.cashAdvances.some((a) => a.date <= h.end)
@@ -282,6 +328,8 @@ export function computeSafeToSpend(input: EngineInput, hypotheticals?: readonly 
     coveredPayments: f.coveredPayments.filter((x) => x.date <= h.end),
     cashAdvances: f.cashAdvances.filter((x) => x.date <= h.end),
     unknownAmounts: f.excludedEvents.filter((e) => e.excluded === 'unknown_amount' && e.date <= h.end),
+    cardsOwedAtHorizon: cardsOwed,
+    unreliableCards: unreliableCards(input, f, h.end),
   };
 }
 
@@ -367,7 +415,7 @@ export function canIAfford(input: EngineInput, q: AffordQuery): AffordResult {
     notes.push(
       paysCard
         ? 'Charged to your card. It reduces cash when your scheduled full-balance card payment happens.'
-        : 'Charged to your card. It will not reduce cash until you pay the card, and no full-balance payment is scheduled.',
+        : `Charged to your card. No full-balance payment is scheduled, so it's counted as card debt still owed on ${H}.`,
     );
   }
 
@@ -399,7 +447,11 @@ export function canIAfford(input: EngineInput, q: AffordQuery): AffordResult {
       : verdict === 'tight' ? `Tight — it dips into your reserve before ${H}`
         : verdict === 'move_first' ? `Only if you move ${formatCents(requiredMove!.cents, cur)} into ${name} by ${formatShortDate(requiredMove!.by)}`
           : 'Not without coming up short';
-  return { verdict, headline, scope, before, after, shortfallCents: after.cents < 0 ? -after.cents : 0, requiredMove, notes };
+  // Phase 4A.5: never an unqualified answer when a card's balance couldn't be included.
+  const unreliable = before.unreliableCards;
+  if (unreliable.length) notes.push(`Not included because the balance can't be calculated: ${unreliable.map((u) => `${u.name} (${u.reason})`).join('; ')}.`);
+  const qualified = unreliable.length && verdict !== 'no' ? `${headline} — not counting ${unreliable.map((u) => u.name).join(', ')}` : headline;
+  return { verdict, headline: qualified, scope, before, after, shortfallCents: after.cents < 0 ? -after.cents : 0, requiredMove, notes };
 }
 
 export interface Projection {
@@ -604,7 +656,7 @@ export function buildDashboard(input: EngineInput): Dashboard {
         id: `card-unscheduled:${line.accountId}`,
         severity: 'warning',
         title: `${formatCents(-line.balanceCents, cur)} on ${line.name} with no payment scheduled`,
-        detail: `This balance is not deducted from Safe to Spend until you schedule a card payment.${line.archived ? ` ${line.name} is archived; archiving doesn't clear what it owes.` : ''}`,
+        detail: `No payment is scheduled. Safe to Spend sets aside what ${line.name} is projected to still owe on ${H} (${formatCents(sts.cardsOwedAtHorizon.find((x) => x.accountId === line.accountId)?.cents ?? 0, cur)}).${line.archived ? ` ${line.name} is archived; archiving doesn't clear what it owes.` : ''}`,
         accountId: line.accountId,
       });
     }
@@ -623,9 +675,18 @@ export function buildDashboard(input: EngineInput): Dashboard {
       id: `card-projected:${a.id}`,
       severity: 'warning',
       title: `${a.name} is projected to owe ${formatCents(owedEnd, cur)} on ${H}, and no payment is scheduled for it`,
-      detail: `Card spending is counted against Safe to Spend only when a card payment is scheduled. Your scheduled payments to ${a.name} don't cover what it's projected to owe at the end of the forecast (${H}), and nothing after that pays it. Schedule a card payment to include it.`,
+      detail: `Your scheduled payments to ${a.name} don't cover what it's projected to owe at the end of the forecast (${H}), and nothing after that pays it. Safe to Spend sets the ${formatCents(owedEnd, cur)} aside. Schedule a card payment so it's paid.`,
       accountId: a.id,
       items: [{ date: sts.horizonEnd, label: `${a.name} owed`, cents: -owedEnd, currency: cur }],
+    });
+  }
+  for (const u of sts.unreliableCards) {
+    warnings.push({
+      id: `card-unreliable:${u.accountId}`,
+      severity: 'warning',
+      title: `${u.name}'s balance isn't included in Safe to Spend`,
+      detail: `It can't be calculated reliably: ${u.reason}. Safe to Spend and "Can I afford this?" don't include what ${u.name} owes.`,
+      accountId: u.accountId,
     });
   }
   const competingText = (cs: { label: string; requestedCents: Cents; fundedCents: Cents; sameGroup: boolean }[], c: CurrencyCode) => {
