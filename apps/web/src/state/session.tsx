@@ -5,6 +5,7 @@ import { hasRecoveryKey, WrongSecretError } from '@clarity/security';
 import type { DexieAdapter } from '../platform/dexieAdapter';
 import { provider } from '../platform/crypto';
 import { requestPersistence } from '../platform/persistence';
+import { captureStore } from './capture';
 import { markFresh } from './fresh';
 import { forgetDevice, rememberDevice, suspendTrust, trustInfo, unlockWithDevice, type TrustDays, type TrustInfo } from '../platform/deviceTrust';
 
@@ -143,6 +144,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const lock = useCallback((reason: 'manual' | 'idle' = 'manual') => {
     // Lock now; remembered access pauses until the passphrase is entered again.
     void suspendTrust().then(() => trustInfo()).then(setTrust);
+    captureStore.clear(); // drafts may describe spending: never keep them past a lock
     setPhase((p) => {
       if (p.kind !== 'ready') return p;
       p.store.lock();

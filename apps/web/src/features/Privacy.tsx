@@ -21,6 +21,10 @@ const QA: [string, string][] = [
     'No. Categories are suggested by fixed rules and by your own past choices, computed on this device. All numbers come from a deterministic calculation engine. No external AI service is used.',
   ],
   [
+    'What happens to what I type in Clarity Capture?',
+    'It is read on this device by Clarity’s own language rules. Nothing is sent to any server or AI provider, and it works offline. Drafts are kept only in memory and cleared when Clarity locks. Only the transactions you approve are saved, encrypted, together with the sentence they came from so you can see where each one came from.',
+  ],
+  [
     'How is my information protected?',
     'Every record is encrypted with AES-256-GCM using a random key. That key is protected by your passphrase (Argon2id key derivation) and, optionally, a recovery key. The app locks after inactivity and clears decrypted data from memory. The page blocks connections to other servers with a Content Security Policy.',
   ],

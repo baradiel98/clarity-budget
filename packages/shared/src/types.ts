@@ -41,11 +41,11 @@ export interface Split {
 }
 
 export interface Provenance {
-  source: 'manual' | 'import' | 'onboarding' | 'recurring';
+  source: 'manual' | 'import' | 'onboarding' | 'recurring' | 'capture';
   importBatchId?: ID;
   rowNumber?: number;
   externalId?: string;
-  /** Original statement description, preserved exactly. */
+  /** Original statement description (import) or the user's own words (capture), preserved exactly. */
   rawDescription?: string;
 }
 

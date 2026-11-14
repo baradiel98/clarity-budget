@@ -4,6 +4,7 @@ import { backupDue, engineInput } from '@clarity/data';
 import { buildDashboard, buildForecast, cashHistory, type Explanation, type UpcomingItem } from '@clarity/engine';
 import { addDays, formatMonthYear, formatShortDate, formatWeekdayDate, INCOME_STATUS_LABEL, OCCURRENCE_STATUS_LABEL, TERMS } from '@clarity/shared';
 import { isFresh } from '../state/fresh';
+import { CaptureLauncher } from './Capture';
 import { useRouter } from '../lib/router';
 import { useData, useSession, useStore } from '../state/session';
 import { useUi } from '../state/ui';
@@ -77,6 +78,7 @@ export function Home() {
       )}
 
       <div className="stack stagger">
+        <CaptureLauncher onOpen={() => navigate('/capture')} />
         <div className="overview">
           {/* 1. Where you are heading */}
           <section className="card outlook" aria-labelledby="h-me">

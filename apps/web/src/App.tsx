@@ -1,4 +1,4 @@
-import { BarChart3, CalendarRange, Ellipsis, Home as HomeIcon, Lock, PieChart, Plus, ReceiptText, Settings as SettingsIcon, ShieldCheck, Upload } from 'lucide-react';
+import { BarChart3, CalendarRange, Ellipsis, Home as HomeIcon, Lock, PieChart, Plus, ReceiptText, Settings as SettingsIcon, ShieldCheck, Sparkles, Upload } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { Explanation } from '@clarity/engine';
 import { TERMS } from '@clarity/shared';
@@ -11,6 +11,7 @@ import { AccountPreview } from './features/AccountPreview';
 import { AddTransactionDialog } from './features/AddTransaction';
 import { AffordDialog } from './features/Afford';
 import { Budget } from './features/Budget';
+import { CapturePage } from './features/Capture';
 import { Home } from './features/Home';
 import { ImportPage } from './features/Import';
 import { LockScreen } from './features/Lock';
@@ -106,6 +107,7 @@ function Shell() {
       if (t.closest('input, textarea, select, [contenteditable]')) return;
       if (e.key === 'n' || e.key === 'N') { e.preventDefault(); setAdd({}); }
       else if (e.key === '?') { e.preventDefault(); setHelp(true); }
+      else if (e.key === 'c' || e.key === 'C') { e.preventDefault(); navigate('/capture'); }
       else if (e.key === '/') { e.preventDefault(); navigate('/transactions'); setTimeout(() => document.getElementById('tx-search')?.focus(), 30); }
       else {
         const n = NAV.find((x) => x.key === e.key);
@@ -122,6 +124,7 @@ function Shell() {
   let page: ReactNode;
   if (path === '/transactions') page = <Transactions key={search} />;
   else if (path === '/budget') page = <Budget />;
+  else if (path === '/capture') page = <CapturePage />;
   else if (path === '/planning') page = <Planning />;
   else if (path === '/reports') page = <Reports />;
   else if (path === '/settings') page = <Settings />;
@@ -141,7 +144,7 @@ function Shell() {
       {n.label}
     </Link>
   );
-  const inMore = ['/budget', '/reports', '/settings', '/import', '/privacy', '/dev/self-test'].includes(path);
+  const inMore = ['/capture', '/budget', '/reports', '/settings', '/import', '/privacy', '/dev/self-test'].includes(path);
 
   return (
     <UiCtx.Provider value={ui}>
@@ -162,6 +165,9 @@ function Shell() {
           <div className="brand"><img src="/favicon.svg" alt="" /> {TERMS.appName}</div>
           <div className="nav-group">{NAV.slice(0, 5).map(item)}</div>
           <button className="btn btn-primary btn-block sidebar-add" onClick={() => setAdd({})}><Plus size={16} /> {TERMS.addTransaction}</button>
+          <div className="nav-group">
+            <Link to="/capture" className="nav-item"><Sparkles size={17} strokeWidth={1.9} /> Clarity Capture <kbd>C</kbd></Link>
+          </div>
           <div className="nav-group">
             <Link to="/import" className="nav-item"><Upload size={17} strokeWidth={1.9} /> {TERMS.importStatement}</Link>
             {item(NAV[5]!)}
@@ -191,6 +197,7 @@ function Shell() {
       {more && (
         <Dialog title="More" onClose={() => setMore(false)}>
           <div className="more-list" onClick={() => setMore(false)}>
+            <Link to="/capture" className="nav-item"><Sparkles size={19} /> Clarity Capture</Link>
             <Link to="/budget" className="nav-item"><PieChart size={19} /> Budget</Link>
             <Link to="/reports" className="nav-item"><BarChart3 size={19} /> Reports</Link>
             <Link to="/import" className="nav-item"><Upload size={19} /> {TERMS.importStatement}</Link>
@@ -204,7 +211,7 @@ function Shell() {
         <Dialog title="Keyboard shortcuts" onClose={() => setHelp(false)}>
           <div className="list">
             {[
-              ['N', TERMS.addTransaction], ['/', 'Search transactions'], ['1 – 6', 'Home, Transactions, Budget, Planning, Reports, Settings'],
+              ['N', TERMS.addTransaction], ['C', 'Clarity Capture'], ['/', 'Search transactions'], ['1 – 6', 'Home, Transactions, Budget, Planning, Reports, Settings'],
               ['↑ ↓', 'Move between transactions'], ['E or Enter', 'Edit selected transaction'], ['Delete', 'Delete selected transaction'],
               ['← →', 'Move along the forecast chart (when focused)'], ['Esc', 'Close dialog'], ['?', 'Show this help'],
             ].map(([k, d]) => (

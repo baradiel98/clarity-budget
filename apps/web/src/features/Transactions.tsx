@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, ReceiptText, Search, Trash2, Upload } from 'lucide-react';
+import { ArrowDown, ArrowUp, ReceiptText, Search, Sparkles, Trash2, Upload } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { deleteTransaction, type Op } from '@clarity/data';
 import { periodTotals } from '@clarity/engine';
@@ -165,6 +165,7 @@ export function Transactions() {
         </div>
         <div className="page-actions">
           {linked && <button className="btn btn-ghost" onClick={() => navigate('/transactions')}>Clear filters</button>}
+          <button className="btn btn-secondary" onClick={() => navigate('/capture')} data-testid="tx-capture"><Sparkles size={15} /> Capture</button>
           <button className="btn btn-secondary" onClick={() => navigate('/import')}><Upload size={15} /> {TERMS.importStatement}</button>
           <button className="btn btn-primary hide-mobile" onClick={() => ui.openAdd()}>{TERMS.addTransaction} <kbd>N</kbd></button>
         </div>

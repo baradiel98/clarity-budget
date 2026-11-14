@@ -1,6 +1,6 @@
 import {
   defaultCategories, localISODate, type Account, type AccountType, type Cents, type Category, type ID, type ISODate, type ImportBatch,
-  type MappingProfile, type OccurrenceException, type RecurringAmount, type RecurringItem, type RecurringKind, type Schedule, type Settings,
+  type MappingProfile, type OccurrenceException, type Provenance, type RecurringAmount, type RecurringItem, type RecurringKind, type Schedule, type Settings,
   type Split, type Transaction, type TxKind, type TxStatus, type WeekendRule, type WorkspaceData,
 } from '@clarity/shared';
 import { accountBalance, validateTransaction, validateTransferPair, type Occurrence, type ValidationIssue } from '@clarity/engine';
@@ -132,6 +132,8 @@ export interface TxInput {
   splits?: { categoryId: ID; amountCents: Cents }[];
   refundOfId?: ID;
   occurrenceRef?: { recurringId: ID; originalDate: ISODate };
+  /** Where this came from (defaults to manual). Capture keeps the user's words in `rawDescription`. */
+  provenance?: Provenance;
 }
 
 function bumpBackupCounter(ctx: Ctx, n: number): Op[] {
@@ -149,7 +151,7 @@ function buildTxs(ctx: Ctx, input: TxInput, ids: { id?: ID; pairId?: ID; groupId
     status: input.status ?? 'confirmed',
     merchant: input.merchant.trim(),
     notes: (input.notes ?? '').trim(),
-    provenance: { source: 'manual' as const },
+    provenance: input.provenance ?? { source: 'manual' as const },
     createdAt: ids.createdAt ?? ctx.now,
     updatedAt: ctx.now,
     ...(input.occurrenceRef ? { occurrenceRef: input.occurrenceRef } : {}),
@@ -192,6 +194,30 @@ export function addTransaction(ctx: Ctx, input: TxInput): { ops: Op[]; txs: Tran
     if (orig && input.amountCents > Math.abs(orig.amountCents)) warnings.push('This refund is larger than the original purchase.');
   }
   return { ops: [...txs.map((value): Op => ({ t: 'put', table: 'transactions', value })), ...bumpBackupCounter(ctx, txs.length)], txs, warnings };
+}
+
+/**
+ * Several transactions in one atomic change (Clarity Capture "Approve all"): every input is validated
+ * with the same rules as a single add; if any one fails, nothing is saved.
+ */
+export function addTransactions(ctx: Ctx, inputs: readonly TxInput[]): { ops: Op[]; txs: Transaction[] } {
+  if (inputs.length === 0) fail('Nothing to save.');
+  let data = ctx.data;
+  const ops: Op[] = [];
+  const txs: Transaction[] = [];
+  inputs.forEach((input, i) => {
+    let r: ReturnType<typeof addTransaction>;
+    try {
+      r = addTransaction({ ...ctx, data }, input);
+    } catch (e) {
+      if (e instanceof CommandError) throw new CommandError(e.issues.map((x) => ({ ...x, message: `Item ${i + 1}: ${x.message}` })));
+      throw e;
+    }
+    ops.push(...r.ops);
+    txs.push(...r.txs);
+    data = applyLocal(data, r.ops);
+  });
+  return { ops, txs };
 }
 
 /** Transfer legs are always edited together. */
