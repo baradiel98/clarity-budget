@@ -24,6 +24,14 @@ Describe financial activity in plain language ("Yesterday I spent $45 at Walmart
 - Categories come from, in order: the user's words, matched to their own category names first; their past choices for that merchant (corrections are remembered this way); the built-in keyword rules. New categories are never created.
 - Drafts live only in memory (`apps/web/src/state/capture.ts`) and are cleared on lock. They never affect balances, budgets, the forecast or Safe to Spend.
 
+## Audit (2026-11-14)
+A Phase 1 audit probed about 50 adversarial phrasings and fixed every case that produced a wrong draft without asking the user (card purchase vs payment, counts, malformed numbers, "k", ranges, "ish", weekday names in merchant names, conflicting dates, cash back, transfers to people). Regressions: `packages/capture/test/audit.test.ts`.
+
+**Known, deliberate:**
+- two identical items in one message stay two drafts (two coffees are two coffees);
+- "Friday" said on a Friday means today;
+- "paid me back" is income but must be confirmed.
+
 ## Tests
 - `packages/capture/test/capture.test.ts`: parsing, review rules, schema, atomic batch, storage failure, effects on the dashboard and budget.
 - `apps/web/e2e/capture.spec.ts`: the UI flows, including a simulated IndexedDB failure.

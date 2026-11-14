@@ -1,6 +1,6 @@
 # Phase 1 implementation report
 
-Date: 2026-11-13 · Branch: `phase-1` · Environment: Linux dev container with Node 22 and Chromium only. There is no iOS or Android simulator, no Safari and no Edge.
+Last updated: 2026-11-14 (Phase 1 audit) · Branch: `phase-1` · Test environment: Linux dev container with Node 22 and Chromium only. There is no iOS or Android simulator, no Safari and no Edge.
 
 Labels: **Verified here** = automated test or direct check in this environment. **Needs device verification** = cannot be checked here. **Not done** = not built.
 
@@ -14,6 +14,7 @@ Labels: **Verified here** = automated test or direct check in this environment. 
 | `import` | CSV parsing and the pipeline below | ✅ unit tests with 6 fixture statements |
 | `security` | Random master key, Argon2id passphrase slot, HKDF recovery-key slot, AES-256-GCM per record with AAD, cross-platform backup format, passphrase policy, self-test vectors | ✅ unit tests; WebCrypto+hash-wasm and noble are byte-identical |
 | `data` | Encrypted workspace store (encrypt → atomic write → memory), undo, commands (accounts, transactions, atomic transfers, splits, refunds, adjustments, recurring, exceptions, import commit/undo, onboarding), migrations, CSV export (formula-injection safe), demo data | ✅ unit tests |
+| `capture` | Clarity Capture: a **deterministic, rule-based** interpreter (not an AI model or LLM) for plain-language text → draft transactions. Covers dates, amounts, merchants, categories, accounts, splits, income, refunds, transfers and card payments. Also untrusted-output validation (`parseDrafts`), review rules (`reviewDraft`) and conversion to validated inputs (`toTxInput`). Runs on the device; no network | ✅ 34 unit tests |
 | `design-system` | Tokens for light and dark, CSS generator | ✅ WCAG AA contrast test |
 
 The CSV pipeline in `import` covers:
@@ -55,22 +56,33 @@ The CSV pipeline in `import` covers:
   - statement import, with document picker, mapping, review and reconciliation;
   - Settings: accounts, categories, preferences, security, backup/restore/CSV via the share sheet, import history, Privacy Center, self-test, delete all.
 
+### Added after the first report (all verified only in Chromium unless noted)
+- **Visual redesign:** cool blue palette, Budget and Reports pages, interactive forecast chart, motion system with reduced-motion support.
+- **Unlock screen redesign;** a labelled, **unconnected** email/password sign-in preview (`/preview/sign-in`). Real accounts are only a proposal: `docs/accounts-architecture.md`.
+- **"Remember this device"** (web, 7/30 days; see `docs/security.md`) and lock states. **Test mode** is compiled only into dev and test builds.
+- **Update banner** with "Check for updates" and the app version in Settings.
+- **Onboarding:** several paychecks into one account, with upcoming-payday previews.
+- **Clarity Capture:**
+  - web `/capture` page and mobile `capture` modal;
+  - drafts held in memory only;
+  - approval through one atomic `addTransactions` change, with the user's words kept as provenance.
+
 ## 2. Verification results (this environment)
 | Check | Result |
 |---|---|
 | `npm run typecheck` (strict TS: packages, DOM provider, tests) | ✅ pass |
 | `npm run lint` (incl. `no-console`) | ✅ pass |
-| Unit tests (Vitest) | ✅ **146 passed** |
+| Unit tests (Vitest), 2026-11-14 | ✅ **201 passed**, 1 skipped (the golden-file generator, which runs only when asked) |
 | Web build (strict CSP, service worker) | ✅ |
-| Web end-to-end (Playwright, Chromium) | ✅ **18 flows passed** (see below) |
+| Web end-to-end (Playwright, Chromium), 2026-11-14 | ✅ **77 passed**, 10 skipped (screenshot captures, which run only with `SCREENSHOTS=1`). Production build plus a separate test-mode build |
 | Web screenshots at 1280/1440/1920, light and dark | ✅ reviewed; layout fixes applied (`docs/screenshots/web`) |
 | Mobile TypeScript | ✅ |
-| Mobile Jest (jest-expo) | ✅ **13 passed** (see below) |
+| Mobile Jest (jest-expo), 2026-11-14 | ✅ **22 passed** (5 suites, including 6 Capture screen tests) |
 | Mobile bundles for iOS and Android (`expo export`, Hermes bytecode) | ✅ both compile |
 | `expo-doctor` | 18/20 pass; the 2 others need the Expo API (exp.host), which this network blocks |
 | Mobile UI rendered via react-native-web at iPhone size, light/dark | ✅ (`docs/screenshots/mobile-web-preview`). **A browser preview, not a device** |
 
-The **18 web flows** cover:
+The original **18 web flows** (the suite has since grown to 77, adding Capture, lock and remember-device, motion, startup safety net, test mode, onboarding pay and redesign checks) cover:
 - onboarding numbers checked against a hand calculation;
 - "It varies" income;
 - adding a transaction in 4 interactions, with undo;
@@ -90,7 +102,7 @@ The **18 web flows** cover:
 - self-test page;
 - demo mode.
 
-The **13 mobile tests** cover:
+The original **13 mobile tests** (now 22, adding the Capture screen and glow-contrast tests) cover:
 - the SQLite adapter with the mobile crypto provider, ciphertext only;
 - atomic rollback;
 - wipe;
@@ -100,7 +112,14 @@ The **13 mobile tests** cover:
 - biometric cancel vs. invalidation;
 - golden engine and crypto vectors.
 
-## 3. Needs device verification (not claimed)
+## 3. Real-device use so far (owner reports, not structured tests)
+- **iPhone (Safari), hosted web app:**
+  - loads and is used after allow-listing the site in AdGuard (see §7);
+  - picked up new versions after closing and reopening the page;
+  - the redesigned screens were seen by the owner.
+- **Native mobile app:** not yet run on any device.
+
+## 4. Needs device verification (not claimed)
 - **iPhone and Android:** every mobile screen, gestures, keyboard avoidance, safe areas, text scaling, VoiceOver/TalkBack, haptics.
 - **Biometrics:** Face ID needs a development build; Expo Go cannot do it on iPhone. Also: invalidation after enrollment changes, background lock, the app-switcher overlay, Android FLAG_SECURE.
 - **Argon2id timing on phones:** pure JS on Hermes. If it is over ~3 s, add a native Argon2 module (the format supports it with no migration).
@@ -110,12 +129,14 @@ The **13 mobile tests** cover:
 
 The step-by-step checklist is in `docs/device-test-script.md`.
 
-## 4. Deliberate limits and deviations (agreed or flagged)
+## 5. Deliberate limits and deviations (agreed or flagged)
 - **No sync** (decision). Changes move between devices only by encrypted backup and restore; the app says so.
 - **Single currency per workspace** (decision). Other currencies are excluded from totals with a warning.
 - **Mobile split editing is web-only for now.** Mobile shows split transactions and keeps their splits when they are edited.
 - **Mobile auto-lock is capped at 5 minutes in the background,** stricter than the setting allows on web. The UI states this.
 - **Web has no biometric unlock** (WebAuthn PRF support is uneven); listed as a future option.
+- **Clarity Capture is rule-based.** Unusual phrasing is flagged for review, not understood. A cloud AI interpreter would need consent and a server, and is not planned without an owner decision.
+- **A card paid beyond what is owed** shows as a negative "owed" amount in the engine (net worth stays correct). The UI has no wording for a card in credit.
 - **Statement formats:** CSV only. PDF, OFX/QFX, XLSX and OCR are rejected with an honest message; the parser interface is ready for them.
 - **Not built (later phases per spec):**
   - insights and recommendations;
@@ -125,7 +146,7 @@ The step-by-step checklist is in `docs/device-test-script.md`.
   - advanced reports;
   - scenario planning.
 
-## 5. Bugs found and fixed during this work
+## 6. Bugs found and fixed during this work
 1. **Safe to Spend horizon** ignored a paycheck that fell after month-end. Found by a test; fixed with a 62-day income lookahead.
 2. **Import:**
    - one unreadable row stopped date-format detection for the whole file (now an 80% threshold);
@@ -142,9 +163,37 @@ The step-by-step checklist is in `docs/device-test-script.md`.
    - backup reminder shown in demo mode;
    - sidebar footer pushed off-screen by the demo banner.
 
-## 6. Owner decisions still open
+7. **Phase 1 audit (2026-11-14):**
+   - **AdGuard (verified cause):** see §7.
+   - **Clarity Capture readings that were silently wrong, now fixed** with regression tests in `packages/capture/test/audit.test.ts`:
+     - a purchase "at <store> on my card" was read as a card payment, and "Visa bill" as spending;
+     - "3 shirts for 45" produced an extra $3 draft;
+     - "$1.234,56" was read as $1.00 and "$1.5k" as $1.50;
+     - "50ish" and "$40-50" were taken as exact amounts;
+     - "Sunday Market" was read as a date;
+     - "cash back" was read as a refund;
+     - "transferred $100 to Mom" was treated as an account transfer.
+   - **Engine:** 14 new edge-case tests (`packages/engine/test/audit.test.ts`) all passed without changes.
+
+## 7. Hosted web app and content blockers (AdGuard)
+- **Symptom:** on the owner's iPhone, the hosted app stayed on "Loading Clarity…" until the site was allow-listed in AdGuard.
+- **Cause, reproduced:** AdGuard Tracking Protection (`SpywareFilter/sections/general_url.txt`) has the rule `/clarity-*.js`, meant for Microsoft Clarity's tracker.
+  - In AdGuard syntax it matches any URL containing `clarity-` followed later by `.js`.
+  - The hostname `clarity-budget-vzhu.onrender.com` therefore makes **all 7 script URLs** match: the app, `boot.js`, the service worker and the workers. CSS, fonts and images still load.
+- **How it was verified:**
+  - AdGuard's own matching engine (`@adguard/tsurlfilter` 6.1.0) was run on the current AdGuard and EasyList filter sources (215,310 rules, app-only `$app` rules excluded as in Safari).
+  - The engine was first checked to block known trackers.
+  - The same build on hostnames without `clarity-` (e.g. `claritybudget-…`, `budget-clarity…`) has 0 of 22 resources blocked.
+  - This was not checked on the real device with the real AdGuard app.
+- **Not the cause:** Clarity's code, CSP, file names or third-party scripts. There are none of those: every request is same-origin.
+- **Change made (code only):** the static loading hint, shown by CSS when no script can run, now says a content blocker such as AdGuard may be blocking the scripts and tells the user what to do. There is an end-to-end test for it.
+- **Recommended, not done (hosting change, owner decision):** serve the app from a hostname without `clarity-`, for example a renamed Render service or a custom domain. Re-check with the filter lists before switching.
+
+## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.
 - Pricing / business model.
-- Hosting for the web app (headers file provided for Netlify / Cloudflare Pages).
+- Web hosting is on Render (`render.yaml`, owner-managed). Open items:
+  - the hostname (see §7);
+  - syncing the Blueprint to create the separate test site (`clarity-budget-test`).
 - Apple Developer Program and Google Play accounts, export-compliance answers (the app uses standard encryption), and store privacy labels ("Data not collected" is accurate for this architecture).

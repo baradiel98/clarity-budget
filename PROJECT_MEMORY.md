@@ -138,3 +138,11 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Verified]** Mobile app Capture screen (modal; Home card and Transactions button). Logic tests pass and the iOS/Android bundles build. Not yet tried on a device.
 - **[Open]** Voice and receipt input; a cloud interpreter.
 
+## Phase 1 audit (2026-11-14)
+- **[Verified]** AdGuard cause: the Tracking Protection rule `/clarity-*.js` (aimed at Microsoft Clarity) matches every script URL on the `clarity-budget-…` hostname. It was reproduced with AdGuard's tsurlfilter engine on the current filter sources (`docs/implementation-report.md` §7). The code-side change only improves the static loading hint.
+- **[Recommendation, owner]** Use a hostname without `clarity-` (hosting change; not done).
+- **[Lesson]** When testing against AdGuard lists, exclude `$app=` rules: they never apply in Safari and otherwise make everything look allowed.
+- **[Lesson]** Pushing `phase-1` deploys to Render. When the owner says "don't deploy", commit locally only.
+- **[Verified]** Capture audit fixed 11 silently-wrong readings (regressions in `packages/capture/test/audit.test.ts`). Engine audit: 14 new edge-case tests passed unchanged.
+- **[Open]** A card paid beyond what is owed shows a negative owed amount; the UI has no "credit" wording.
+
