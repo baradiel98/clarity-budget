@@ -4,8 +4,8 @@ import { useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { addTransaction, deleteTransaction, updateTransaction, type TxInput } from '@clarity/data';
-import { addDays, centsToDecimalString, formatCents, formatShortDate, parseAmountInput, TERMS } from '@clarity/shared';
-import { buildMerchantMemory, expandOccurrences, findPossibleDuplicates, merchantKey, suggestOccurrenceMatch } from '@clarity/engine';
+import { addDays, ALREADY_INCLUDED_HINT, ALREADY_INCLUDED_LABEL, centsToDecimalString, formatCents, formatShortDate, parseAmountInput, TERMS } from '@clarity/shared';
+import { balanceAsOfDate, buildMerchantMemory, expandOccurrences, findPossibleDuplicates, merchantKey, suggestOccurrenceMatch } from '@clarity/engine';
 import { Check } from '../src/features/Welcome';
 import { takeAddPrefill } from '../src/state/nav';
 import { useData, useRun, useSession, useStore } from '../src/state/session';
@@ -61,12 +61,17 @@ export default function AddScreen() {
   const [date, setDate] = useState(src?.date ?? prefill.date ?? today);
   const [notes, setNotes] = useState(src?.notes ?? '');
   const [pending, setPending] = useState(src?.status === 'pending');
+  const [included, setIncluded] = useState(!!src?.includedInBalance);
   const [more, setMore] = useState(false);
   const [dupConfirmed, setDupConfirmed] = useState(false);
   const [linkOcc, setLinkOcc] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const isEdit = !!existing;
+  // Phase 4A.5.6: a transaction dated on or before the balance the user entered may already be in that balance.
+  const selectedAccount = data.accounts.find((a) => a.id === accountId);
+  const balanceDate = selectedAccount ? balanceAsOfDate(selectedAccount, data.transactions) : null;
+  const canInclude = !!balanceDate && date <= balanceDate && date >= (selectedAccount?.openingDate ?? date);
 
   const cents = parseAmountInput(amount || '0', cur) ?? 0;
   const memory = useMemo(() => buildMerchantMemory(data.transactions, merchantKey), [data.transactions]);
@@ -107,6 +112,7 @@ export default function AddScreen() {
     const input: TxInput = {
       kind, accountId, ...(kind === 'transfer' ? { toAccountId } : {}), date, amountCents: cents, merchant, categoryId: kind === 'transfer' ? null : categoryId, notes,
       status: pending ? 'pending' : 'confirmed',
+      ...(included && canInclude ? { includedInBalance: true } : {}),
       // Splits are edited on the web app in Phase 1; keep them intact when editing here.
       ...(src?.splits?.length ? { splits: src.splits.map((x) => ({ categoryId: x.categoryId, amountCents: Math.abs(x.amountCents) })) } : {}),
       ...(prefill.occurrenceRef ? { occurrenceRef: prefill.occurrenceRef } : occurrence && linkOcc ? { occurrenceRef: { recurringId: occurrence.recurringId, originalDate: occurrence.originalDate } } : {}),
@@ -159,6 +165,12 @@ export default function AddScreen() {
           </ScrollView>
         )}
         <DateField label="Date" value={date} onChange={setDate} />
+        {canInclude && (
+          <View testID="already-included">
+            <Check label={ALREADY_INCLUDED_LABEL(formatShortDate(balanceDate!))} value={included} onChange={setIncluded} />
+            <T variant="footnote" color="textSecondary">{ALREADY_INCLUDED_HINT}</T>
+          </View>
+        )}
         {occurrence && <Check label={`This ${occurrence.kind === 'income' ? 'is' : 'pays'} ${occurrence.name} ${occurrence.kind === 'income' ? 'expected' : 'due'} ${formatShortDate(occurrence.date)}`} hint="So it isn't counted again in your forecast." value={linkOcc} onChange={setLinkOcc} />}
         {duplicates.length > 0 && <T color="warning" accessibilityRole="alert">A {formatCents(Math.abs(duplicates[0]!.amountCents), cur)} transaction at {duplicates[0]!.merchant} on this date already exists. {dupConfirmed ? 'Tap Save again to add it anyway.' : ''}</T>}
         {src?.splits?.length ? <T variant="footnote" color="textSecondary">This transaction is split across {src.splits.length} categories. Its split stays as is; change the split on the web app. If you change the amount, the parts must still add up.</T> : null}

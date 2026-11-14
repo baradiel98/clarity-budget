@@ -2,7 +2,34 @@ import type { Account, Cents, CurrencyCode, ID, ISODate, Transaction } from '@cl
 
 /** A transaction changes an account's balance only if dated on/after the opening date. */
 export function affectsBalance(account: Account, tx: Transaction): boolean {
-  return tx.accountId === account.id && tx.date >= account.openingDate;
+  return tx.accountId === account.id && tx.date >= account.openingDate && !tx.includedInBalance;
+}
+
+/**
+ * Phase 4A.5.6: a pending credit not yet available to spend: a pending refund, income or other money in
+ * (not a transfer between the user's own accounts, whose sending leg is counted the same way).
+ */
+export function isPendingCredit(tx: Transaction): boolean {
+  return tx.status === 'pending' && tx.amountCents > 0 && !tx.transferGroupId && tx.kind !== 'transfer';
+}
+
+/** Pending credits (dated on or before `asOf`) included in the recorded balance but not yet spendable. */
+export function pendingCreditTotal(account: Account, transactions: readonly Transaction[], asOf: ISODate): Cents {
+  let total = 0;
+  for (const t of transactions) if (affectsBalance(account, t) && t.date <= asOf && isPendingCredit(t)) total += t.amountCents;
+  return total;
+}
+
+/** Posted balance: the recorded balance without any pending items (what "Update balance" compares with the bank). */
+export function postedBalance(account: Account, transactions: readonly Transaction[], asOf: ISODate): Cents {
+  return accountBalance(account, transactions, asOf) - pendingTotal(account, transactions, asOf);
+}
+
+/** The date of the balance the user last entered: the opening date, or the latest "Update balance" adjustment. */
+export function balanceAsOfDate(account: Account, transactions: readonly Transaction[]): ISODate {
+  let d = account.openingDate;
+  for (const t of transactions) if (t.accountId === account.id && t.kind === 'adjustment' && t.date > d) d = t.date;
+  return d;
 }
 
 /**
@@ -36,6 +63,8 @@ export interface AccountBalanceLine {
   type: Account['type'];
   balanceCents: Cents;
   pendingCents: Cents;
+  /** Phase 4A.5.6: pending credits in the balance, not available to spend until they clear. */
+  pendingCreditCents?: Cents;
   countsAsCash: boolean;
   /** Archived account still listed because it owes money (Phase 4A.4.4). */
   archived?: boolean;
@@ -93,6 +122,7 @@ export function balanceSummary(
       type: a.type,
       balanceCents: bal,
       pendingCents: pendingTotal(a, transactions, asOf),
+      pendingCreditCents: pendingCreditTotal(a, transactions, asOf),
       countsAsCash: isCash,
     });
   }

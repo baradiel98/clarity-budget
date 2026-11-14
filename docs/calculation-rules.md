@@ -29,7 +29,9 @@ A card owing $500 has balance **−$500**, displayed as "Owed $500".
 
 **Transfers** are always two legs sharing `transferGroupId`. They are created, edited and deleted together in one atomic write. A lone leg fails validation.
 
-**Splits** must add up exactly to the total and have the same sign. **Pending** transactions count in balances and forecasts, with a label. Changing pending to confirmed never changes an amount.
+**Splits** must add up exactly to the total and have the same sign. **Pending** transactions count in the *recorded* balance, with a label. Changing pending to confirmed never changes an amount.
+- **Pending credits are not spendable (Phase 4A.5.6).** A pending credit is a pending, positive, non-transfer transaction (refund, income, cashback). On checking, savings, cash and archived accounts it is in the recorded balance but **not** in the money the forecast starts from, so it cannot fund a transfer or bill, cover a shortfall or debt, raise Safe to Spend, or make "Can I afford this?" say yes. It counts on the day it is marked posted, exactly once. A future-dated pending credit is excluded too ("pending, not counted until it clears"). Pending **debits** stay counted. Cards: pending credits are added back to card debt (Phase 4A.5.4). Accounts in another currency stay excluded.
+- Four separate figures: **recorded balance** (everything, pending included; never changed by this rule), **pending credits** (shown per account), **spendable money** (recorded − pending credits, the forecast's start), **projected balances** (forecast).
 
 ## Balances
 - **Recorded balance** of an account = opening balance + every transaction dated on/after the account's opening date and on/before today.
@@ -37,6 +39,12 @@ A card owing $500 has balance **−$500**, displayed as "Owed $500".
 - Transactions dated **after today** are *planned*. They appear in the forecast on their date, not in today's balance.
 - **Available cash** = sum of active, spendable, non-card accounts in the base currency. **Owed on cards** is shown separately and never mixed into cash.
 - **Update balance** creates an `adjustment` transaction for the difference, with a reason. History is never edited.
+- **Balance convention (Phase 4A.5.6).** Every balance the user types in (onboarding, a new account, Update balance) is the bank's **posted (cleared) balance right now, without pending items**.
+  - Anything recorded in Clarity afterwards is added to it, including transactions dated today. A transaction dated before the opening date is history only.
+  - For a transaction dated on or before the balance date (`balanceAsOfDate` = the opening date or the latest adjustment date), Add Transaction offers "Already included in the balance I entered on {date}". Ticked, it is stored with `includedInBalance` and kept as history, never added again (cases O1, O3).
+  - **Update balance compares posted with posted:** the adjustment is bank posted balance − Clarity's posted balance (recorded − every pending item). Pending items are never absorbed into an adjustment, and a pending credit recorded after an update stays excluded (case O4: $500 posted, $300 pending deposit, update to $500 → no adjustment; $500 spendable, $800 recorded).
+  - The dialog lists the pending items and says: "If any of them has cleared at your bank, mark it posted first, so it isn't counted twice."
+  - Adjustments recorded before Phase 4A.5.6 (under the old recorded-vs-recorded comparison) are not rewritten.
 
 ## Recurring schedules
 - Frequencies: once, every N days, weekly, every 2 weeks (from a real anchor date), twice monthly, monthly, quarterly, annually (monthly with interval 1/3/12).

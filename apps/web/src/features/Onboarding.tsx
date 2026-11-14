@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { countedOutflows, engineInput, onboard, type OnboardingInput } from '@clarity/data';
 import { buildDashboard, scheduleDates } from '@clarity/engine';
-import { addDays, formatMonthYear, formatShortDate, formatWeekdayDate, monthNameLong, parseAmountInput, parseISO, type ISODate, type Schedule, TERMS } from '@clarity/shared';
+import { addDays, BALANCE_ENTRY_HINT, formatMonthYear, formatShortDate, formatWeekdayDate, monthNameLong, parseAmountInput, parseISO, type ISODate, type Schedule, TERMS } from '@clarity/shared';
 import { Plus, X } from 'lucide-react';
 import { useData, useRun, useSession } from '../state/session';
 import { AmountInput } from '../ui/AmountInput';
@@ -159,8 +159,8 @@ export function Onboarding() {
         {step === 0 && (
           <>
             <h1 className="t-title1">What's in your checking account right now?</h1>
-            <p className="muted t-callout">Use the balance your bank app shows today. You can add savings, cash and cards later.</p>
-            <Field label="Current checking balance" error={errors.balance}>
+            <p className="muted t-callout">You can add savings, cash and cards later.</p>
+            <Field label="Current checking balance" hint={BALANCE_ENTRY_HINT} error={errors.balance}>
               {(id) => <AmountInput id={id} value={balance} onChange={setBalance} currency={cur} autoFocus />}
             </Field>
           </>

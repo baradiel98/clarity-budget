@@ -197,8 +197,25 @@ function excludedLine(e: ForecastEvent): ExplainLine {
       ? 'amount unknown, not counted'
       : e.excluded === 'estimated_income'
         ? 'estimated income, not counted in Safe to Spend'
-        : 'past payday not recorded, not counted';
+        : e.excluded === 'pending_credit'
+          ? 'pending, not counted until it clears'
+          : 'past payday not recorded, not counted';
   return { kind: 'excluded', label: e.label, date: e.date, note, ...(e.occurrence?.amountCents ? { cents: e.occurrence.amountCents } : {}) };
+}
+
+/**
+ * Phase 4A.5.6: the first lines of every explanation. The recorded balance, then each pending credit held back
+ * (it stays in the recorded balance but isn't available to spend until it clears), so the lines still add up.
+ * Pending credits on non-spendable accounts are listed for information (they can't fund transfers or bills).
+ */
+function startLines(f: Forecast, accounts: readonly Account[], cur: CurrencyCode): ExplainLine[] {
+  const name = (id: ID) => accounts.find((a) => a.id === id)?.name ?? 'Account';
+  return [
+    { kind: 'start', label: TERMS.recordedBalance, cents: f.recordedStartCashCents },
+    ...f.pendingCredits.map((p): ExplainLine => p.spendable
+      ? { kind: 'out', label: `${name(p.accountId)}: pending credit not yet available`, cents: -p.cents, note: "pending; it's in your recorded balance but not counted until it clears" }
+      : { kind: 'info', label: `${name(p.accountId)}: ${formatCents(p.cents, cur)} pending credit`, note: "pending; not counted (it can't fund transfers or bills) until it clears" }),
+  ];
 }
 
 /** One card's debt at a low point (Phase 4A.5.2, Policy B). */
@@ -376,7 +393,7 @@ export function computeSafeToSpend(input: EngineInput, hypotheticals?: readonly 
       : null;
 
   const lines: ExplainLine[] = [
-    { kind: 'start', label: TERMS.recordedBalance, cents: f.startCashCents },
+    ...startLines(f, input.accounts, cur),
     ...low.incomeBefore.map((e) => eventLine(e, cur)),
     ...low.obligations.map((e) => eventLine(e, cur)),
     ...cardLines(low, input, h.end, nextAfterEnd),
@@ -616,8 +633,8 @@ export interface UpcomingItem {
   isIncome: boolean;
 }
 
-function projectionExplanation(f: Forecast, upTo: ISODate, title: string, cur: CurrencyCode): Explanation {
-  const lines: ExplainLine[] = [{ kind: 'start', label: TERMS.recordedBalance, cents: f.startCashCents }];
+function projectionExplanation(f: Forecast, upTo: ISODate, title: string, cur: CurrencyCode, accounts: readonly Account[]): Explanation {
+  const lines: ExplainLine[] = [...startLines(f, accounts, cur)];
   let estimatedIncome = 0;
   for (const d of f.days) {
     if (d.date > upTo) break;
@@ -642,9 +659,9 @@ function projectionExplanation(f: Forecast, upTo: ISODate, title: string, cur: C
   };
 }
 
-function lowExplanation(low: LowPoint, f: Forecast, title: string, cur: CurrencyCode, next: IncomeRef | null): Explanation {
+function lowExplanation(low: LowPoint, f: Forecast, title: string, cur: CurrencyCode, next: IncomeRef | null, accounts: readonly Account[]): Explanation {
   const lines: ExplainLine[] = [
-    { kind: 'start', label: TERMS.recordedBalance, cents: f.startCashCents },
+    ...startLines(f, accounts, cur),
     ...low.incomeBefore.map((e) => eventLine(e, cur)),
     ...low.obligations.map((e) => eventLine(e, cur)),
     { kind: 'result', label: `Lowest on ${formatShortDate(low.date)}`, cents: low.cents },
@@ -666,8 +683,8 @@ export function buildDashboard(input: EngineInput): Dashboard {
   const balances = balanceSummary(input.accounts, input.transactions, input.today, cur);
   const next = horizonFor(input).next;
 
-  const monthEndExpl = projectionExplanation(inclusive, eom, 'Projected month-end balance', cur);
-  const eodExpl = projectionExplanation(inclusive, input.today, 'Projected end of today', cur);
+  const monthEndExpl = projectionExplanation(inclusive, eom, 'Projected month-end balance', cur, input.accounts);
+  const eodExpl = projectionExplanation(inclusive, input.today, 'Projected end of today', cur, input.accounts);
 
   const lowMonth = lowestBetween(conservative, input.today, eom)!;
   const lowBefore = next ? lowestBetween(conservative, input.today, next.date) : null;
@@ -1044,7 +1061,7 @@ export function buildDashboard(input: EngineInput): Dashboard {
     kind: l.countsAsCash ? 'in' : 'info',
     label: l.name,
     cents: l.balanceCents,
-    note: l.archived ? (l.type === 'credit_card' ? 'archived card, still owed' : 'archived and overdrawn, still owed') : l.countsAsCash ? (l.pendingCents ? `includes ${formatCents(l.pendingCents, cur)} pending` : 'counts as available cash') : l.type === 'credit_card' ? 'owed on card, not cash' : 'not marked as spendable',
+    note: l.archived ? (l.type === 'credit_card' ? 'archived card, still owed' : 'archived and overdrawn, still owed') : l.countsAsCash ? (l.pendingCreditCents ? `includes ${formatCents(l.pendingCreditCents, cur)} of pending credits, which aren't available to spend until they clear (not counted in Safe to Spend)` : l.pendingCents ? `includes ${formatCents(l.pendingCents, cur)} pending` : 'counts as available cash') : l.type === 'credit_card' ? 'owed on card, not cash' : 'not marked as spendable',
   }));
   recordedLines.push({ kind: 'result', label: TERMS.recordedBalance, cents: balances.availableCashCents });
 
@@ -1054,9 +1071,9 @@ export function buildDashboard(input: EngineInput): Dashboard {
     monthEnd: { cents: monthEndExpl.resultCents ?? 0, date: eom, explanation: monthEndExpl },
     endOfDay: { cents: eodExpl.resultCents ?? 0, date: input.today, explanation: eodExpl },
     safeToSpend: sts,
-    lowestThroughMonthEnd: { ...lowMonth, explanation: lowExplanation(lowMonth, conservative, TERMS.lowestBalance, cur, next) },
+    lowestThroughMonthEnd: { ...lowMonth, explanation: lowExplanation(lowMonth, conservative, TERMS.lowestBalance, cur, next, input.accounts) },
     lowestBeforeNextIncome:
-      lowBefore && next ? { ...lowBefore, nextIncome: next, explanation: lowExplanation(lowBefore, conservative, 'Lowest before next income', cur, next) } : null,
+      lowBefore && next ? { ...lowBefore, nextIncome: next, explanation: lowExplanation(lowBefore, conservative, 'Lowest before next income', cur, next, input.accounts) } : null,
     nextIncome: next,
     upcoming,
     upcomingUntil: until,
@@ -1078,6 +1095,6 @@ export function buildDashboard(input: EngineInput): Dashboard {
 export function balanceOnDate(input: EngineInput, date: ISODate): Projection {
   const target = date < input.today ? input.today : date;
   const f = forecastTo(input, target, true);
-  const ex = projectionExplanation(f, target, `Projected balance on ${formatShortDate(target)}`, input.baseCurrency);
+  const ex = projectionExplanation(f, target, `Projected balance on ${formatShortDate(target)}`, input.baseCurrency, input.accounts);
   return { cents: ex.resultCents ?? 0, date: target, explanation: ex };
 }

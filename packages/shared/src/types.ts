@@ -73,6 +73,11 @@ export interface Transaction {
   occurrenceRef?: OccurrenceRef;
   /** Reason text for adjustments (reconciliation trail). */
   adjustmentReason?: string;
+  /**
+   * Phase 4A.5.6: the user said this is already included in the balance they entered (opening balance or
+   * "Update balance"). Kept as history (reports, search), never added to the account balance again.
+   */
+  includedInBalance?: boolean;
   provenance: Provenance;
   createdAt: number;
   updatedAt: number;

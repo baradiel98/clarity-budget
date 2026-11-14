@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Share, View } from 'react-native';
 import { countedOutflows, engineInput, onboard, type OnboardingInput } from '@clarity/data';
 import { buildDashboard } from '@clarity/engine';
-import { addDays, formatShortDate, monthNameLong, parseAmountInput, parseISO, TERMS, type Schedule } from '@clarity/shared';
+import { addDays, BALANCE_ENTRY_HINT, formatShortDate, monthNameLong, parseAmountInput, parseISO, TERMS, type Schedule } from '@clarity/shared';
 import { useData, useRun, useSession } from '../state/session';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -120,7 +120,7 @@ export function Onboarding() {
     return (
       <Panel step={1} footer={<Button title="Continue" onPress={() => setStep(1)} />}>
         <T variant="title1" accessibilityRole="header">What's in your checking account right now?</T>
-        <T color="textSecondary">Use the balance your bank app shows today. You can add savings, cash and cards later.</T>
+        <T color="textSecondary">{BALANCE_ENTRY_HINT} You can add savings, cash and cards later.</T>
         <Money cents={parseAmountInput(balance || '0', cur) ?? 0} currency={cur} variant="hero" style={{ textAlign: 'center', marginVertical: 12 }} />
         <Keypad value={balance} onChange={setBalance} />
       </Panel>

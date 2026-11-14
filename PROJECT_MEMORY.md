@@ -330,3 +330,15 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
   - The owner's table value "$400 debt, $200 posted refund, later $200 payment → $100" is $300 by arithmetic. $100 would count the refunded $200 twice; tested at $300 and reported.
 - **[Verified]** 500 random scenarios now equal an independent reference model (250 with refunds).
 - **[Kept]** The 62-day lookahead is unchanged and documented.
+
+## Phase 4A.5.6 (2026-11-14): pending cash credits and starting-balance integrity (audit 4A.5.5)
+- **[Verified defect, fixed]** Pending credits into checking, savings, cash and archived accounts were spendable. `accountBalance` includes pending items and the forecast started from it. Examples: $500 + $300 pending refund → $800 (now $500); pending + $700 bill → $100 (now −$200); pending into savings funded a transfer and a savings bill.
+- **[Fix]** `forecast.ts` starts non-card accounts at recorded − pending credits (`isPendingCredit`, `pendingCreditTotal`) and excludes future-dated pending credits (`'pending_credit'`). Recorded balances are unchanged. "Why this number?" starts from the recorded balance and takes out "<account>: pending credit not yet available". Non-spendable accounts get an info line. The recorded-balance explanation notes the pending amount.
+- **[Verified defect, fixed]** Update balance compared the bank figure with the recorded balance, so a pending deposit was absorbed (O4 gave $200). It now compares posted with posted (`postedBalance`).
+- **[Confirmed decision: convention]** Entered balances are the bank's posted balance without pending items. Later records are added, including today's. "Already included in the balance I entered on {date}" (`Transaction.includedInBalance`) records an item as history only. Only the user knows whether the bank figure already includes an item, so it's an explicit control, not a guess.
+- **[Known limitation]**
+  - A pending credit is treated as never arriving within the forecast until marked posted.
+  - Reconciling while a cleared item is still pending in Clarity double counts unless it's marked posted first; the dialog warns.
+  - Old adjustments are not rewritten.
+- **[Lesson]** In a randomized reference test, generate only dates that the rule under test covers. A past unrecorded one-off is a separate rule, and one seed failed for that reason; the reference was wrong, not the engine.
+- **[Verified]** Engine tests `pending-credits.test.ts` (33, including 300 invariant scenarios and 200 against an independent model); data `balance-convention.test.ts` (5); web e2e `phase4a56.spec.ts` (4); mobile `pending-credits.test.tsx` (2).

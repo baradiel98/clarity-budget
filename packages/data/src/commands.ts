@@ -3,7 +3,7 @@ import {
   type MappingProfile, type OccurrenceException, type Provenance, type RecurringAmount, type RecurringItem, type RecurringKind, type Schedule, type Settings,
   type Split, type Transaction, type TxKind, type TxStatus, type WeekendRule, type WorkspaceData,
 } from '@clarity/shared';
-import { accountBalance, validateTransaction, validateTransferPair, type Occurrence, type ValidationIssue } from '@clarity/engine';
+import { accountBalance, postedBalance, validateTransaction, validateTransferPair, type Occurrence, type ValidationIssue } from '@clarity/engine';
 import type { ImportCandidate, ImportSettings, ReconciliationPreview } from '@clarity/import';
 import { applyOps as applyLocal, type Op } from './ops';
 
@@ -216,7 +216,9 @@ export function archiveAccount(ctx: Ctx, id: ID, plan: ArchivePlan = {}): Op[] {
 export function adjustBalance(ctx: Ctx, accountId: ID, actualBalanceCents: Cents, reason: string, date: ISODate = ctx.today): { ops: Op[]; tx: Transaction | null } {
   const a = ctx.data.accounts.find((x) => x.id === accountId) ?? fail('Account not found.');
   const actual = a.type === 'credit_card' ? -Math.abs(actualBalanceCents) : actualBalanceCents;
-  const current = accountBalance(a, ctx.data.transactions, date);
+  // Phase 4A.5.6: the figure entered is the bank's POSTED balance, so it is compared with Clarity's posted balance
+  // (pending items left out). Pending items stay pending and are never absorbed into the adjustment.
+  const current = postedBalance(a, ctx.data.transactions, date);
   const diff = actual - current;
   if (diff === 0) return { ops: [], tx: null };
   const tx: Transaction = {
@@ -248,6 +250,8 @@ export interface TxInput {
   occurrenceRef?: { recurringId: ID; originalDate: ISODate };
   /** Where this came from (defaults to manual). Capture keeps the user's words in `rawDescription`. */
   provenance?: Provenance;
+  /** Phase 4A.5.6: already included in the balance the user entered for the account; kept as history only. */
+  includedInBalance?: boolean;
 }
 
 function bumpBackupCounter(ctx: Ctx, n: number): Op[] {
@@ -263,6 +267,7 @@ function buildTxs(ctx: Ctx, input: TxInput, ids: { id?: ID; pairId?: ID; groupId
   const base = {
     date: input.date,
     status: input.status ?? 'confirmed',
+    ...(input.includedInBalance ? { includedInBalance: true } : {}),
     merchant: input.merchant.trim(),
     notes: (input.notes ?? '').trim(),
     provenance: input.provenance ?? { source: 'manual' as const },

@@ -63,3 +63,17 @@ export const UPCOMING_NOTE = 'Nothing here is recorded until you record it or ma
 
 /** Heading for items after the Upcoming window that Safe to Spend still counts (both apps). */
 export const UPCOMING_LATER_TITLE = 'Later · also counted in Safe to Spend';
+
+/**
+ * Phase 4A.5.6: what a balance you type in means (onboarding, new account, Update balance). Matches the engine:
+ * the figure is the bank's posted balance; pending items are tracked separately; transactions recorded afterwards
+ * are added unless marked "Already included".
+ */
+export const BALANCE_ENTRY_HINT =
+  "Enter the posted (cleared) balance your bank shows right now, without pending items. Anything you record in Clarity after this is added to it, including transactions dated today, so if it's already in this balance, tick “Already included” when you record it.";
+export const UPDATE_BALANCE_HINT =
+  'Enter the posted (cleared) balance your bank shows right now, without pending items. Clarity compares it with its own posted balance and records the difference as an adjustment with your reason; history isn\'t changed and pending items stay pending.';
+export const UPDATE_BALANCE_PENDING_NOTE =
+  "These are still pending in Clarity. If any of them has cleared at your bank, mark it posted first, so it isn't counted twice.";
+export const ALREADY_INCLUDED_LABEL = (date: string) => `Already included in the balance I entered on ${date}`;
+export const ALREADY_INCLUDED_HINT = "Kept in your history but not added to the account balance again.";

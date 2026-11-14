@@ -394,6 +394,36 @@ The step-by-step checklist is in `docs/device-test-script.md`.
 - **Random comparison:** 500 scenarios, all equal to an independent reference model.
 - **Not verified:** physical devices, Safari.
 
+## 7n. Phase 4A.5.6: pending cash credits and starting-balance integrity
+
+| Scenario (Nov 13, horizon Dec 31; $500 checking) | Phase 4A.5.4 | Now |
+|---|---:|---:|
+| $300 pending refund | $800 | **$500** |
+| Same, posted | $800 | $800 |
+| Pending + $1,000 rent Dec 1, paycheck Dec 4 | −$200 | **−$500** |
+| Pending + paycheck Nov 20, rent Dec 1 | $800 | **$500** |
+| Pending + $700 bill | $100 | **−$200** |
+| Two pending refunds ($100 + $200) | $800 | **$500** |
+| Pending $300 cashback | $800 | **$500** |
+| Pending $300 into savings, transfer to checking, $600 rent | $200 | **−$100** |
+| Pending $300 into savings, $300 savings bill | $500 | **$200** |
+| Pending $300 into an archived account overdrawn by $100 | $500 | **$400** |
+| Pending €300 into a EUR account | $500 | $500 |
+| Cash wallet, pending $200, $200 bill | $500 | **$300** |
+| Future-dated pending refund Dec 10, rent $600 Dec 15 | $200 | **−$100** |
+| O1: opened at $800 incl. a pending $300, recorded again | $1,100 | **$800** (pending excluded; "Already included" for a posted one) |
+| O2: deposit dated before opening | $800 | $800 |
+| O3: confirmed $50 purchase on the opening day | $750 | $750 (or $800 with "Already included") |
+| O4: pending $300, Update balance to posted $500 | $200 | **$500** (no adjustment) |
+| Card pending refund (Phase 4A.5.4 rule) | $100 | $100 |
+
+- **Tests:**
+  - `packages/engine/test/pending-credits.test.ts` (33): every case, the lifecycle, explanations, affordability, 300 invariant scenarios and 200 scenarios against an independent model;
+  - `packages/data/test/balance-convention.test.ts` (5);
+  - `apps/web/e2e/phase4a56.spec.ts` (4): onboarding, pending refund through posting, Update balance, "Already included";
+  - `apps/mobile/test/pending-credits.test.tsx` (2).
+- **Not verified:** physical devices, Safari. Adjustments made before this phase are not rewritten.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

@@ -1,9 +1,9 @@
 import { Archive, ArchiveRestore, Download, KeyRound, Pencil, Plus, RefreshCw, Scale, ShieldCheck, Trash2, Upload } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { accountUsage, adjustBalance, archiveAccount, archiveBalanceReview, archiveTargets, createAccount, createCategory, describeUsage, exportTransactionsCsv, PAUSE_NOTE, updateAccount, updateCategory, updateSettings, WorkspaceStore, type ArchivePlan } from '@clarity/data';
-import { accountBalance } from '@clarity/engine';
+import { accountBalance, affectsBalance, postedBalance } from '@clarity/engine';
 import { BACKUP_EXTENSION } from '@clarity/security';
-import { centsToDecimalString, formatShortDate, NO_SYNC_NOTICE, parseAmountInput, TERMS, type Account, type AccountType } from '@clarity/shared';
+import { BALANCE_ENTRY_HINT, centsToDecimalString, formatShortDate, NO_SYNC_NOTICE, parseAmountInput, TERMS, UPDATE_BALANCE_HINT, UPDATE_BALANCE_PENDING_NOTE, type Account, type AccountType } from '@clarity/shared';
 import { useRouter } from '../lib/router';
 import { downloadText, pickFile, stamp } from '../platform/files';
 import { buildId, checkForUpdate } from '../platform/update';
@@ -293,7 +293,7 @@ function AccountDialog({ account, onClose }: { account?: Account; onClose: () =>
       <form className="stack" onSubmit={(e) => { e.preventDefault(); void save(); }}>
         <Field label="Name" error={errors.name}>{(id) => <input id={id} className="input" value={name} onChange={(e) => setName(e.target.value)} autoFocus />}</Field>
         {!account && <Field label="Type">{() => <Segmented label="Account type" value={type} onChange={(t) => { setType(t); setSpendable(t === 'checking' || t === 'cash'); }} options={[{ value: 'checking', label: 'Checking' }, { value: 'savings', label: 'Savings' }, { value: 'cash', label: 'Cash' }, { value: 'credit_card', label: 'Credit card' }]} block />}</Field>}
-        {!account && <Field label={type === 'credit_card' ? 'Amount owed today' : 'Balance today'} error={errors.balance}>{(id) => <AmountInput id={id} value={balance} onChange={setBalance} currency={cur} />}</Field>}
+        {!account && <Field label={type === 'credit_card' ? 'Amount owed today' : 'Balance today'} hint={BALANCE_ENTRY_HINT} error={errors.balance}>{(id) => <AmountInput id={id} value={balance} onChange={setBalance} currency={cur} />}</Field>}
         {type !== 'credit_card' && (
           <label className="check"><input type="checkbox" checked={spendable} onChange={(e) => setSpendable(e.target.checked)} /><span>Count toward available cash and Safe to Spend<br /><span className="hint">Turn off for savings you don't want to spend from.</span></span></label>
         )}
@@ -308,7 +308,9 @@ function BalanceDialog({ account, onClose }: { account: Account; onClose: () => 
   const { today } = useSession();
   const run = useRun();
   const cur = data.settings.baseCurrency;
-  const current = accountBalance(account, data.transactions, today);
+  // Phase 4A.5.6: compare with the bank's POSTED balance; pending items stay pending.
+  const current = postedBalance(account, data.transactions, today);
+  const pendingItems = data.transactions.filter((t) => affectsBalance(account, t) && t.date <= today && t.status === 'pending');
   const isCard = account.type === 'credit_card';
   const [value, setValue] = useState(centsToDecimalString(isCard ? -current : current));
   const [reason, setReason] = useState('Matched balance in bank app');
@@ -324,8 +326,14 @@ function BalanceDialog({ account, onClose }: { account: Account; onClose: () => 
   return (
     <Dialog title={`Update ${account.name} balance`} onClose={onClose} footer={<><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={!diff} onClick={() => void save()}>Record adjustment</button></>}>
       <div className="stack">
-        <p className="t-callout muted" style={{ margin: 0 }}>Clarity shows <Money cents={isCard ? -current : current} currency={cur} />{isCard ? ' owed' : ''}. Enter what your bank shows now. The difference is recorded as an adjustment with your reason — history isn't changed.</p>
-        <Field label={isCard ? 'Amount owed per bank' : 'Balance per bank'} error={error}>{(id) => <AmountInput id={id} value={value} onChange={setValue} currency={cur} autoFocus />}</Field>
+        <p className="t-callout muted" style={{ margin: 0 }} data-testid="update-balance-hint">Clarity's posted balance is <Money cents={isCard ? -current : current} currency={cur} />{isCard ? ' owed' : ''}. {UPDATE_BALANCE_HINT}</p>
+        {pendingItems.length > 0 && (
+          <div className="callout" data-testid="update-balance-pending">
+            <div>{UPDATE_BALANCE_PENDING_NOTE}</div>
+            <ul className="warning-items">{pendingItems.map((t) => <li key={t.id}><span>{formatShortDate(t.date)}</span><span>{t.merchant || 'Pending'}</span><span className="num"><Money cents={isCard ? -t.amountCents : t.amountCents} currency={cur} /></span></li>)}</ul>
+          </div>
+        )}
+        <Field label={isCard ? 'Posted amount owed per bank' : 'Posted balance per bank'} error={error}>{(id) => <AmountInput id={id} value={value} onChange={setValue} currency={cur} autoFocus />}</Field>
         <Field label="Reason">{(id) => <input id={id} className="input" value={reason} onChange={(e) => setReason(e.target.value)} />}</Field>
         {diff !== null && diff !== 0 && <div className="callout">Adjustment: <Money cents={diff} currency={cur} sign="always" /></div>}
       </div>

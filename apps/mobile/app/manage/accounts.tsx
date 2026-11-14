@@ -2,8 +2,8 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { Alert, View } from 'react-native';
 import { accountUsage, adjustBalance, archiveAccount, archiveBalanceReview, createAccount, updateAccount } from '@clarity/data';
-import { accountBalance } from '@clarity/engine';
-import { parseAmountInput, type AccountType } from '@clarity/shared';
+import { accountBalance, affectsBalance, postedBalance } from '@clarity/engine';
+import { BALANCE_ENTRY_HINT, formatCents, formatShortDate, parseAmountInput, UPDATE_BALANCE_HINT, UPDATE_BALANCE_PENDING_NOTE, type AccountType } from '@clarity/shared';
 import { Check } from '../../src/features/Welcome';
 import { useData, useRun, useSession } from '../../src/state/session';
 import { Button } from '../../src/ui/Button';
@@ -72,7 +72,23 @@ export default function Accounts() {
               />
               {adjust?.id === a.id && (
                 <View style={{ gap: 10, paddingVertical: 10 }}>
-                  <Field label={a.type === 'credit_card' ? 'Amount owed per bank' : 'Balance per bank'} hint="The difference is recorded as an adjustment with a reason. History isn't changed.">
+                  {(() => {
+                    // Phase 4A.5.6: compare with the bank's POSTED balance; pending items stay pending.
+                    const posted = postedBalance(a, data.transactions, today);
+                    const pendingItems = data.transactions.filter((t) => affectsBalance(a, t) && t.date <= today && t.status === 'pending');
+                    return (
+                      <View style={{ gap: 6 }} testID="update-balance-hint">
+                        <T variant="footnote" color="textSecondary">Clarity's posted balance is {formatCents(a.type === 'credit_card' ? -posted : posted, cur)}{a.type === 'credit_card' ? ' owed' : ''}. {UPDATE_BALANCE_HINT}</T>
+                        {pendingItems.length > 0 && (
+                          <View testID="update-balance-pending">
+                            <T variant="footnote">{UPDATE_BALANCE_PENDING_NOTE}</T>
+                            {pendingItems.map((t) => <T key={t.id} variant="footnote" color="textSecondary">{formatShortDate(t.date)} · {t.merchant || 'Pending'} · {formatCents(a.type === 'credit_card' ? -t.amountCents : t.amountCents, cur)}</T>)}
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })()}
+                  <Field label={a.type === 'credit_card' ? 'Posted amount owed per bank' : 'Posted balance per bank'}>
                     <Input value={adjust.value} onChangeText={(t) => setAdjust({ id: a.id, value: t.replace(/[^\d.,]/g, '') })} keyboardType="decimal-pad" autoFocus />
                   </Field>
                   <Button title="Record adjustment" small onPress={async () => { const v = parseAmountInput(adjust.value, cur); if (v === null) return; await run((ctx) => adjustBalance(ctx, a.id, v, 'Matched balance in bank app')); setAdjust(null); }} />
@@ -87,7 +103,7 @@ export default function Accounts() {
           <View style={{ gap: 14 }}>
             <Field label="Name"><Input value={name} onChangeText={setName} autoFocus /></Field>
             <Segmented label="Type" value={type} onChange={(t) => { setType(t); setSpendable(t === 'checking' || t === 'cash'); }} options={[{ value: 'checking', label: 'Checking' }, { value: 'savings', label: 'Savings' }, { value: 'cash', label: 'Cash' }, { value: 'credit_card', label: 'Card' }]} />
-            <Field label={type === 'credit_card' ? 'Amount owed today' : 'Balance today'}><Input value={balance} onChangeText={(t) => setBalance(t.replace(/[^\d.,]/g, ''))} keyboardType="decimal-pad" placeholder="0.00" /></Field>
+            <Field label={type === 'credit_card' ? 'Amount owed today' : 'Balance today'} hint={BALANCE_ENTRY_HINT}><Input value={balance} onChangeText={(t) => setBalance(t.replace(/[^\d.,]/g, ''))} keyboardType="decimal-pad" placeholder="0.00" /></Field>
             {type !== 'credit_card' && <Check label="Count toward available cash and Safe to Spend" value={spendable} onChange={setSpendable} />}
             {type === 'credit_card' && <T variant="footnote" color="textSecondary">Card purchases count as spending when they happen; paying the card is a transfer, so nothing is counted twice.</T>}
             {error && <T color="negative">{error}</T>}

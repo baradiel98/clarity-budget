@@ -10,7 +10,7 @@ import {
   type RecurringItem,
   type Transaction,
 } from '@clarity/shared';
-import { accountBalance, isCashAccount } from './balances';
+import { accountBalance, isCashAccount, isPendingCredit, pendingCreditTotal } from './balances';
 import { expandOccurrences, OVERDUE_LOOKBACK_DAYS, type Occurrence } from './occurrences';
 
 export interface Hypothetical {
@@ -37,7 +37,7 @@ export interface ForecastInput {
 
 /** archived_balance: an archived spendable account that is overdrawn today (Phase 4A.4.4). */
 export type EventSource = 'occurrence' | 'overdue' | 'scheduled_tx' | 'hypothetical' | 'archived_balance';
-export type ExclusionReason = 'unknown_amount' | 'estimated_income' | 'overdue_income';
+export type ExclusionReason = 'unknown_amount' | 'estimated_income' | 'overdue_income' | 'pending_credit';
 
 export interface Leg {
   accountId: ID;
@@ -187,6 +187,10 @@ export interface Forecast {
   currencyConflicts: CurrencyConflict[];
   /** Pending refunds/credits on base-currency cards, not counted against card debt until they post (Phase 4A.5.4). */
   pendingCardCredits: Record<ID, Cents>;
+  /** Phase 4A.5.6: recorded spendable cash today (startCashCents is what is available: without pending credits). */
+  recordedStartCashCents: Cents;
+  /** Phase 4A.5.6: pending credits held back on non-card accounts (spendable = counted in the combined cash). */
+  pendingCredits: { accountId: ID; cents: Cents; spendable: boolean }[];
 }
 
 function legsForOccurrence(o: Occurrence, amount: Cents): Leg[] {
@@ -223,9 +227,22 @@ export function buildForecast(input: ForecastInput): Forecast {
   const cashIds = new Set(accounts.filter((a) => isCashAccount(a, baseCurrency)).map((a) => a.id));
   const accountById = new Map(accounts.map((a) => [a.id, a]));
 
-  // Running balances for every account, starting with today's recorded balance.
+  // Running balances for every account. Phase 4A.5.6: the forecast works with money that is available: the recorded
+  // balance minus pending credits (pending refunds/income are visible in the recorded balance but not spendable until
+  // they clear, so they can't fund bills or transfers or hide a debt). Cards keep their recorded balance; their
+  // pending credits are added back to the debt instead (Phase 4A.5.4), so a full-balance payment isn't inflated.
+  const pendingCredits = new Map<ID, Cents>();
+  for (const a of accounts) {
+    const p = pendingCreditTotal(a, transactions, today);
+    if (p > 0) pendingCredits.set(a.id, p);
+  }
   const balances = new Map<ID, Cents>();
-  for (const a of accounts) balances.set(a.id, accountBalance(a, transactions, today));
+  let recordedCash = 0;
+  for (const a of accounts) {
+    const recorded = accountBalance(a, transactions, today);
+    if (cashIds.has(a.id)) recordedCash += recorded;
+    balances.set(a.id, a.type === 'credit_card' ? recorded : recorded - (pendingCredits.get(a.id) ?? 0));
+  }
   let cash = 0;
   for (const id of cashIds) cash += balances.get(id) ?? 0;
   const startCash = cash;
@@ -250,7 +267,12 @@ export function buildForecast(input: ForecastInput): Forecast {
   for (const t of transactions) {
     if (t.date <= today || t.date > horizonEnd) continue;
     const acct = accountById.get(t.accountId);
-    if (!acct || t.date < acct.openingDate) continue;
+    if (!acct || t.date < acct.openingDate || t.includedInBalance) continue;
+    // Phase 4A.5.6: a future-dated credit still marked pending isn't counted until it is posted.
+    if (isPendingCredit(t)) {
+      excluded.push({ id: `tx:${t.id}`, date: t.date, label: t.merchant || 'Pending credit', source: 'scheduled_tx', legs: [], cashDeltaCents: 0, txId: t.id, estimated: false, excluded: 'pending_credit' });
+      continue;
+    }
     if (t.transferGroupId) {
       const k = `${t.date}|${t.transferGroupId}`;
       const pair = plannedTransfer.get(k);
@@ -337,16 +359,8 @@ export function buildForecast(input: ForecastInput): Forecast {
   /** Per card: planned cash-advance money still owed (never more than the card's projected balance owed). */
   const advanceOwed = new Map<ID, Cents>();
   const baseCards = new Set(accounts.filter((a) => a.type === 'credit_card' && a.currency === baseCurrency).map((a) => a.id));
-  // Pending refunds and other pending credits already in a card's recorded balance (Phase 4A.5.4): the recorded
-  // balance is unchanged, but for card debt they are not counted until they post. Pending transfers (payments
-  // already made from an account) are not credits of this kind and stay counted.
-  const pendingCredits = new Map<ID, Cents>();
-  for (const t of transactions) {
-    if (!baseCards.has(t.accountId) || t.status !== 'pending' || t.amountCents <= 0 || t.date > today || t.transferGroupId || t.kind === 'transfer') continue;
-    const acct = accountById.get(t.accountId);
-    if (acct && t.date < acct.openingDate) continue;
-    pendingCredits.set(t.accountId, (pendingCredits.get(t.accountId) ?? 0) + t.amountCents);
-  }
+  // Pending refunds and other pending credits already in a card's recorded balance (Phase 4A.5.4): for card debt they
+  // are added back until they post (pendingCredits, computed above for every account).
   const total = diffDays(horizonEnd, today);
   for (let i = 0; i <= total; i++) {
     const date = addDays(today, i);
@@ -576,7 +590,9 @@ export function buildForecast(input: ForecastInput): Forecast {
     coveredPayments: covered,
     cashAdvances: advanceList,
     currencyConflicts: conflicts,
-    pendingCardCredits: Object.fromEntries(pendingCredits),
+    pendingCardCredits: Object.fromEntries([...pendingCredits].filter(([id]) => baseCards.has(id))),
+    recordedStartCashCents: recordedCash,
+    pendingCredits: [...pendingCredits].filter(([id]) => accountById.get(id)?.type !== 'credit_card').map(([accountId, cents]) => ({ accountId, cents, spendable: cashIds.has(accountId) })),
   };
 }
 

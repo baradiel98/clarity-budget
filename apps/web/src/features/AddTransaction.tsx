@@ -1,8 +1,8 @@
 import { AlertTriangle, Plus, Trash2, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { addTransaction, deleteTransaction, updateTransaction, type TxInput } from '@clarity/data';
-import { buildMerchantMemory, expandOccurrences, findPossibleDuplicates, merchantKey, suggestOccurrenceMatch } from '@clarity/engine';
-import { addDays, centsToDecimalString, formatCents, formatShortDate, parseAmountInput, TERMS, type Transaction } from '@clarity/shared';
+import { balanceAsOfDate, buildMerchantMemory, expandOccurrences, findPossibleDuplicates, merchantKey, suggestOccurrenceMatch } from '@clarity/engine';
+import { addDays, ALREADY_INCLUDED_HINT, ALREADY_INCLUDED_LABEL, centsToDecimalString, formatCents, formatShortDate, parseAmountInput, TERMS, type Transaction } from '@clarity/shared';
 import { useData, useRun, useSession, useStore } from '../state/session';
 import type { AddPrefill } from '../state/ui';
 import { AmountInput } from '../ui/AmountInput';
@@ -67,6 +67,7 @@ function initialFrom(prefill: AddPrefill | undefined, existing: Transaction[] | 
       date: src.date,
       notes: src.notes,
       pending: src.status === 'pending',
+      included: !!src.includedInBalance,
       splits: src.splits?.map((s) => ({ categoryId: s.categoryId, amount: centsToDecimalString(Math.abs(s.amountCents)) })) ?? [],
     };
   }
@@ -82,6 +83,7 @@ function initialFrom(prefill: AddPrefill | undefined, existing: Transaction[] | 
     date: prefill?.date ?? defaults.today,
     notes: '',
     pending: false,
+    included: false,
     splits: [] as { categoryId: string; amount: string }[],
   };
 }
@@ -117,10 +119,15 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [dupConfirmed, setDupConfirmed] = useState(false);
   const [linkOcc, setLinkOcc] = useState(true);
+  const [included, setIncluded] = useState(init.included);
   const [showSuggest, setShowSuggest] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const isEdit = !!existing;
+  // Phase 4A.5.6: a transaction dated on or before the balance the user entered may already be in that balance.
+  const selectedAccount = data.accounts.find((a) => a.id === accountId);
+  const balanceDate = selectedAccount ? balanceAsOfDate(selectedAccount, data.transactions) : null;
+  const canInclude = !!balanceDate && date <= balanceDate && date >= (selectedAccount?.openingDate ?? date);
   const cents = parseAmountInput(amount, cur);
   const memory = useMemo(() => buildMerchantMemory(data.transactions, merchantKey), [data.transactions]);
   const merchants = useMemo(() => {
@@ -170,6 +177,7 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
       categoryId: kind === 'transfer' ? null : categoryId,
       notes,
       status: pending ? 'pending' : 'confirmed',
+      ...(included && canInclude ? { includedInBalance: true } : {}),
       ...(splits.length ? { splits: splits.map((s) => ({ categoryId: s.categoryId, amountCents: parseAmountInput(s.amount, cur)! })) } : {}),
       ...(prefill?.occurrenceRef ? { occurrenceRef: prefill.occurrenceRef } : occurrence && linkOcc ? { occurrenceRef: { recurringId: occurrence.recurringId, originalDate: occurrence.originalDate } } : {}),
     };
@@ -277,6 +285,12 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
           <label className="check callout">
             <input type="checkbox" checked={linkOcc} onChange={(e) => setLinkOcc(e.target.checked)} />
             <span>This {occurrence.kind === 'income' ? 'is' : 'pays'} <strong>{occurrence.name}</strong> {occurrence.kind === 'income' ? 'expected' : 'due'} {formatShortDate(occurrence.date)}, so it won't be counted again in your forecast.</span>
+          </label>
+        )}
+        {canInclude && (
+          <label className="check" data-testid="already-included">
+            <input type="checkbox" checked={included} onChange={(e) => setIncluded(e.target.checked)} />
+            <span>{ALREADY_INCLUDED_LABEL(formatShortDate(balanceDate!))}. <span className="hint">{ALREADY_INCLUDED_HINT}</span></span>
           </label>
         )}
         {date > today && <div className="callout">Dated in the future: it will appear as planned in your forecast and count toward your balance on {formatShortDate(date)}.</div>}
