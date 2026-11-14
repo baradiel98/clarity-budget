@@ -36,7 +36,7 @@ export function WarningList({ warnings, currency }: { warnings: readonly Warning
                     <View key={`${x.date}-${i}`} testID="warning-date" style={{ flexDirection: 'row', gap: 8 }}>
                       <T variant="footnote" color="textSecondary" style={{ width: 52 }}>{formatShortDate(x.date)}</T>
                       <T variant="footnote" color="textSecondary" style={{ flex: 1 }}>{x.label}</T>
-                      <Money cents={x.cents} currency={currency} variant="footnote" color={x.cents < 0 ? 'negative' : 'textSecondary'} />
+                      <Money cents={x.cents} currency={x.currency ?? currency} variant="footnote" color={x.cents < 0 ? 'negative' : 'textSecondary'} />
                     </View>
                   ))}
                 </View>

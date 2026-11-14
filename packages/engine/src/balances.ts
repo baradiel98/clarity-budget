@@ -37,6 +37,8 @@ export interface AccountBalanceLine {
   balanceCents: Cents;
   pendingCents: Cents;
   countsAsCash: boolean;
+  /** Archived account still listed because it owes money (Phase 4A.4.4). */
+  archived?: boolean;
 }
 
 export interface BalanceSummary {
@@ -66,12 +68,21 @@ export function balanceSummary(
   const lines: AccountBalanceLine[] = [];
   const excluded: ID[] = [];
   for (const a of accounts) {
-    if (a.archived) continue;
+    // Currency first, so archived accounts in another currency are named in the currency notice too (Phase 4A.4.4).
     if (a.currency !== baseCurrency) {
       excluded.push(a.id);
       continue;
     }
     const bal = accountBalance(a, transactions, asOf);
+    if (a.archived) {
+      // Archiving never hides debt (Phase 4A.4.4): an archived account that is overdrawn, or a card that still owes
+      // money, stays in the totals. A positive archived balance does not (it isn't spendable).
+      if (bal >= 0) continue;
+      if (a.type === 'credit_card') owed += -bal;
+      else assets += bal;
+      lines.push({ accountId: a.id, name: a.name, type: a.type, balanceCents: bal, pendingCents: pendingTotal(a, transactions, asOf), countsAsCash: false, archived: true });
+      continue;
+    }
     const isCash = isCashAccount(a, baseCurrency);
     if (a.type === 'credit_card') owed += -bal;
     else assets += bal;

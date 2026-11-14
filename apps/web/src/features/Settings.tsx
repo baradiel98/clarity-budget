@@ -1,6 +1,6 @@
 import { Archive, ArchiveRestore, Download, KeyRound, Pencil, Plus, RefreshCw, Scale, ShieldCheck, Trash2, Upload } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { accountUsage, adjustBalance, archiveAccount, archiveTargets, createAccount, createCategory, describeUsage, exportTransactionsCsv, updateAccount, updateCategory, updateSettings, WorkspaceStore, type ArchivePlan } from '@clarity/data';
+import { accountUsage, adjustBalance, archiveAccount, archiveBalanceReview, archiveTargets, createAccount, createCategory, describeUsage, exportTransactionsCsv, PAUSE_NOTE, updateAccount, updateCategory, updateSettings, WorkspaceStore, type ArchivePlan } from '@clarity/data';
 import { accountBalance } from '@clarity/engine';
 import { BACKUP_EXTENSION } from '@clarity/security';
 import { centsToDecimalString, formatShortDate, NO_SYNC_NOTICE, parseAmountInput, TERMS, type Account, type AccountType } from '@clarity/shared';
@@ -76,7 +76,7 @@ export function Settings() {
                         if (a.archived) return void run((ctx) => updateAccount(ctx, a.id, { archived: false }));
                         // Phase 4A.4.2: review what still uses the account before archiving it
                         const u = accountUsage(data, a.id, today);
-                        if (u.recurring.length || u.planned.length) setDialog({ kind: 'archive', account: a });
+                        if (u.recurring.length || u.planned.length || archiveBalanceReview(data, a.id, today).note) setDialog({ kind: 'archive', account: a });
                         else void run((ctx) => archiveAccount(ctx, a.id));
                       }}>{a.archived ? <ArchiveRestore size={15} /> : <Archive size={15} />}</button>
                     </div>
@@ -180,6 +180,7 @@ function ArchiveDialog({ account, onClose }: { account: Account; onClose: () => 
   const run = useRun();
   const cur = data.settings.baseCurrency;
   const usage = accountUsage(data, account.id, today);
+  const balanceNote = archiveBalanceReview(data, account.id, today).note;
   const [choice, setChoice] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const confirm = async () => {
@@ -199,7 +200,8 @@ function ArchiveDialog({ account, onClose }: { account: Account; onClose: () => 
       footer={<><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" onClick={() => void confirm()} data-testid="archive-confirm">Archive account</button></>}
     >
       <div className="stack" data-testid="archive-review">
-        <p className="t-callout" style={{ margin: 0 }}>These are still scheduled with {account.name}. Choose what happens to each one. Nothing changes unless you choose it.</p>
+        {balanceNote && <p className="callout" style={{ margin: 0 }} data-testid="archive-balance-note">{balanceNote}</p>}
+        {(usage.recurring.length > 0 || usage.planned.length > 0) && <p className="t-callout" style={{ margin: 0 }}>These are still scheduled with {account.name}. Choose what happens to each one. Nothing changes unless you choose it.</p>}
         {usage.recurring.map((u) => (
           <Field key={u.item.id} label={describeUsage(u, data.accounts)}>
             {(id) => (
@@ -217,9 +219,9 @@ function ArchiveDialog({ account, onClose }: { account: Account; onClose: () => 
             <ul className="warning-items">{usage.planned.map((t) => <li key={t.id}><span>{formatShortDate(t.date)}</span><span>{t.merchant || 'Planned transaction'}</span><span className="num"><Money cents={t.amountCents} currency={cur} /></span></li>)}</ul>
           </div>
         )}
-        <p className="hint" style={{ margin: 0 }}>
-          Kept items are still counted: bills and transfers out are paid from what {account.name} holds, and anything it can't cover is counted against your spendable accounts. Money going into an archived account isn't counted as spendable. Paused items aren't counted in Safe to Spend until you resume them in Planning.
-        </p>
+        {(usage.recurring.length > 0 || usage.planned.length > 0) && <p className="hint" style={{ margin: 0 }}>
+          Kept items are still counted: bills and transfers out are paid from what {account.name} holds, and anything it can't cover is counted against your spendable accounts. Money going into an archived account isn't counted as spendable. Paused items aren't counted in Safe to Spend until you resume them in Planning. {PAUSE_NOTE}
+        </p>}
         {error && <p className="t-footnote neg" role="alert" style={{ margin: 0 }}>{error}</p>}
       </div>
     </Dialog>

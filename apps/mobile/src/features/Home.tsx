@@ -251,7 +251,7 @@ function UpcomingAmount({ u, cur }: { u: UpcomingItem; cur: string }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, alignSelf: 'flex-start', paddingTop: 1 }}>
       {u.status === 'estimated' && <T color="warning" accessibilityLabel="about" style={{ fontFamily: 'Inter_600SemiBold' }}>≈</T>}
-      <Money cents={u.cents} currency={cur} sign="always" color={u.cents > 0 ? 'positive' : 'text'} style={{ fontFamily: 'Inter_600SemiBold' }} />
+      <Money cents={u.cents} currency={u.currency ?? cur} sign="always" color={u.cents > 0 ? 'positive' : 'text'} style={{ fontFamily: 'Inter_600SemiBold' }} />
     </View>
   );
 }
@@ -259,7 +259,7 @@ function UpcomingAmount({ u, cur }: { u: UpcomingItem; cur: string }) {
 /** One spoken line per row: name, date, status and what it means, amount, and what tapping does. */
 function upcomingSpoken(u: UpcomingItem, cur: string): string {
   const label = (u.isIncome ? INCOME_STATUS_LABEL : OCCURRENCE_STATUS_LABEL)[u.status];
-  const amount = u.status === 'unknown' ? 'amount unknown' : `${u.status === 'estimated' ? 'about ' : ''}${formatCents(u.cents, cur, { sign: 'always' })}`;
+  const amount = u.status === 'unknown' ? 'amount unknown' : `${u.status === 'estimated' ? 'about ' : ''}${formatCents(u.cents, u.currency ?? cur, { sign: 'always' })}`;
   const tap = u.occurrence && u.status !== 'skipped' ? ` Tap to ${u.isIncome ? 'record as received' : 'mark paid'}.` : '';
   return `${u.label}, ${formatWeekdayDate(u.date)}. ${label}: ${STATUS_HELP[u.status](u.isIncome)} ${amount}.${tap}`;
 }

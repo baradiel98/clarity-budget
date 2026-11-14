@@ -1,5 +1,5 @@
 import {
-  defaultCategories, localISODate, type Account, type AccountType, type Cents, type Category, type ID, type ISODate, type ImportBatch,
+  defaultCategories, formatCents, localISODate, type Account, type AccountType, type Cents, type Category, type ID, type ISODate, type ImportBatch,
   type MappingProfile, type OccurrenceException, type Provenance, type RecurringAmount, type RecurringItem, type RecurringKind, type Schedule, type Settings,
   type Split, type Transaction, type TxKind, type TxStatus, type WeekendRule, type WorkspaceData,
 } from '@clarity/shared';
@@ -101,6 +101,37 @@ export function updateAccount(ctx: Ctx, id: ID, patch: Partial<Pick<Account, 'na
 export interface AccountUsage {
   recurring: { item: RecurringItem; role: 'from' | 'to' }[];
   planned: Transaction[];
+}
+
+/** The account's balance today and, when it owes money, what archiving does to that debt (Phase 4A.4.4). */
+export function archiveBalanceReview(data: WorkspaceData, accountId: ID, today: ISODate): { balanceCents: Cents; note: string | null } {
+  const account = data.accounts.find((a) => a.id === accountId);
+  if (!account) return { balanceCents: 0, note: null };
+  const balanceCents = accountBalance(account, data.transactions, today);
+  return { balanceCents, note: archiveBalanceNote(account, balanceCents, data.settings.baseCurrency) };
+}
+
+/** Shown wherever pausing is offered with archiving (Phase 4A.4.4): the existing pause/resume rule. */
+export const PAUSE_NOTE =
+  'Pausing skips every payment due while it is paused. When you resume it, payments that fell due during the pause are not brought back and won\'t show as overdue.';
+
+/** Plain-language note about an account's debt before it is archived (Phase 4A.4.4). */
+export function archiveBalanceNote(account: Account, balanceCents: Cents, baseCurrency: string): string | null {
+  const f = (c: Cents) => formatCents(c, account.currency);
+  const name = account.name;
+  if (account.type === 'credit_card') {
+    return balanceCents < 0
+      ? `${name} still owes ${f(-balanceCents)}. Archiving doesn't clear it: the card stays in your totals, and the "no payment scheduled" warning stays until it's paid or a payment is scheduled.`
+      : null;
+  }
+  if (balanceCents >= 0) return null;
+  if (account.currency !== baseCurrency) {
+    return `${name} is at ${f(balanceCents)}. It's in ${account.currency}, so it isn't counted in Safe to Spend (${baseCurrency}), before or after archiving.`;
+  }
+  if (account.spendable) {
+    return `${name} is overdrawn by ${f(-balanceCents)}. Archiving doesn't clear it: Safe to Spend keeps counting ${f(-balanceCents)} against your spendable accounts until ${name} is back to ${f(0)}.`;
+  }
+  return `${name} is at ${f(balanceCents)}. It isn't marked as spendable, so it isn't counted in Safe to Spend now, and archiving doesn't change that. It stays in your totals as money owed.`;
 }
 
 export function accountUsage(data: WorkspaceData, accountId: ID, today: ISODate): AccountUsage {

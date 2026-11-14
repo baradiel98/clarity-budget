@@ -276,3 +276,19 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Limitations]**
   - The mobile archive screen and mobile Planning list are tested at component/data level, not by rendering the routed screens.
   - Planned future transactions on an archived account are listed but not reassigned (edit them in Transactions).
+
+## Phase 4A.4.4 (2026-11-14): archived liabilities, card-debt integrity, currency accuracy
+- **[Verified defect, fixed]** Archiving an overdrawn spendable account hid the debt ($500 → $1,000). Now:
+  - an `archived_balance` forecast item counts the debt against spendable cash today;
+  - the account is brought to $0 in the projection (counted once);
+  - archived non-spendable accounts keep their pre-archive treatment.
+- **[Verified defect, fixed]** An archived card's "no payment scheduled" warning disappeared. `balanceSummary` now keeps archived accounts that owe money, and lists accounts in another currency (archived too) before anything else.
+- **[Verified defect, fixed]** The archived account warning claimed foreign-currency items were counted. Currency is now checked first.
+- **[Verified defect, fixed]** A planned advance from a foreign-currency card was subtracted from base-currency Safe to Spend. Borrowed money now counts only for base-currency cards.
+- **[Finding / decision open]** Cash advance $90 → Safe to Spend $190 is consistent with the card model: the payment repaid the advance, and the later purchases are uncounted purchase debt (same without the advance).
+  - Fixed the disclosure with the `card-projected:` warning.
+  - Whether to deduct projected uncovered card balances is an owner decision.
+- **[Verified defect, fixed]** Foreign amounts were shown with $. Warnings, items, Upcoming and the Planning timeline now use the account currency.
+- **[Fixed]** Repeated dates of one schedule are one warning with every date.
+- **[Documented, tested]** The existing pause/resume rule is stated in both archive reviews (`PAUSE_NOTE`).
+- **[Decision open]** Archiving caps the archived account's own scheduled transfers out. This is the only remaining way archiving raises Safe to Spend (600 generated scenarios).

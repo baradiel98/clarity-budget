@@ -55,9 +55,9 @@ export interface Warning {
   accountId?: ID;
   /**
    * Every dated amount behind the warning (Phase 4A.4.2). The full warning list shows all of them; the short
-   * `detail` may summarise ("4 more"), but nothing is dropped here.
+   * `detail` may summarise ("4 more"), but nothing is dropped here. `currency` is the account's own currency, set only when it differs from the base currency (4A.4.4).
    */
-  items?: { date: ISODate; label: string; cents: Cents }[];
+  items?: { date: ISODate; label: string; cents: Cents; currency?: CurrencyCode }[];
 }
 
 const SEVERITY_ORDER: Record<Warning['severity'], number> = { critical: 0, warning: 1, info: 2 };
@@ -174,7 +174,7 @@ function forecastTo(input: EngineInput, horizonEnd: ISODate, includeEstimatedInc
 function eventLine(e: ForecastEvent, cur: CurrencyCode): ExplainLine {
   const base = e.source === 'overdue' ? 'overdue, counted today' : e.estimated ? 'estimated' : e.source === 'hypothetical' ? 'hypothetical' : e.source === 'scheduled_tx' ? 'planned' : undefined;
   const short = e.unfundedCents ? `only ${formatCents(e.cashDeltaCents, cur)} is available to move; ${formatCents(e.unfundedCents, cur)} not counted` : undefined;
-  const cover = e.coverCents ? `the account it's paid from is short; ${formatCents(e.coverCents, cur)} has to come from your spendable accounts` : undefined;
+  const cover = e.source === 'archived_balance' ? 'an archived account\'s negative balance; still owed' : e.coverCents ? `the account it's paid from is short; ${formatCents(e.coverCents, cur)} has to come from your spendable accounts` : undefined;
   const status = [base, short, cover].filter(Boolean).join('; ') || undefined;
   return {
     kind: e.cashDeltaCents < 0 ? 'out' : 'in',
@@ -441,6 +441,8 @@ export interface UpcomingItem {
   cents: Cents;
   /** False when the item does not move cash (for example a subscription charged to a credit card). */
   affectsCash: boolean;
+  /** Set when the amount is in another currency than the base currency (an account in another currency; Phase 4A.4.4). */
+  currency?: CurrencyCode;
   status: Occurrence['status'] | 'scheduled_tx';
   occurrence?: Occurrence;
   txId?: ID;
@@ -510,6 +512,7 @@ export function buildDashboard(input: EngineInput): Dashboard {
     const twoWeeks = d ? d.date : input.today;
     return twoWeeks > eom ? twoWeeks : eom;
   })();
+  const ccyOf = (id: ID): CurrencyCode => input.accounts.find((a) => a.id === id)?.currency ?? cur;
   /** Upcoming items between two dates (overdue ones only in the first list). */
   const itemsBetween = (from: ISODate, to: ISODate, withOverdue: boolean): UpcomingItem[] => {
     const out: UpcomingItem[] = [];
@@ -527,6 +530,7 @@ export function buildDashboard(input: EngineInput): Dashboard {
         status: o.status,
         occurrence: ev?.occurrence ?? o,
         isIncome: o.kind === 'income',
+        ...(ccyOf(o.accountId) !== cur ? { currency: ccyOf(o.accountId) } : {}),
       });
     }
     for (const d of inclusive.days) {
@@ -534,7 +538,8 @@ export function buildDashboard(input: EngineInput): Dashboard {
       if (d.date > to) break;
       for (const e of d.events) {
         if (e.source !== 'scheduled_tx' || !e.txId) continue;
-        out.push({ id: e.id, date: e.date, label: e.label, cents: e.cashDeltaCents || e.legs[0]!.deltaCents, affectsCash: e.cashDeltaCents !== 0, status: 'scheduled_tx', txId: e.txId, isIncome: e.legs[0]!.deltaCents > 0 });
+        const c = e.cashDeltaCents ? cur : ccyOf(e.legs[0]!.accountId);
+        out.push({ id: e.id, date: e.date, label: e.label, cents: e.cashDeltaCents || e.legs[0]!.deltaCents, affectsCash: e.cashDeltaCents !== 0, status: 'scheduled_tx', txId: e.txId, isIncome: e.legs[0]!.deltaCents > 0, ...(c !== cur ? { currency: c } : {}) });
       }
     }
     return out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
@@ -573,64 +578,143 @@ export function buildDashboard(input: EngineInput): Dashboard {
       warnings.push({ id: `unknown:${e.id}`, severity: 'info', title: `${e.label} has no amount`, detail: `Expected ${formatShortDate(e.date)}. Add an amount to include it in your forecast.` });
     }
   }
+  // Phase 4A.4.4: amounts are formatted in the currency of the account they belong to; repeated dates of one
+  // scheduled item are one warning (every date is still in `items`).
+  const acctOf = (id: ID) => input.accounts.find((a) => a.id === id);
+  const nameOf = (id: ID) => acctOf(id)?.name ?? 'an account';
+  const curOf = (id: ID): CurrencyCode => acctOf(id)?.currency ?? cur;
+  const H = formatShortDate(sts.horizonEnd);
+  const dateList = (ds: ISODate[]) => ds.map(formatShortDate).join(', ');
+  /** Occurrences of one recurring item share a group; anything else (planned transactions) stands alone. */
+  const groupKey = (eventId: string) => (eventId.startsWith('occ:') ? `occ:${eventId.slice(4).split('|')[0]}` : eventId);
+  function groupBy<X>(xs: readonly X[], key: (x: X) => string): X[][] {
+    const m = new Map<string, X[]>();
+    for (const x of xs) m.set(key(x), [...(m.get(key(x)) ?? []), x]);
+    return [...m.values()];
+  }
+  const sum = (xs: number[]) => xs.reduce((s, x) => s + x, 0);
+
+  const cardWarned = new Set<ID>();
   for (const line of balances.lines) {
     if (line.type !== 'credit_card' || line.balanceCents >= 0) continue;
     const scheduled = input.recurring.some((r) => !r.paused && r.toAccountId === line.accountId);
     if (!scheduled) {
+      cardWarned.add(line.accountId);
       warnings.push({
         id: `card-unscheduled:${line.accountId}`,
         severity: 'warning',
         title: `${formatCents(-line.balanceCents, cur)} on ${line.name} with no payment scheduled`,
-        detail: 'This balance is not deducted from Safe to Spend until you schedule a card payment.',
+        detail: `This balance is not deducted from Safe to Spend until you schedule a card payment.${line.archived ? ` ${line.name} is archived; archiving doesn't clear what it owes.` : ''}`,
+        accountId: line.accountId,
       });
     }
   }
-  // Phase 4A.2/4A.4: transfers the sending account can't cover, payments savings can't cover, borrowed money,
-  // and spendable accounts that would go below zero on their own.
-  const nameOf = (id: ID) => input.accounts.find((a) => a.id === id)?.name ?? 'an account';
-  const H = formatShortDate(sts.horizonEnd);
-  const competingText = (cs: { label: string; requestedCents: Cents; fundedCents: Cents; sameGroup: boolean }[]) => {
-    const first = cs.filter((c) => !c.sameGroup).map((c) => `${c.label} (${formatCents(c.fundedCents, cur)} of ${formatCents(c.requestedCents, cur)})`);
-    const shared = cs.filter((c) => c.sameGroup).map((c) => `${c.label} (${formatCents(c.fundedCents, cur)} of ${formatCents(c.requestedCents, cur)})`);
-    return [first.length ? `Counted first: ${first.join(', ')}.` : '', shared.length ? `Shared in proportion with: ${shared.join(', ')}.` : ''].filter(Boolean).join(' ');
-  };
-  for (const u of conservative.unfundedTransfers) {
-    if (u.date > sts.horizonEnd) continue;
-    const short = u.requestedCents - u.fundedCents;
+  // A card projected to owe money at the end of the forecast that no later scheduled payment pays (Phase 4A.4.4).
+  // Card purchases (and cash advances already repaid) are only counted when a payment is scheduled, so say so.
+  const afterHorizon = expandOccurrences(input.recurring, input.exceptions, input.transactions, { from: addDays(sts.horizonEnd, 1), to: addDays(sts.horizonEnd, INCOME_LOOKAHEAD_DAYS), today: input.today });
+  for (const a of input.accounts) {
+    if (a.type !== 'credit_card' || a.currency !== cur || cardWarned.has(a.id)) continue;
+    const owedEnd = -(conservative.endBalances[a.id] ?? 0);
+    if (owedEnd <= 0) continue;
+    const paidLater = afterHorizon.some((o) => o.toAccountId === a.id && o.status !== 'skipped' && o.status !== 'confirmed') ||
+      input.transactions.some((t) => t.accountId === a.id && t.amountCents > 0 && t.date > sts.horizonEnd);
+    if (paidLater) continue;
     warnings.push({
-      id: `unfunded:${u.eventId}`,
+      id: `card-projected:${a.id}`,
       severity: 'warning',
-      title: u.fundedCents === 0 ? `${u.label}: ${nameOf(u.fromAccountId)} won't have the money` : `${u.label}: only ${formatCents(u.fundedCents, cur)} of ${formatCents(u.requestedCents, cur)} is available`,
-      detail: u.competing.length === 0
-        ? `Scheduled for ${formatShortDate(u.date)} from ${nameOf(u.fromAccountId)}, which is projected to have ${formatCents(u.sourceBalanceCents, cur)} then. Only that amount is counted; ${formatCents(short, cur)} is not.`
-        : `Scheduled for ${formatShortDate(u.date)} from ${nameOf(u.fromAccountId)}, which is projected to have ${formatCents(u.sourceBalanceCents, cur)} then. Requested ${formatCents(u.requestedCents, cur)}; counted ${formatCents(u.fundedCents, cur)}; not counted ${formatCents(short, cur)}. ${competingText(u.competing)} When one account can't cover every transfer on the same day, the forecast assumes card payments go first, then moves to other non-spendable accounts, then moves into your spendable accounts. That is a cautious assumption, not how your bank will necessarily process them.`,
-      accountId: u.fromAccountId,
-      items: [{ date: u.date, label: u.label, cents: -short }],
+      title: `${a.name} is projected to owe ${formatCents(owedEnd, cur)} on ${H}, and no payment is scheduled for it`,
+      detail: `Card spending is counted against Safe to Spend only when a card payment is scheduled. Your scheduled payments to ${a.name} don't cover what it's projected to owe at the end of the forecast (${H}), and nothing after that pays it. Schedule a card payment to include it.`,
+      accountId: a.id,
+      items: [{ date: sts.horizonEnd, label: `${a.name} owed`, cents: -owedEnd, currency: cur }],
     });
   }
-  for (const c of conservative.coveredPayments) {
-    if (c.date > sts.horizonEnd) continue;
-    const name = nameOf(c.accountId);
+  const competingText = (cs: { label: string; requestedCents: Cents; fundedCents: Cents; sameGroup: boolean }[], c: CurrencyCode) => {
+    const first = cs.filter((x) => !x.sameGroup).map((x) => `${x.label} (${formatCents(x.fundedCents, c)} of ${formatCents(x.requestedCents, c)})`);
+    const shared = cs.filter((x) => x.sameGroup).map((x) => `${x.label} (${formatCents(x.fundedCents, c)} of ${formatCents(x.requestedCents, c)})`);
+    return [first.length ? `Counted first: ${first.join(', ')}.` : '', shared.length ? `Shared in proportion with: ${shared.join(', ')}.` : ''].filter(Boolean).join(' ');
+  };
+  const PRIORITY_NOTE = 'When one account can\'t cover every transfer on the same day, the forecast assumes card payments go first, then moves to other non-spendable accounts, then moves into your spendable accounts. That is a cautious assumption, not how your bank will necessarily process them.';
+  for (const list of groupBy(conservative.unfundedTransfers.filter((u) => u.date <= sts.horizonEnd), (u) => groupKey(u.eventId))) {
+    const u = list[0]!;
+    const c = curOf(u.fromAccountId);
+    const f = (x: Cents) => formatCents(x, c);
+    const from = nameOf(u.fromAccountId);
+    if (list.length === 1) {
+      const short = u.requestedCents - u.fundedCents;
+      warnings.push({
+        id: `unfunded:${u.eventId}`,
+        severity: 'warning',
+        title: u.fundedCents === 0 ? `${u.label}: ${from} won't have the money` : `${u.label}: only ${f(u.fundedCents)} of ${f(u.requestedCents)} is available`,
+        detail: u.competing.length === 0
+          ? `Scheduled for ${formatShortDate(u.date)} from ${from}, which is projected to have ${f(u.sourceBalanceCents)} then. Only that amount is counted; ${f(short)} is not.`
+          : `Scheduled for ${formatShortDate(u.date)} from ${from}, which is projected to have ${f(u.sourceBalanceCents)} then. Requested ${f(u.requestedCents)}; counted ${f(u.fundedCents)}; not counted ${f(short)}. ${competingText(u.competing, c)} ${PRIORITY_NOTE}`,
+        accountId: u.fromAccountId,
+        items: [{ date: u.date, label: u.label, cents: -short, currency: c }],
+      });
+      continue;
+    }
+    const req = sum(list.map((x) => x.requestedCents));
+    const got = sum(list.map((x) => x.fundedCents));
     warnings.push({
-      id: `covered:${c.eventId}`,
+      id: `unfunded:${groupKey(u.eventId)}`,
       severity: 'warning',
-      title: c.fundedCents === 0 ? `${c.label}: ${name} can't cover it` : `${c.label}: ${name} can cover only ${formatCents(c.fundedCents, cur)} of ${formatCents(c.requestedCents, cur)}`,
-      detail: `Due ${formatShortDate(c.date)} from ${name}, which is projected to have ${formatCents(c.accountBalanceCents, cur)} then. Safe to Spend counts the other ${formatCents(c.coveredCents, cur)} against your spendable accounts. Move ${formatCents(c.coveredCents, cur)} into ${name} before ${formatShortDate(c.date)}, or change the account it's paid from.`,
-      accountId: c.accountId,
-      items: [{ date: c.date, label: c.label, cents: -c.coveredCents }],
+      title: `${u.label}: ${from} can't fully fund ${list.length} transfers`,
+      detail: `Scheduled on ${dateList(list.map((x) => x.date))} from ${from}. Requested ${f(req)} in total; counted ${f(got)}; not counted ${f(req - got)}.${list.some((x) => x.competing.length) ? ` ${PRIORITY_NOTE}` : ''}`,
+      accountId: u.fromAccountId,
+      items: list.map((x) => ({ date: x.date, label: `${x.label}: ${f(x.fundedCents)} of ${f(x.requestedCents)} counted`, cents: -(x.requestedCents - x.fundedCents), currency: c })),
+    });
+  }
+  for (const list of groupBy(conservative.coveredPayments.filter((x) => x.date <= sts.horizonEnd && x.kind !== 'overdrawn'), (x) => groupKey(x.eventId))) {
+    const p = list[0]!;
+    const name = nameOf(p.accountId);
+    const c = curOf(p.accountId);
+    const f = (x: Cents) => formatCents(x, c);
+    if (list.length === 1) {
+      warnings.push({
+        id: `covered:${p.eventId}`,
+        severity: 'warning',
+        title: p.fundedCents === 0 ? `${p.label}: ${name} can't cover it` : `${p.label}: ${name} can cover only ${f(p.fundedCents)} of ${f(p.requestedCents)}`,
+        detail: `Due ${formatShortDate(p.date)} from ${name}, which is projected to have ${f(p.accountBalanceCents)} then. Safe to Spend counts the other ${f(p.coveredCents)} against your spendable accounts. Move ${f(p.coveredCents)} into ${name} before ${formatShortDate(p.date)}, or change the account it's paid from.`,
+        accountId: p.accountId,
+        items: [{ date: p.date, label: p.label, cents: -p.coveredCents, currency: c }],
+      });
+      continue;
+    }
+    const total = sum(list.map((x) => x.coveredCents));
+    warnings.push({
+      id: `covered:${groupKey(p.eventId)}`,
+      severity: 'warning',
+      title: `${p.label}: ${name} can't fully cover ${list.length} payments`,
+      detail: `Due ${dateList(list.map((x) => x.date))} from ${name}, which is projected to have ${f(p.accountBalanceCents)} on ${formatShortDate(p.date)}. Safe to Spend counts ${f(total)} in total against your spendable accounts. Move ${f(total)} into ${name} before ${formatShortDate(p.date)} to cover all of them, or change the account it's paid from.`,
+      accountId: p.accountId,
+      items: list.map((x) => ({ date: x.date, label: `${x.label}: ${f(x.coveredCents)} not covered by ${name}`, cents: -x.coveredCents, currency: c })),
+    });
+  }
+  // Archived and overdrawn: the debt is still counted (Phase 4A.4.4).
+  for (const p of conservative.coveredPayments.filter((x) => x.kind === 'overdrawn')) {
+    const name = nameOf(p.accountId);
+    const f = (x: Cents) => formatCents(x, curOf(p.accountId));
+    warnings.push({
+      id: `archived-overdrawn:${p.accountId}`,
+      severity: 'warning',
+      title: `${name} is archived and overdrawn by ${f(p.coveredCents)}`,
+      detail: `Archiving doesn't clear it: Safe to Spend still counts ${f(p.coveredCents)} against your spendable accounts, as it did before ${name} was archived. Bring ${name} back to ${f(0)} (or restore it) to clear this.`,
+      accountId: p.accountId,
+      items: [{ date: p.date, label: `${name} balance`, cents: p.accountBalanceCents, currency: curOf(p.accountId) }],
     });
   }
   const lastDay = conservative.days.filter((d) => d.date <= sts.horizonEnd).at(-1);
   for (const adv of conservative.cashAdvances) {
     if (adv.date > sts.horizonEnd) continue;
     const owedAtEnd = lastDay?.advanceOwedEndCents ?? 0;
+    const c = curOf(adv.cardId);
     warnings.push({
       id: `advance:${adv.eventId}`,
       severity: 'warning',
-      title: `${adv.label}: ${formatCents(adv.cents, cur)} borrowed from ${nameOf(adv.cardId)}`,
+      title: `${adv.label}: ${formatCents(adv.cents, c)} borrowed from ${nameOf(adv.cardId)}`,
       accountId: adv.cardId,
-      items: [{ date: adv.date, label: adv.label, cents: adv.cents }],
-      detail: `A cash advance on ${formatShortDate(adv.date)} is borrowed money, so Safe to Spend doesn't count it as yours until a scheduled card payment pays it back.${owedAtEnd > 0 ? ` Through ${H}, ${formatCents(owedAtEnd, cur)} of planned cash advances is not paid back.` : ''} Interest, fees and your card limit are not known, so it may cost more or may not be available.`,
+      items: [{ date: adv.date, label: adv.label, cents: adv.cents, currency: c }],
+      detail: `A cash advance on ${formatShortDate(adv.date)} is borrowed money, so Safe to Spend doesn't count it as yours until a scheduled card payment pays it back.${owedAtEnd > 0 ? ` Through ${H}, ${formatCents(owedAtEnd, c)} of planned cash advances is not paid back.` : ''} Interest, fees and your card limit are not known, so it may cost more or may not be available.`,
     });
   }
   const shortByAccount = new Map<ID, AccountShortfall[]>();
@@ -648,20 +732,21 @@ export function buildDashboard(input: EngineInput): Dashboard {
     const coveredDays = list.filter((x) => ownLow(x.date) >= 0);
     if (!coveredDays.length) continue;
     const name = nameOf(id);
+    const c = curOf(id);
     const first = list[0]!;
     const deepestDay = list.reduce((a, x) => (x.lowCents < a.lowCents ? x : a));
     const deepest = deepestDay.lowCents;
-    const laterAll = list.slice(1).map((x) => `${formatCents(x.lowCents, cur)} on ${formatShortDate(x.date)} (${x.labels.join(', ')})`);
+    const laterAll = list.slice(1).map((x) => `${formatCents(x.lowCents, c)} on ${formatShortDate(x.date)} (${x.labels.join(', ')})`);
     const later = laterAll.length > 4 ? [...laterAll.slice(0, 4), `${laterAll.length - 4} more`] : laterAll;
     warnings.push({
       id: `account-short:${id}`,
       severity: 'warning',
-      title: `${name} would go to ${formatCents(first.lowCents, cur)} on ${formatShortDate(first.date)}`,
+      title: `${name} would go to ${formatCents(first.lowCents, c)} on ${formatShortDate(first.date)}`,
       detail: list.length === 1
-        ? `${first.labels.join(', ')} is paid from ${name}. Your other spendable accounts have enough, and Safe to Spend assumes you move money between them. Move ${formatCents(-first.lowCents, cur)} into ${name} before ${formatShortDate(first.date)}, or change the account it's paid from.`
-        : `${first.labels.join(', ')} is paid from ${name}. Later: ${later.join('; ')}. Lowest: ${formatCents(deepest, cur)} on ${formatShortDate(deepestDay.date)}. Safe to Spend assumes you move money between your spendable accounts. Move ${formatCents(-deepest, cur)} into ${name} before ${formatShortDate(first.date)} to cover all of these, or change the accounts they're paid from.`,
+        ? `${first.labels.join(', ')} is paid from ${name}. Your other spendable accounts have enough, and Safe to Spend assumes you move money between them. Move ${formatCents(-first.lowCents, c)} into ${name} before ${formatShortDate(first.date)}, or change the account it's paid from.`
+        : `${first.labels.join(', ')} is paid from ${name}. Later: ${later.join('; ')}. Lowest: ${formatCents(deepest, c)} on ${formatShortDate(deepestDay.date)}. Safe to Spend assumes you move money between your spendable accounts. Move ${formatCents(-deepest, c)} into ${name} before ${formatShortDate(first.date)} to cover all of these, or change the accounts they're paid from.`,
       accountId: id,
-      items: list.map((x) => ({ date: x.date, label: `${name} after ${x.labels.join(', ')}`, cents: x.lowCents })),
+      items: list.map((x) => ({ date: x.date, label: `${name} after ${x.labels.join(', ')}`, cents: x.lowCents, currency: c })),
     });
   }
   // Possible duplicates: a planned transaction (not linked to a bill) on the same account, for the same amount,
@@ -675,7 +760,7 @@ export function buildDashboard(input: EngineInput): Dashboard {
     if (!candidates.length) continue;
     const scored = candidates.map((o) => ({ o, sim: similarity(t.merchant, o.name) })).sort((x, y) => y.sim - x.sim);
     const best = scored.length === 1 || (scored[0]!.sim >= 0.3 && scored[0]!.sim > scored[1]!.sim) ? scored[0]!.o : null;
-    const amount = formatCents(-t.amountCents, cur);
+    const amount = formatCents(-t.amountCents, curOf(t.accountId));
     warnings.push(
       best
         ? {
@@ -692,59 +777,71 @@ export function buildDashboard(input: EngineInput): Dashboard {
           },
     );
   }
-  // Transfers between currencies are never converted (Phase 4A.4.2).
-  for (const x of conservative.currencyConflicts) {
-    if (x.date > sts.horizonEnd) continue;
+  // Transfers between currencies are never converted (Phase 4A.4.2); grouped per scheduled item (4A.4.4).
+  for (const list of groupBy(conservative.currencyConflicts.filter((x) => x.date <= sts.horizonEnd), (x) => groupKey(x.eventId))) {
+    const x = list[0]!;
     warnings.push({
-      id: `currency-transfer:${x.eventId}`,
+      id: `currency-transfer:${list.length === 1 ? x.eventId : groupKey(x.eventId)}`,
       severity: 'warning',
       title: `${x.label}: ${nameOf(x.fromAccountId)} (${x.fromCurrency}) to ${nameOf(x.toAccountId)} (${x.toCurrency}) isn't converted`,
       detail: x.counted
-        ? `Clarity doesn't convert currencies. On ${formatShortDate(x.date)} the money leaving ${nameOf(x.fromAccountId)} is counted there, but nothing is counted as arriving in ${nameOf(x.toAccountId)}.`
-        : `Clarity doesn't convert currencies, so this full-balance card payment on ${formatShortDate(x.date)} has no amount in ${x.fromCurrency} and isn't counted. Enter it as a fixed amount, or pay the card from an account in ${x.toCurrency}.`,
+        ? `Clarity doesn't convert currencies. On ${dateList(list.map((y) => y.date))} the money leaving ${nameOf(x.fromAccountId)} is counted there, but nothing is counted as arriving in ${nameOf(x.toAccountId)}.`
+        : `Clarity doesn't convert currencies, so this full-balance card payment on ${dateList(list.map((y) => y.date))} has no amount in ${x.fromCurrency} and isn't counted. Enter it as a fixed amount, or pay the card from an account in ${x.toCurrency}.`,
       accountId: x.fromAccountId,
-      items: [{ date: x.date, label: x.label, cents: x.cents }],
+      items: list.map((y) => ({ date: y.date, label: y.label, cents: y.cents, currency: y.fromCurrency })),
     });
   }
   // Scheduled items on accounts left out of the totals: other currencies, and archived accounts (Phase 4A.4.2).
+  type Item = NonNullable<Warning['items']>[number] & { key: string };
   const occItems = (pred: (id: ID) => boolean) => {
-    const out = new Map<ID, NonNullable<Warning['items']>>();
-    const add = (id: ID, item: NonNullable<Warning['items']>[number]) => out.set(id, [...(out.get(id) ?? []), item]);
+    const out = new Map<ID, Item[]>();
+    const add = (id: ID, item: Item) => out.set(id, [...(out.get(id) ?? []), item]);
     for (const o of conservative.occurrences) {
       if (o.status === 'confirmed' || o.status === 'skipped' || o.date > sts.horizonEnd || (o.status !== 'overdue' && o.date < input.today)) continue;
       const signed = o.kind === 'income' ? o.amountCents : -o.amountCents;
-      if (pred(o.accountId)) add(o.accountId, { date: o.date, label: o.name, cents: signed });
-      else if (o.toAccountId && pred(o.toAccountId)) add(o.toAccountId, { date: o.date, label: o.name, cents: o.amountCents });
+      // the amount is in the currency of the account it is paid from
+      if (pred(o.accountId)) add(o.accountId, { date: o.date, label: o.name, cents: signed, currency: curOf(o.accountId), key: o.recurringId });
+      else if (o.toAccountId && pred(o.toAccountId)) add(o.toAccountId, { date: o.date, label: o.name, cents: o.amountCents, currency: curOf(o.accountId), key: o.recurringId });
     }
     for (const t of input.transactions) {
-      if (t.date > input.today && t.date <= sts.horizonEnd && pred(t.accountId)) add(t.accountId, { date: t.date, label: t.merchant || 'Planned transaction', cents: t.amountCents });
+      if (t.date > input.today && t.date <= sts.horizonEnd && pred(t.accountId)) add(t.accountId, { date: t.date, label: t.merchant || 'Planned transaction', cents: t.amountCents, currency: curOf(t.accountId), key: t.id });
     }
     return out;
   };
+  const strip = (xs: Item[]) => xs.map(({ key: _key, ...rest }) => rest);
+  const byDate = (a: { date: ISODate }, b: { date: ISODate }) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
   if (balances.excludedCurrencyAccountIds.length) {
     const foreign = new Set(balances.excludedCurrencyAccountIds);
-    const items = [...occItems((id) => foreign.has(id)).values()].flat().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    const items = [...occItems((id) => foreign.has(id)).values()].flat().sort(byDate);
     warnings.push({
       id: 'currency',
       severity: 'info',
       title: 'Some accounts are not included',
       detail: `Accounts in a currency other than ${cur} are left out of totals.${items.length ? ` Their scheduled items aren't counted in Safe to Spend either: ${items.map((x) => `${x.label} (${formatShortDate(x.date)})`).join(', ')}.` : ''}`,
-      ...(items.length ? { items } : {}),
+      ...(items.length ? { items: strip(items) } : {}),
     });
   }
   const archived = new Set(input.accounts.filter((a) => a.archived).map((a) => a.id));
-  for (const [id, items] of occItems((id) => archived.has(id))) {
+  for (const [id, raw] of occItems((id) => archived.has(id))) {
     const name = nameOf(id);
-    items.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    const items = raw.sort(byDate);
+    const distinct = new Set(items.map((x) => x.key)).size;
+    const list = items.map((x) => `${x.label} (${formatShortDate(x.date)})`).join(', ');
+    const acctCur = curOf(id);
     warnings.push({
       id: `archived:${id}`,
       severity: 'warning',
-      title: `${items.length} scheduled ${items.length === 1 ? 'item still uses' : 'items still use'} ${name}, which is archived`,
-      detail: `${items.map((x) => `${x.label} (${formatShortDate(x.date)})`).join(', ')}. Bills and transfers out of ${name} are still counted: they're paid from what ${name} holds, and anything it can't cover is counted against your spendable accounts. Money going into it isn't counted as spendable. Move them to an active account in Planning, or restore ${name}.`,
+      title: `${distinct} scheduled ${distinct === 1 ? 'item still uses' : 'items still use'} ${name}, which is archived`,
+      // Currency first (Phase 4A.4.4): an archived account in another currency is never counted, so never claim it is.
+      detail: acctCur !== cur
+        ? `${list}. ${name} is in ${acctCur}, and Clarity doesn't convert currencies, so none of these are counted in Safe to Spend (${cur}). Move them to an account in ${cur}, or restore ${name}.`
+        : `${list}. Bills and transfers out of ${name} are still counted: they're paid from what ${name} holds, and anything it can't cover is counted against your spendable accounts. Money going into it isn't counted as spendable. Move them to an active account in Planning, or restore ${name}.`,
       accountId: id,
-      items,
+      items: strip(items),
     });
   }
+  // An item's `currency` is set only when it differs from the base currency (absent = base currency).
+  for (const w of warnings) for (const it of w.items ?? []) if (it.currency === cur) delete it.currency;
   // Most important first, so the dashboard's short list shows them; the full list (Planning) shows every one.
   warnings.sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
 
@@ -752,7 +849,7 @@ export function buildDashboard(input: EngineInput): Dashboard {
     kind: l.countsAsCash ? 'in' : 'info',
     label: l.name,
     cents: l.balanceCents,
-    note: l.countsAsCash ? (l.pendingCents ? `includes ${formatCents(l.pendingCents, cur)} pending` : 'counts as available cash') : l.type === 'credit_card' ? 'owed on card, not cash' : 'not marked as spendable',
+    note: l.archived ? (l.type === 'credit_card' ? 'archived card, still owed' : 'archived and overdrawn, still owed') : l.countsAsCash ? (l.pendingCents ? `includes ${formatCents(l.pendingCents, cur)} pending` : 'counts as available cash') : l.type === 'credit_card' ? 'owed on card, not cash' : 'not marked as spendable',
   }));
   recordedLines.push({ kind: 'result', label: TERMS.recordedBalance, cents: balances.availableCashCents });
 

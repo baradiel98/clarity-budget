@@ -1,7 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { ScrollView, View } from 'react-native';
-import { accountUsage, archiveAccount, archiveTargets, describeUsage, type ArchivePlan } from '@clarity/data';
+import { accountUsage, archiveAccount, archiveBalanceReview, archiveTargets, describeUsage, PAUSE_NOTE, type ArchivePlan } from '@clarity/data';
 import { formatShortDate } from '@clarity/shared';
 import { useData, useRun, useSession } from '../../src/state/session';
 import { Button } from '../../src/ui/Button';
@@ -26,6 +26,7 @@ export default function ArchiveReview() {
   const [error, setError] = useState<string | null>(null);
   if (!account) return <SubScreen title="Archive account"><T>Account not found.</T></SubScreen>;
   const usage = accountUsage(data, account.id, today);
+  const balanceNote = archiveBalanceReview(data, account.id, today).note;
   const confirm = async () => {
     const plan: ArchivePlan = { reassign: {}, pause: [] };
     for (const [rid, c] of Object.entries(choice)) {
@@ -38,7 +39,8 @@ export default function ArchiveReview() {
   };
   return (
     <SubScreen title={`Archive ${account.name}?`}>
-      <T variant="callout">These are still scheduled with {account.name}. Choose what happens to each one. Nothing changes unless you choose it.</T>
+      {balanceNote && <Card><T variant="callout" testID="archive-balance-note">{balanceNote}</T></Card>}
+      {(usage.recurring.length > 0 || usage.planned.length > 0) && <T variant="callout">These are still scheduled with {account.name}. Choose what happens to each one. Nothing changes unless you choose it.</T>}
       {usage.recurring.map((u) => {
         const v = choice[u.item.id] ?? 'keep';
         const set = (x: string) => setChoice({ ...choice, [u.item.id]: x });
@@ -63,9 +65,9 @@ export default function ArchiveReview() {
           ))}
         </Card>
       )}
-      <T variant="footnote" color="textSecondary">
-        Kept items are still counted: bills and transfers out are paid from what {account.name} holds, and anything it can't cover is counted against your spendable accounts. Money going into an archived account isn't counted as spendable. Paused items aren't counted in Safe to Spend until you resume them in Planning.
-      </T>
+      {(usage.recurring.length > 0 || usage.planned.length > 0) && <T variant="footnote" color="textSecondary">
+        Kept items are still counted: bills and transfers out are paid from what {account.name} holds, and anything it can't cover is counted against your spendable accounts. Money going into an archived account isn't counted as spendable. Paused items aren't counted in Safe to Spend until you resume them in Planning. {PAUSE_NOTE}
+      </T>}
       {error && <T color="negative" accessibilityRole="alert">{error}</T>}
       <Button title="Archive account" onPress={() => void confirm()} testID="archive-confirm" />
       <Button title="Cancel" kind="secondary" onPress={() => router.back()} />

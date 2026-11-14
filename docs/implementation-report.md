@@ -316,6 +316,26 @@ The step-by-step checklist is in `docs/device-test-script.md`.
   - `apps/mobile/test/warnings.test.tsx`: 2.
 - **Not verified:** physical devices, Safari, rendering of the routed mobile screens (archive review, Planning list) on a device.
 
+## 7j. Phase 4A.4.4: archived liabilities, card-debt integrity, currency accuracy
+
+| Issue | Scenario | Before | After |
+|---|---|---|---|
+| Archived overdrawn account | Checking $1,000, Old checking −$500 | $500 active / **$1,000 archived**, no warning | $500 / **$500**, "Old checking is archived and overdrawn by $500.00" |
+| Archived card debt | Visa owes $1,000, no payment, archived | warning gone | warning kept, "archiving doesn't clear what it owes" |
+| Archived EUR account | archived Euro savings pays €500 | "still counted …" (false); not in currency notice | "in EUR … none of these are counted"; in currency notice |
+| EUR card advance into EUR account | €500 | −$500 from USD Safe to Spend | not subtracted |
+| Cash advance, payment, later purchases | $500, $90 advance, $400 payment Dec 21, $400 purchases Dec 22 | $190, no disclosure | $190 + "Visa is projected to owe $90.00 on Dec 31…" (purchases before/on Dec 21: $100) |
+| Currency display | EUR → EUR transfer | "$500.00 of $800.00" | "€500.00 of €800.00" |
+| Grouping | weekly $100 from archived $250 | 5 warnings; "7 scheduled items" | 1 warning, 5 dates, $450; "1 scheduled item" |
+
+- **Tests:**
+  - `packages/engine/test/archived-liabilities.test.ts`: 27 tests;
+  - `packages/data/test/archive-liabilities.test.ts`: 3;
+  - `apps/web/e2e/phase4a44.spec.ts`: 2;
+  - `apps/mobile/test/currency-warnings.test.tsx`: 2.
+- **Generated scenarios (600, scratch probe):** archiving no longer raises Safe to Spend except through the archived account's own capped transfers out.
+- **Not verified:** physical devices, Safari, rendering of the routed mobile archive screen.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

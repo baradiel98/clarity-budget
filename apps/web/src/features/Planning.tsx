@@ -81,14 +81,17 @@ export function Planning() {
   const onDate = useMemo(() => balanceOnDate(engineInput(data, today), target), [data, today, target]);
 
   const timeline = useMemo(() => {
-    const days: { date: string; end: number; items: { key: string; label: string; cents: number; occ?: Occurrence; status: Occurrence['status'] | 'scheduled_tx' | 'excluded'; isIncome: boolean }[] }[] = [];
+    // An amount that isn't a cash effect is in the currency of the account it belongs to (Phase 4A.4.4).
+    const ccy = (id?: string) => data.accounts.find((a) => a.id === id)?.currency ?? cur;
+    const days: { date: string; end: number; items: { key: string; label: string; cents: number; currency?: string; occ?: Occurrence; status: Occurrence['status'] | 'scheduled_tx' | 'excluded'; isIncome: boolean }[] }[] = [];
     const occByDate = new Map<string, Occurrence[]>();
     for (const o of forecast.occurrences) if (o.status === 'skipped' || o.status === 'overdue') occByDate.set(o.status === 'overdue' ? today : o.date, [...(occByDate.get(o.status === 'overdue' ? today : o.date) ?? []), o]);
     for (const d of forecast.days) {
-      const items = d.events.map((e) => ({
+      const items: (typeof days)[number]['items'] = d.events.map((e) => ({
         key: e.id,
         label: e.label,
         cents: e.cashDeltaCents || (e.legs.find((l) => l.accountId === e.occurrence?.accountId)?.deltaCents ?? 0),
+        currency: e.cashDeltaCents ? cur : ccy(e.occurrence?.accountId ?? e.legs[0]?.accountId),
         ...(e.occurrence ? { occ: e.occurrence } : {}),
         status: (e.source === 'scheduled_tx' ? 'scheduled_tx' : e.source === 'hypothetical' ? 'expected' : e.occurrence?.status ?? 'expected') as Occurrence['status'] | 'scheduled_tx' | 'excluded',
         isIncome: e.occurrence?.kind === 'income' || (e.source === 'scheduled_tx' && e.legs[0]!.deltaCents > 0),
@@ -98,7 +101,7 @@ export function Planning() {
       if (items.length) days.push({ date: d.date, end: d.endCashCents, items });
     }
     return days;
-  }, [forecast, today]);
+  }, [forecast, today, data.accounts, cur]);
 
   const items = (g: Group) => data.recurring.filter((r) => GROUP_KINDS[g].includes(r.kind));
   const totals = (g: Group) => {
@@ -160,7 +163,7 @@ export function Planning() {
                         <span style={{ textDecoration: it.status === 'skipped' ? 'line-through' : undefined }} className={it.status === 'skipped' ? 'faint' : ''}>{it.label}</span>
                         {it.status === 'excluded' ? <span className="badge warn">Estimated, not in Safe to Spend</span> : it.status !== 'expected' && statusBadge({ status: it.status as Occurrence['status'], isIncome: it.isIncome })}
                       </span>
-                      <span className={`tl-amt num ${it.cents > 0 ? 'pos' : ''}`}>{it.status === 'unknown' || it.status === 'skipped' ? <span className="faint">—</span> : <>{it.status === 'estimated' && <span className="approx" aria-label="about">≈</span>}<Money cents={it.cents} currency={cur} sign="always" /></>}</span>
+                      <span className={`tl-amt num ${it.cents > 0 ? 'pos' : ''}`}>{it.status === 'unknown' || it.status === 'skipped' ? <span className="faint">—</span> : <>{it.status === 'estimated' && <span className="approx" aria-label="about">≈</span>}<Money cents={it.cents} currency={it.currency ?? cur} sign="always" /></>}</span>
                       {it.occ ? (
                         <button className="icon-btn tl-act" id={`act-${it.key}`} aria-label={`Actions for ${it.label}`} aria-haspopup="menu" aria-expanded={menu === it.key} onClick={(e) => { menuTrigger.current = e.currentTarget; setMenu(menu === it.key ? null : it.key); }}><MoreHorizontal size={16} /></button>
                       ) : <span className="tl-act" aria-hidden />}

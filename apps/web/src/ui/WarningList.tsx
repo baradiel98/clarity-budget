@@ -31,7 +31,7 @@ export function WarningList({ warnings, currency }: { warnings: readonly Warning
                   {w.items && w.items.length > 1 && (
                     <ul className="warning-items" aria-label={`All dates for: ${w.title}`}>
                       {w.items.map((x, i) => (
-                        <li key={`${x.date}-${i}`}><span>{formatShortDate(x.date)}</span><span>{x.label}</span><span className={`num ${x.cents < 0 ? 'neg' : ''}`}><Money cents={x.cents} currency={currency} /></span></li>
+                        <li key={`${x.date}-${i}`}><span>{formatShortDate(x.date)}</span><span>{x.label}</span><span className={`num ${x.cents < 0 ? 'neg' : ''}`}><Money cents={x.cents} currency={x.currency ?? currency} /></span></li>
                       ))}
                     </ul>
                   )}

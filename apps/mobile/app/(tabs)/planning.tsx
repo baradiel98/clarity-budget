@@ -134,11 +134,13 @@ export default function Planning() {
             {[...d.events, ...forecast.excludedEvents.filter((e) => e.date === d.date)].map((e) => {
               const isIncome = e.occurrence?.kind === 'income' || (e.source === 'scheduled_tx' && (e.legs[0]?.deltaCents ?? 0) > 0);
               const cents = e.cashDeltaCents || (e.legs[0]?.deltaCents ?? 0);
+              // an amount that isn't a cash effect is in the currency of its account (Phase 4A.4.4)
+              const amountCur = e.cashDeltaCents ? cur : data.accounts.find((a) => a.id === (e.occurrence?.accountId ?? e.legs[0]?.accountId))?.currency ?? cur;
               return (
                 <Pressable key={e.id} disabled={!e.occurrence} onPress={() => e.occurrence && occActions(e.occurrence, isIncome)} accessibilityRole={e.occurrence ? 'button' : undefined} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 }}>
                   <T style={{ flex: 1 }} numberOfLines={1}>{e.label}</T>
                   {e.excluded ? <Badge label={e.excluded === 'unknown_amount' ? 'Amount unknown' : 'Not counted'} tone="warn" /> : e.occurrence && e.occurrence.status !== 'expected' ? <StatusBadge u={{ status: e.occurrence.status, isIncome }} /> : null}
-                  {e.excluded ? <T color="textTertiary">—</T> : <Money cents={cents} currency={cur} sign="always" color={cents > 0 ? 'positive' : 'text'} style={{ fontFamily: 'Inter_600SemiBold' }} />}
+                  {e.excluded ? <T color="textTertiary">—</T> : <Money cents={cents} currency={amountCur} sign="always" color={cents > 0 ? 'positive' : 'text'} style={{ fontFamily: 'Inter_600SemiBold' }} />}
                 </Pressable>
               );
             })}

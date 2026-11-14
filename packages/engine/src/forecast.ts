@@ -35,7 +35,8 @@ export interface ForecastInput {
   hypotheticals?: readonly Hypothetical[];
 }
 
-export type EventSource = 'occurrence' | 'overdue' | 'scheduled_tx' | 'hypothetical';
+/** archived_balance: an archived spendable account that is overdrawn today (Phase 4A.4.4). */
+export type EventSource = 'occurrence' | 'overdue' | 'scheduled_tx' | 'hypothetical' | 'archived_balance';
 export type ExclusionReason = 'unknown_amount' | 'estimated_income' | 'overdue_income';
 
 export interface Leg {
@@ -112,6 +113,8 @@ export interface CoveredPayment {
   coveredCents: Cents;
   /** The account's projected balance before the payment (may be negative). */
   accountBalanceCents: Cents;
+  /** 'overdrawn': an archived spendable account's negative balance today, still owed (Phase 4A.4.4). */
+  kind?: 'payment' | 'overdrawn';
 }
 
 /** A planned transfer out of a credit card into another account: borrowed money (Phase 4A.4). */
@@ -285,6 +288,15 @@ export function buildForecast(input: ForecastInput): Forecast {
     push({ ...base, date: o.date, source: 'occurrence', legs: [], cashDeltaCents: 0 });
   }
 
+  // 2b) Archiving never hides debt (Phase 4A.4.4): an archived account that was counted as spendable and is
+  //     overdrawn today keeps counting against the spendable accounts, exactly as it did before it was archived.
+  //     (A positive archived balance is still not spendable.)
+  for (const a of accounts) {
+    if (!a.archived || !a.spendable || a.type === 'credit_card' || a.currency !== baseCurrency) continue;
+    if ((balances.get(a.id) ?? 0) >= 0) continue;
+    push({ id: `overdrawn:${a.id}`, date: today, label: `${a.name} (archived) overdrawn balance`, source: 'archived_balance', legs: [], cashDeltaCents: 0, estimated: false });
+  }
+
   // 3) Hypothetical purchases ("Can I afford this?") — never stored.
   for (const h of input.hypotheticals ?? []) {
     if (h.date < today || h.date > horizonEnd) continue;
@@ -351,6 +363,17 @@ export function buildForecast(input: ForecastInput): Forecast {
     const reserveMoves: Move[] = [];
     const payments: ForecastEvent[] = [];
     const incoming: ForecastEvent[] = [];
+    // Overdrawn archived accounts: the debt is counted against the spendable accounts (and the account is brought
+    // back to zero in the projection, so it isn't counted twice by later payments from it).
+    for (const e of events) {
+      if (e.source !== 'archived_balance') continue;
+      const id = e.id.slice('overdrawn:'.length);
+      const bal = balances.get(id) ?? 0;
+      if (bal >= 0) continue;
+      apply(id, -bal);
+      e.coverCents = -bal;
+      covered.push({ eventId: e.id, label: e.label, date, accountId: id, requestedCents: -bal, fundedCents: 0, coveredCents: -bal, accountBalanceCents: bal, kind: 'overdrawn' });
+    }
     // 0. Transfers between accounts in different currencies (Phase 4A.4.2): Clarity never converts. The money
     //    leaving the sending account is counted there; nothing is counted as arriving. A full-balance card payment
     //    across currencies has no amount in the sender's currency, so it is not counted at all (and warned about).
@@ -412,7 +435,9 @@ export function buildForecast(input: ForecastInput): Forecast {
     for (const a of advances) {
       apply(a.src, -a.cents);
       apply(a.dst, a.cents);
-      if (typeOf(a.dst) !== 'credit_card') {
+      // Borrowed against the spendable accounts only when the card is in the base currency (Phase 4A.4.4):
+      // a card in another currency can't be subtracted from a base-currency total.
+      if (typeOf(a.dst) !== 'credit_card' && accountById.get(a.src)?.currency === baseCurrency) {
         advanceOwed.set(a.src, (advanceOwed.get(a.src) ?? 0) + a.cents);
         advanceList.push({ eventId: a.e.id, label: a.e.label, date, cardId: a.src, toAccountId: a.dst, cents: a.cents });
       }

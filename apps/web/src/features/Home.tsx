@@ -199,7 +199,7 @@ export function Home() {
                       <div className="meta">{formatWeekdayDate(u.date)} {statusBadge(u)}{!u.affectsCash && <span>Charged to a card, not from cash</span>}</div>
                     </div>
                     <span className={`up-amount num ${u.cents > 0 ? 'pos' : ''}`}>
-                      {u.status === 'unknown' ? <span className="faint">—</span> : <>{u.status === 'estimated' && <span className="approx" aria-label="about">≈</span>}<Money cents={u.cents} currency={cur} sign="always" /></>}
+                      {u.status === 'unknown' ? <span className="faint">—</span> : <>{u.status === 'estimated' && <span className="approx" aria-label="about">≈</span>}<Money cents={u.cents} currency={u.currency ?? cur} sign="always" /></>}
                     </span>
                     {u.occurrence && u.status !== 'skipped' && (
                       <button
@@ -221,7 +221,7 @@ export function Home() {
                       <li key={u.id}>
                         <span className="up-later-date">{formatShortDate(u.date)}</span>
                         <span className="up-later-name">{u.label}{u.status === 'estimated' && <span className="sr-only"> (estimated)</span>}{!u.affectsCash && <span className="faint"> · card</span>}</span>
-                        <span className={`num ${u.cents > 0 ? 'pos' : ''}`}>{u.status === 'unknown' ? <span className="faint">—</span> : <>{u.status === 'estimated' && <span className="approx" aria-hidden>≈</span>}<Money cents={u.cents} currency={cur} sign="always" /></>}</span>
+                        <span className={`num ${u.cents > 0 ? 'pos' : ''}`}>{u.status === 'unknown' ? <span className="faint">—</span> : <>{u.status === 'estimated' && <span className="approx" aria-hidden>≈</span>}<Money cents={u.cents} currency={u.currency ?? cur} sign="always" /></>}</span>
                       </li>
                     ))}
                   </ul>
