@@ -66,6 +66,11 @@ export interface SafeToSpend {
   availableCashCents: Cents;
   reserveCents: Cents;
   lowPoint: LowPoint;
+  /**
+   * Everything counted after the low point through the horizon. By definition of the low point, these
+   * never take the balance below it, so they don't lower Safe to Spend. Listed so the explanation is complete.
+   */
+  afterLow: { events: ForecastEvent[]; inCents: Cents; outCents: Cents; note: string | null };
   excludedIncome: ForecastEvent[];
   explanation: Explanation;
 }
@@ -148,12 +153,22 @@ export function computeSafeToSpend(input: EngineInput, hypotheticals?: readonly 
   const cents = low.cents - reserve;
   const excludedIncome = f.excludedEvents.filter((e) => e.date <= low.date || e.excluded === 'overdue_income');
   const cur = input.baseCurrency;
+  const afterEvents = f.days.filter((d) => d.date > low.date && d.date <= h.end).flatMap((d) => d.events.filter((e) => e.cashDeltaCents !== 0));
+  const afterIn = afterEvents.reduce((a, e) => a + Math.max(0, e.cashDeltaCents), 0);
+  const afterOut = afterEvents.reduce((a, e) => a + Math.max(0, -e.cashDeltaCents), 0);
+  const outs = afterEvents.filter((e) => e.cashDeltaCents < 0).map((e) => e.label);
+  const list = (xs: string[]) => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+  const afterNote =
+    afterOut > 0
+      ? `${list(outs)} (${formatCents(afterOut, cur)}) come after ${formatShortDate(low.date)}${afterIn > 0 ? `, once ${formatCents(afterIn, cur)} has come in` : ''}. Your balance stays at or above the ${formatShortDate(low.date)} low through ${formatShortDate(h.end)}, so they don't lower Safe to Spend.`
+      : null;
 
   const lines: ExplainLine[] = [
     { kind: 'start', label: 'Available cash now', cents: f.startCashCents },
     ...low.incomeBefore.map((e) => eventLine(e, cur)),
     ...low.obligations.map((e) => eventLine(e, cur)),
     { kind: 'info', label: `Lowest point: ${formatShortDate(low.date)}`, cents: low.cents },
+    ...afterEvents.map((e): ExplainLine => ({ ...eventLine(e, cur), note: [eventLine(e, cur).note, `after the lowest point, doesn't lower it`].filter(Boolean).join('; ') })),
     { kind: 'reserve', label: 'Minimum cash reserve', cents: -reserve },
     { kind: 'result', label: cents >= 0 ? 'Safe to Spend' : 'Short by', cents },
     ...excludedIncome.map(excludedLine),
@@ -161,7 +176,7 @@ export function computeSafeToSpend(input: EngineInput, hypotheticals?: readonly 
   const horizonText = h.reason === 'next_income' ? `your next known paycheck on ${formatShortDate(h.end)}` : `the end of the month (${formatShortDate(h.end)})`;
   const summary =
     cents >= 0
-      ? `You can spend up to ${formatCents(cents, cur)} today and still cover everything scheduled through ${horizonText}, keeping your ${formatCents(reserve, cur)} reserve.`
+      ? `You can spend up to ${formatCents(cents, cur)} today and still cover everything scheduled through ${horizonText}, keeping your ${formatCents(reserve, cur)} reserve. Your balance is lowest on ${formatShortDate(low.date)}${afterOut > 0 ? '; everything after that is covered' : ''}.`
       : `Your scheduled obligations through ${horizonText} are ${formatCents(-cents, cur)} more than your cash and reserve allow. Your balance is lowest on ${formatShortDate(low.date)}.`;
 
   return {
@@ -172,6 +187,7 @@ export function computeSafeToSpend(input: EngineInput, hypotheticals?: readonly 
     availableCashCents: f.startCashCents,
     reserveCents: reserve,
     lowPoint: low,
+    afterLow: { events: afterEvents, inCents: afterIn, outCents: afterOut, note: afterNote },
     excludedIncome,
     explanation: {
       title: 'Safe to Spend',
@@ -251,6 +267,8 @@ export interface Dashboard {
   nextIncome: IncomeRef | null;
   /** Occurrences + planned transactions from today through +14 days, plus anything overdue. */
   upcoming: UpcomingItem[];
+  /** Last date covered by `upcoming` (never before month-end). */
+  upcomingUntil: ISODate;
   warnings: Warning[];
   recordedBalanceExplanation: Explanation;
   /** Inclusive forecast (estimated income counted) through month end / horizon, for charts. */
@@ -327,10 +345,12 @@ export function buildDashboard(input: EngineInput): Dashboard {
   const lowMonth = lowestBetween(conservative, input.today, eom)!;
   const lowBefore = next ? lowestBetween(conservative, input.today, next.date) : null;
 
-  // Upcoming: overdue + next 14 days.
+  // Upcoming: overdue + at least the next 14 days, and always through month-end, so the items listed on
+  // the dashboard add up to the projected month-end balance shown above them.
   const until = (() => {
     const d = inclusive.days[Math.min(14, inclusive.days.length - 1)];
-    return d ? d.date : input.today;
+    const twoWeeks = d ? d.date : input.today;
+    return twoWeeks > eom ? twoWeeks : eom;
   })();
   const upcoming: UpcomingItem[] = [];
   for (const o of inclusive.occurrences) {
@@ -424,6 +444,7 @@ export function buildDashboard(input: EngineInput): Dashboard {
       lowBefore && next ? { ...lowBefore, nextIncome: next, explanation: lowExplanation(lowBefore, conservative, 'Lowest before next income', cur, next) } : null,
     nextIncome: next,
     upcoming,
+    upcomingUntil: until,
     warnings,
     recordedBalanceExplanation: {
       title: 'Current recorded balance',

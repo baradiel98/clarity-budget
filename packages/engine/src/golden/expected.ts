@@ -33,6 +33,12 @@ export const GOLDEN_EXPECTED: Record<string, unknown> = {
         "phone",
         -6000,
         "expected"
+      ],
+      [
+        "2026-09-26",
+        "pay",
+        180000,
+        "expected"
       ]
     ],
     "warnings": [],
