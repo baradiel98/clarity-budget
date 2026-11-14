@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { countedOutflows, engineInput, onboard, type OnboardingInput } from '@clarity/data';
 import { buildDashboard, scheduleDates } from '@clarity/engine';
-import { addDays, BALANCE_ENTRY_HINT, formatMonthYear, formatShortDate, formatWeekdayDate, monthNameLong, parseAmountInput, parseISO, type ISODate, type Schedule, TERMS } from '@clarity/shared';
+import { addDays, BALANCE_ENTRY_HINT, parseBalanceEntry, formatMonthYear, formatShortDate, formatWeekdayDate, monthNameLong, parseAmountInput, parseISO, type ISODate, type Schedule, TERMS } from '@clarity/shared';
 import { Plus, X } from 'lucide-react';
 import { useData, useRun, useSession } from '../state/session';
 import { AmountInput } from '../ui/AmountInput';
@@ -54,12 +54,14 @@ export function Onboarding() {
 
   if (session.pendingRecoveryKey) return <RecoveryKeyStep recoveryKey={session.pendingRecoveryKey} onDone={session.clearPendingRecoveryKey} />;
 
-  const balanceCents = parseAmountInput(balance, cur);
+  // Phase 4A.5.8: signed; an overdrawn balance keeps its minus sign
+  const balanceParsed = parseBalanceEntry(balance, cur);
+  const balanceCents = balanceParsed.ok ? balanceParsed.cents : null;
   const billCents = parseAmountInput(billAmount, cur);
 
   const next = () => {
     const e: Record<string, string> = {};
-    if (step === 0 && balanceCents === null) e.balance = 'Enter your current balance (0 is fine).';
+    if (step === 0 && !balanceParsed.ok) e.balance = balance.trim() ? balanceParsed.message : 'Enter your current balance (0 is fine).';
     if (step === 1) {
       for (const p of pays) {
         if (p.freq === 'none') continue;
@@ -161,7 +163,7 @@ export function Onboarding() {
             <h1 className="t-title1">What's in your checking account right now?</h1>
             <p className="muted t-callout">You can add savings, cash and cards later.</p>
             <Field label="Current checking balance" hint={BALANCE_ENTRY_HINT} error={errors.balance}>
-              {(id) => <AmountInput id={id} value={balance} onChange={setBalance} currency={cur} autoFocus />}
+              {(id) => <AmountInput id={id} value={balance} onChange={setBalance} currency={cur} signed autoFocus />}
             </Field>
           </>
         )}

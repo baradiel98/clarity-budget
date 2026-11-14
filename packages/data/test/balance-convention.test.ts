@@ -72,12 +72,13 @@ describe('Update balance compares posted with posted', () => {
     expect(sts(data)).toBe(47000);
   });
 
-  it('"Already included" through the command: recorded as history, not added', () => {
+  it('"Already included" through the command: a posted item is recorded as history, not added; a pending one is refused (Phase 4A.5.8)', () => {
     const o = opened(80000);
     const id = o.id;
     let data = o.data;
-    data = applyOps(data, recordRefund(data, id, 30000, 'pending', { includedInBalance: true }).ops);
-    expect(data.transactions[0]!.includedInBalance).toBe(true);
+    expect(() => recordRefund(data, id, 30000, 'pending', { includedInBalance: true })).toThrow(/pending transaction can't already be in Checking's posted balance/);
+    data = applyOps(data, recordRefund(data, id, 30000, 'confirmed', { includedInBalance: true }).ops);
+    expect(data.transactions[0]).toMatchObject({ includedInBalance: true, includedAsOf: '2026-11-13' });
     expect(accountBalance(data.accounts[0]!, data.transactions, '2026-11-13')).toBe(80000);
     expect(sts(data)).toBe(80000);
   });

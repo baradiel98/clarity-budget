@@ -4,3 +4,4 @@ export * from './dates';
 export * from './categories';
 export * from './terms';
 export * from './ids';
+export * from './balanceEntry';

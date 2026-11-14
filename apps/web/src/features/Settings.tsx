@@ -1,9 +1,9 @@
 import { Archive, ArchiveRestore, Download, KeyRound, Pencil, Plus, RefreshCw, Scale, ShieldCheck, Trash2, Upload } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { accountUsage, adjustBalance, archiveAccount, archiveBalanceReview, archiveTargets, createAccount, createCategory, describeUsage, exportTransactionsCsv, PAUSE_NOTE, updateAccount, updateCategory, updateSettings, WorkspaceStore, type ArchivePlan } from '@clarity/data';
-import { accountBalance, affectsBalance, postedBalance } from '@clarity/engine';
+import { accountUsage, adjustBalance, archiveAccount, markTransactionPosted, previewBalanceUpdate, archiveBalanceReview, archiveTargets, createAccount, createCategory, describeUsage, exportTransactionsCsv, PAUSE_NOTE, updateAccount, updateCategory, updateSettings, WorkspaceStore, type ArchivePlan } from '@clarity/data';
+import { accountBalance, pendingItems, postedBalance } from '@clarity/engine';
 import { BACKUP_EXTENSION } from '@clarity/security';
-import { BALANCE_ENTRY_HINT, centsToDecimalString, formatShortDate, NO_SYNC_NOTICE, parseAmountInput, TERMS, UPDATE_BALANCE_HINT, UPDATE_BALANCE_PENDING_NOTE, type Account, type AccountType } from '@clarity/shared';
+import { BALANCE_ENTRY_HINT, CARD_BALANCE_ENTRY_HINT, cardModeOf, centsToDecimalString, formatShortDate, NO_SYNC_NOTICE, parseAmountInput, parseBalanceEntry, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, RECONCILED_MESSAGE, TERMS, UPDATE_BALANCE_HINT, UPDATE_BALANCE_PENDING_NOTE, type Account, type AccountType, type CardBalanceMode } from '@clarity/shared';
 import { useRouter } from '../lib/router';
 import { downloadText, pickFile, stamp } from '../platform/files';
 import { buildId, checkForUpdate } from '../platform/update';
@@ -69,7 +69,7 @@ export function Settings() {
                       <div className="hint">{TYPE_LABEL[a.type]}{a.type !== 'credit_card' ? (a.spendable ? ' · counts as available cash' : ' · not counted as available cash') : ''}</div>
                     </div>
                     <div className="row">
-                      <span className="num" style={{ fontWeight: 600 }}>{a.type === 'credit_card' ? <>Owed <Money cents={-bal} currency={cur} /></> : <Money cents={bal} currency={cur} />}</span>
+                      <span className="num" style={{ fontWeight: 600 }}>{a.type === 'credit_card' ? (bal > 0 ? <>In credit <Money cents={bal} currency={cur} /></> : <>Owed <Money cents={-bal} currency={cur} /></>) : <Money cents={bal} currency={cur} />}</span>
                       <button className="icon-btn" title="Update balance" aria-label={`Update balance of ${a.name}`} onClick={() => setDialog({ kind: 'balance', account: a })}><Scale size={15} /></button>
                       <button className="icon-btn" aria-label={`Edit ${a.name}`} onClick={() => setDialog({ kind: 'account', account: a })}><Pencil size={15} /></button>
                       <button className="icon-btn" aria-label={a.archived ? `Restore ${a.name}` : `Archive ${a.name}`} onClick={() => {
@@ -279,12 +279,14 @@ function AccountDialog({ account, onClose }: { account?: Account; onClose: () =>
   const [name, setName] = useState(account?.name ?? '');
   const [type, setType] = useState<AccountType>(account?.type ?? 'checking');
   const [balance, setBalance] = useState('');
+  const [cardMode, setCardMode] = useState<CardBalanceMode>('owed');
   const [spendable, setSpendable] = useState(account?.spendable ?? true);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const save = async () => {
-    const cents = parseAmountInput(balance || '0', cur);
-    if (!account && cents === null) return setErrors({ balance: 'Enter a valid balance.' });
-    const r = await run((ctx) => (account ? updateAccount(ctx, account.id, { name, ...(type !== 'credit_card' ? { spendable } : {}) }) : createAccount(ctx, { name, type, currentBalanceCents: cents!, spendable: type === 'credit_card' ? false : spendable })));
+    // Phase 4A.5.8: signed balances (overdrawn accounts are negative); cards are entered as Owed / In credit.
+    const parsed = parseBalanceEntry(balance, cur, type === 'credit_card' ? cardMode : undefined, true);
+    if (!account && !parsed.ok) return setErrors({ balance: parsed.message });
+    const r = await run((ctx) => (account ? updateAccount(ctx, account.id, { name, ...(type !== 'credit_card' ? { spendable } : {}) }) : createAccount(ctx, { name, type, currentBalanceCents: parsed.ok ? parsed.cents : 0, spendable: type === 'credit_card' ? false : spendable })));
     if (!r.ok) setErrors(Object.fromEntries(r.errors.map((e) => [e.field, e.message])));
     else onClose();
   };
@@ -293,7 +295,8 @@ function AccountDialog({ account, onClose }: { account?: Account; onClose: () =>
       <form className="stack" onSubmit={(e) => { e.preventDefault(); void save(); }}>
         <Field label="Name" error={errors.name}>{(id) => <input id={id} className="input" value={name} onChange={(e) => setName(e.target.value)} autoFocus />}</Field>
         {!account && <Field label="Type">{() => <Segmented label="Account type" value={type} onChange={(t) => { setType(t); setSpendable(t === 'checking' || t === 'cash'); }} options={[{ value: 'checking', label: 'Checking' }, { value: 'savings', label: 'Savings' }, { value: 'cash', label: 'Cash' }, { value: 'credit_card', label: 'Credit card' }]} block />}</Field>}
-        {!account && <Field label={type === 'credit_card' ? 'Amount owed today' : 'Balance today'} hint={BALANCE_ENTRY_HINT} error={errors.balance}>{(id) => <AmountInput id={id} value={balance} onChange={setBalance} currency={cur} />}</Field>}
+        {!account && type === 'credit_card' && <Field label="Card balance">{() => <Segmented label="Card balance" value={cardMode} onChange={setCardMode} options={[{ value: 'owed', label: 'Owed' }, { value: 'credit', label: 'In credit' }]} block />}</Field>}
+        {!account && <Field label={type === 'credit_card' ? (cardMode === 'owed' ? 'Amount owed today' : 'Credit on the card today') : 'Balance today'} hint={type === 'credit_card' ? CARD_BALANCE_ENTRY_HINT : BALANCE_ENTRY_HINT} error={errors.balance}>{(id) => <AmountInput id={id} value={balance} onChange={setBalance} currency={cur} signed />}</Field>}
         {type !== 'credit_card' && (
           <label className="check"><input type="checkbox" checked={spendable} onChange={(e) => setSpendable(e.target.checked)} /><span>Count toward available cash and Safe to Spend<br /><span className="hint">Turn off for savings you don't want to spend from.</span></span></label>
         )}
@@ -303,39 +306,77 @@ function AccountDialog({ account, onClose }: { account?: Account; onClose: () =>
   );
 }
 
+const KIND_LABEL: Record<string, string> = { expense: 'Expense', income: 'Income', refund: 'Refund', transfer: 'Transfer', adjustment: 'Adjustment' };
+
 function BalanceDialog({ account, onClose }: { account: Account; onClose: () => void }) {
   const data = useData();
   const { today } = useSession();
   const run = useRun();
+  const toast = useToast();
   const cur = data.settings.baseCurrency;
   // Phase 4A.5.6: compare with the bank's POSTED balance; pending items stay pending.
   const current = postedBalance(account, data.transactions, today);
-  const pendingItems = data.transactions.filter((t) => affectsBalance(account, t) && t.date <= today && t.status === 'pending');
+  const pending = pendingItems(account, data.transactions, today);
   const isCard = account.type === 'credit_card';
-  const [value, setValue] = useState(centsToDecimalString(isCard ? -current : current));
+  // Phase 4A.5.8: signed figures; a card is entered as Owed / In credit (never a sign flip).
+  const initialCard = cardModeOf(current);
+  const [cardMode, setCardMode] = useState<CardBalanceMode>(initialCard.mode);
+  const [value, setValue] = useState(centsToDecimalString(isCard ? initialCard.amountCents : current));
   const [reason, setReason] = useState('Matched balance in bank app');
+  const [unrelated, setUnrelated] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const cents = parseAmountInput(value, cur);
-  const diff = cents === null ? null : (isCard ? -cents : cents) - current;
+  const parsed = parseBalanceEntry(value, cur, isCard ? cardMode : undefined);
+  const preview = parsed.ok ? previewBalanceUpdate(data, account.id, parsed.cents, today) : null;
+  const diff = preview?.differenceCents ?? null;
+  const matchIds = new Set((preview?.matches ?? []).flat().map((t) => t.id));
+  const matchItems = pending.filter((t) => matchIds.has(t.id));
+  const blocked = matchItems.length > 0 && !unrelated;
+  const shown = (c: number) => (isCard ? -c : c);
   const save = async () => {
-    if (cents === null) return setError('Enter a valid amount.');
-    const r = await run((ctx) => adjustBalance(ctx, account.id, cents, reason), { undoLabel: 'Balance update' });
-    if (!r.ok) setError(r.errors[0]?.message ?? 'Could not update');
-    else onClose();
+    if (!parsed.ok) return setError(parsed.message);
+    const r = await run((ctx) => adjustBalance(ctx, account.id, parsed.cents, reason, today, { unrelatedToPending: unrelated }), { undoLabel: diff === 0 ? 'Balance confirmed' : 'Balance update' });
+    if (!r.ok) return setError(r.errors[0]?.message ?? 'Could not update');
+    if (diff === 0) toast({ message: RECONCILED_MESSAGE(account.name, formatShortDate(today)) });
+    onClose();
   };
+  const markPosted = (id: string) => void run((ctx) => markTransactionPosted(ctx, id), { undoLabel: 'Marked posted' });
   return (
-    <Dialog title={`Update ${account.name} balance`} onClose={onClose} footer={<><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={!diff} onClick={() => void save()}>Record adjustment</button></>}>
+    <Dialog
+      title={`Update ${account.name} balance`}
+      onClose={onClose}
+      footer={<><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={diff === null || blocked} onClick={() => void save()}>{diff === 0 ? 'Confirm balance' : 'Record adjustment'}</button></>}
+    >
       <div className="stack">
-        <p className="t-callout muted" style={{ margin: 0 }} data-testid="update-balance-hint">Clarity's posted balance is <Money cents={isCard ? -current : current} currency={cur} />{isCard ? ' owed' : ''}. {UPDATE_BALANCE_HINT}</p>
-        {pendingItems.length > 0 && (
+        <p className="t-callout muted" style={{ margin: 0 }} data-testid="update-balance-hint">Clarity's posted balance is {isCard ? (current > 0 ? <><Money cents={current} currency={cur} /> in credit</> : <><Money cents={-current} currency={cur} /> owed</>) : <Money cents={current} currency={cur} />}. {isCard ? CARD_BALANCE_ENTRY_HINT : UPDATE_BALANCE_HINT}</p>
+        {pending.length > 0 && matchItems.length === 0 && (
           <div className="callout" data-testid="update-balance-pending">
             <div>{UPDATE_BALANCE_PENDING_NOTE}</div>
-            <ul className="warning-items">{pendingItems.map((t) => <li key={t.id}><span>{formatShortDate(t.date)}</span><span>{t.merchant || 'Pending'}</span><span className="num"><Money cents={isCard ? -t.amountCents : t.amountCents} currency={cur} /></span></li>)}</ul>
+            <ul className="warning-items">{pending.map((t) => <li key={t.id}><span>{formatShortDate(t.date)}</span><span>{t.merchant || 'Pending'} · {KIND_LABEL[t.kind]}</span><span className="num"><Money cents={shown(t.amountCents)} currency={cur} sign="always" /></span></li>)}</ul>
           </div>
         )}
-        <Field label={isCard ? 'Posted amount owed per bank' : 'Posted balance per bank'} error={error}>{(id) => <AmountInput id={id} value={value} onChange={setValue} currency={cur} autoFocus />}</Field>
+        {isCard && <Field label="Card balance per bank">{() => <Segmented label="Card balance per bank" value={cardMode} onChange={setCardMode} options={[{ value: 'owed', label: 'Owed' }, { value: 'credit', label: 'In credit' }]} block />}</Field>}
+        <Field label={isCard ? (cardMode === 'owed' ? 'Posted amount owed per bank' : 'Posted credit per bank') : 'Posted balance per bank'} error={error ?? (!parsed.ok && value.trim() ? parsed.message : undefined)}>{(id) => <AmountInput id={id} value={value} onChange={(v) => { setValue(v); setError(null); setUnrelated(false); }} currency={cur} signed autoFocus />}</Field>
+        {matchItems.length > 0 && (
+          <div className="callout warn" data-testid="pending-match" role="alert">
+            <strong>{PENDING_MATCH_TITLE}</strong>
+            <div className="hint">{PENDING_MATCH_NOTE}</div>
+            {(preview?.matches.length ?? 0) > 1 && <div className="hint">{preview!.matches.length} different combinations add up to <Money cents={shown(diff!)} currency={cur} sign="always" />; Clarity can't tell which, if any, has cleared.</div>}
+            <ul className="warning-items with-action">
+              {matchItems.map((t) => (
+                <li key={t.id}>
+                  <span>{formatShortDate(t.date)}</span>
+                  <span>{t.merchant || 'Pending'} · {KIND_LABEL[t.kind]} · pending</span>
+                  <span className="num"><Money cents={shown(t.amountCents)} currency={cur} sign="always" /></span>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => markPosted(t.id)} aria-label={`Mark ${t.merchant || 'pending item'} posted`}>Mark posted</button>
+                </li>
+              ))}
+            </ul>
+            <label className="check"><input type="checkbox" checked={unrelated} onChange={(e) => setUnrelated(e.target.checked)} data-testid="pending-unrelated" /><span>{PENDING_MATCH_UNRELATED}</span></label>
+          </div>
+        )}
         <Field label="Reason">{(id) => <input id={id} className="input" value={reason} onChange={(e) => setReason(e.target.value)} />}</Field>
-        {diff !== null && diff !== 0 && <div className="callout">Adjustment: <Money cents={diff} currency={cur} sign="always" /></div>}
+        {diff !== null && diff !== 0 && <div className="callout" data-testid="adjustment-preview">Adjustment: <Money cents={shown(diff)} currency={cur} sign="always" />{isCard ? ' to the amount owed' : ''}</div>}
+        {diff === 0 && <div className="callout" data-testid="balance-matches">This matches Clarity's posted balance. Confirming records that it was reconciled on {formatShortDate(today)}; no adjustment is created.</div>}
       </div>
     </Dialog>
   );

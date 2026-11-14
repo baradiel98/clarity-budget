@@ -4,7 +4,7 @@ import { expect, test, type Page } from '@playwright/test';
  * Phase 4A.5.6 through the real UI: pending credits and the balance convention.
  * Sample data: Safe to Spend $2,427.17 (lowest Dec 1), Everyday Checking. Today is Fri, Nov 13, 2026.
  */
-const HINT = 'Enter the posted (cleared) balance your bank shows right now, without pending items.';
+const HINT = 'Enter the posted (cleared) balance your bank shows right now, without pending items';
 async function sample(page: Page) {
   await page.clock.setFixedTime(new Date('2026-11-13T10:00:00'));
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -85,9 +85,11 @@ test('Update balance asks for the posted balance, lists pending items, and doesn
   await expect(u.getByTestId('update-balance-hint')).toContainText(HINT);
   await expect(u.getByTestId('update-balance-pending')).toContainText('Store return');
   await expect(u.getByTestId('update-balance-pending')).toContainText('If any of them has cleared at your bank, mark it posted first');
-  // the bank's posted balance equals Clarity's posted balance: nothing to adjust
+  // the bank's posted balance equals Clarity's posted balance: nothing to adjust (Phase 4A.5.8: confirmed without a transaction)
   await expect(u.getByLabel('Posted balance per bank')).toHaveValue('2871.23');
-  await expect(u.getByRole('button', { name: 'Record adjustment' })).toBeDisabled();
+  await expect(u.getByTestId('balance-matches')).toBeVisible();
+  await expect(u.getByRole('button', { name: 'Record adjustment' })).toHaveCount(0);
+  await expect(u.getByRole('button', { name: 'Confirm balance' })).toBeEnabled();
 });
 
 test('a transaction dated on the day a balance was entered can be marked "Already included"', async ({ page }) => {
@@ -107,7 +109,8 @@ test('a transaction dated on the day a balance was entered can be marked "Alread
   await d.getByRole('button', { name: 'Income', exact: true }).click();
   await d.getByTestId('amount').fill('300');
   await d.getByLabel('Account').selectOption({ label: 'New checking' });
-  await expect(d.getByTestId('already-included')).toContainText('Already included in the balance I entered on Nov 13');
+  await expect(d.getByTestId('already-included')).toContainText("Already included in this account's balance as of Nov 13");
+  await expect(d.getByTestId('already-included').getByRole('checkbox')).not.toBeChecked(); // same day: counted unless ticked (Phase 4A.5.8)
   await d.getByTestId('already-included').getByRole('checkbox').check();
   await d.getByTestId('save-tx').click();
   await expect(page.getByRole('dialog')).toHaveCount(0);

@@ -424,7 +424,28 @@ The step-by-step checklist is in `docs/device-test-script.md`.
   - `apps/mobile/test/pending-credits.test.tsx` (2).
 - **Not verified:** physical devices, Safari. Adjustments made before this phase are not rewritten.
 
+## 7o. Phase 4A.5.8: balance reconciliation and inclusion safeguards
+
+| Audit finding (4A.5.7) | Before | After |
+|---|---|---|
+| D1 onboarding "-100" | saved +$100 | −$100 ("Short by $100.00") |
+| D4 card $50 in credit, Update balance | couldn't be entered; "0" → −$50 adjustment | entered as In credit; exact match confirms; Owed $30 → −$80 |
+| D3 pending deposit ticked "Already included" | $800 spendable | refused; box hidden for pending items |
+| D9 flag after the balance date (data layer) | honoured silently | refused with a message; engine ignores invalid flags |
+| D2 cleared deposit still pending, Update to $800, then post | $1,100 | blocked; Mark posted → $800, no adjustment |
+| D2 cleared purchase, same | $300 | blocked; Mark posted → $400 |
+| D5 transfer new → old account, ticked | old account $1,000 (lost $200) | $1,200; per-account decision |
+| D6 purchase dated Nov 18 entered after the Nov 20 update | $850 | $900 (history, "as of Nov 20") |
+| D7 history-only items in lists | no indication | "Already in balance · Nov 20" / "Before account added" |
+| D8 matching Update balance | no date recorded | `balanceConfirmedDate` set, no $0 transaction |
+| Found: editing a +$40 adjustment | became −$40 expense | refused |
+
+- **Tests:** data `reconciliation-safeguards.test.ts` (40), `reconciliation-ledger.test.ts` (300 random sequences compared with an independent ledger after every step), import (1 new); web `e2e/phase4a58.spec.ts` (7); mobile `test/reconciliation.test.tsx` (4, component tests).
+- **Changed expectations:** tests that encoded the defects (4A.5.6 "Already included" on a pending item; O1 legacy flag) now assert the corrected behaviour. No other expectation changed after the owner's "strictly before" decision.
+- **Not verified:** physical devices, simulators, Safari, screen readers.
+
 ## 8. Owner decisions still open
+- Phase 4A.5.8: whether a non-spendable account below zero (savings at −$50) should count against Safe to Spend (currently not, per the Phase 4A.4.4 rule).
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.
 - Pricing / business model.

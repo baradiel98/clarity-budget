@@ -1,7 +1,7 @@
 import { AlertTriangle, Plus, Trash2, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { addTransaction, deleteTransaction, updateTransaction, type TxInput } from '@clarity/data';
-import { balanceAsOfDate, buildMerchantMemory, expandOccurrences, findPossibleDuplicates, merchantKey, suggestOccurrenceMatch } from '@clarity/engine';
+import { balanceAsOfDate, buildMerchantMemory, inclusionProblem, expandOccurrences, findPossibleDuplicates, merchantKey, suggestOccurrenceMatch } from '@clarity/engine';
 import { addDays, ALREADY_INCLUDED_HINT, ALREADY_INCLUDED_LABEL, centsToDecimalString, formatCents, formatShortDate, parseAmountInput, TERMS, type Transaction } from '@clarity/shared';
 import { useData, useRun, useSession, useStore } from '../state/session';
 import type { AddPrefill } from '../state/ui';
@@ -67,7 +67,8 @@ function initialFrom(prefill: AddPrefill | undefined, existing: Transaction[] | 
       date: src.date,
       notes: src.notes,
       pending: src.status === 'pending',
-      included: !!src.includedInBalance,
+      included: !!src.includedInBalance as boolean | null,
+      toIncluded: !!other?.includedInBalance as boolean | null,
       splits: src.splits?.map((s) => ({ categoryId: s.categoryId, amount: centsToDecimalString(Math.abs(s.amountCents)) })) ?? [],
     };
   }
@@ -83,7 +84,9 @@ function initialFrom(prefill: AddPrefill | undefined, existing: Transaction[] | 
     date: prefill?.date ?? defaults.today,
     notes: '',
     pending: false,
-    included: false,
+    // Phase 4A.5.8 (D6): null = not chosen yet, so the default rule applies (ticked when dated before the confirmed date)
+    included: null as boolean | null,
+    toIncluded: null as boolean | null,
     splits: [] as { categoryId: string; amount: string }[],
   };
 }
@@ -119,15 +122,27 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [dupConfirmed, setDupConfirmed] = useState(false);
   const [linkOcc, setLinkOcc] = useState(true);
-  const [included, setIncluded] = useState(init.included);
+  const [included, setIncluded] = useState<boolean | null>(init.included);
+  const [toIncluded, setToIncluded] = useState<boolean | null>(init.toIncluded);
   const [showSuggest, setShowSuggest] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const isEdit = !!existing;
-  // Phase 4A.5.6: a transaction dated on or before the balance the user entered may already be in that balance.
-  const selectedAccount = data.accounts.find((a) => a.id === accountId);
-  const balanceDate = selectedAccount ? balanceAsOfDate(selectedAccount, data.transactions) : null;
-  const canInclude = !!balanceDate && date <= balanceDate && date >= (selectedAccount?.openingDate ?? date);
+  // Phase 4A.5.8: a reconciliation record; the data layer refuses edits too
+  const isAdjustment = !!existing?.some((t) => t.kind === 'adjustment');
+  // Phase 4A.5.6/4A.5.8: a posted transaction dated from the opening date through the account's confirmed balance date
+  // may already be in that balance. Never offered for pending or future-dated items; for a transfer, each account is
+  // decided against its own balance date. Default (D6): ticked when dated before that date; unticked on the date itself.
+  const status = pending ? 'pending' : 'confirmed';
+  const inclusion = (acctId: string, chosen: boolean | null) => {
+    const a = data.accounts.find((x) => x.id === acctId);
+    if (!a) return null;
+    if (inclusionProblem(a, data.transactions, date, status, today)) return null;
+    const bd = balanceAsOfDate(a, data.transactions);
+    return { account: a, date: bd, checked: chosen ?? date < bd }; // default: ticked only when dated before the confirmed date
+  };
+  const fromInc = inclusion(accountId, included);
+  const toInc = kind === 'transfer' && toAccountId ? inclusion(toAccountId, toIncluded) : null;
   const cents = parseAmountInput(amount, cur);
   const memory = useMemo(() => buildMerchantMemory(data.transactions, merchantKey), [data.transactions]);
   const merchants = useMemo(() => {
@@ -177,7 +192,8 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
       categoryId: kind === 'transfer' ? null : categoryId,
       notes,
       status: pending ? 'pending' : 'confirmed',
-      ...(included && canInclude ? { includedInBalance: true } : {}),
+      includedInBalance: !!fromInc?.checked,
+      ...(kind === 'transfer' ? { toIncludedInBalance: !!toInc?.checked } : {}),
       ...(splits.length ? { splits: splits.map((s) => ({ categoryId: s.categoryId, amountCents: parseAmountInput(s.amount, cur)! })) } : {}),
       ...(prefill?.occurrenceRef ? { occurrenceRef: prefill.occurrenceRef } : occurrence && linkOcc ? { occurrenceRef: { recurringId: occurrence.recurringId, originalDate: occurrence.originalDate } } : {}),
     };
@@ -222,13 +238,14 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
             </button>
           )}
           <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button type="submit" form="tx-form" className="btn btn-primary" disabled={busy} aria-busy={busy} data-testid="save-tx">
+          <button type="submit" form="tx-form" className="btn btn-primary" disabled={busy || isAdjustment} aria-busy={busy} data-testid="save-tx">
             {busy && <Spinner />}{duplicates.length && dupConfirmed ? 'Save anyway' : 'Save'} <kbd aria-hidden="true" style={{ background: 'transparent', color: 'inherit', borderColor: 'currentColor', opacity: 0.9 }}>↵</kbd>
           </button>
         </>
       }
     >
       <form id="tx-form" onSubmit={(e) => { e.preventDefault(); void save(); }} className="stack">
+        {isAdjustment && <div className="callout warn" role="alert" data-testid="adjustment-locked">Balance adjustments can’t be edited: changing it here would turn it into an expense or income and could flip its sign. Delete it, or use Update balance again in Settings.</div>}
         {!prefill?.occurrenceRef && !isEdit && <Segmented label="Type" value={kind} options={KINDS} onChange={(k) => { setKind(k); if (!categoryTouched) setCategoryId(k === 'income' ? 'cat_paycheck' : null); }} block />}
         <Field label="Amount" error={errors.amount}>
           {(id) => <AmountInput id={id} value={amount} onChange={setAmount} currency={cur} large autoFocus aria-invalid={!!errors.amount} data-testid="amount" />}
@@ -287,10 +304,16 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
             <span>This {occurrence.kind === 'income' ? 'is' : 'pays'} <strong>{occurrence.name}</strong> {occurrence.kind === 'income' ? 'expected' : 'due'} {formatShortDate(occurrence.date)}, so it won't be counted again in your forecast.</span>
           </label>
         )}
-        {canInclude && (
+        {fromInc && (
           <label className="check" data-testid="already-included">
-            <input type="checkbox" checked={included} onChange={(e) => setIncluded(e.target.checked)} />
-            <span>{ALREADY_INCLUDED_LABEL(formatShortDate(balanceDate!))}. <span className="hint">{ALREADY_INCLUDED_HINT}</span></span>
+            <input type="checkbox" checked={fromInc.checked} onChange={(e) => setIncluded(e.target.checked)} />
+            <span>{ALREADY_INCLUDED_LABEL(formatShortDate(fromInc.date), kind === 'transfer' ? fromInc.account.name : undefined)}. <span className="hint">{ALREADY_INCLUDED_HINT}</span></span>
+          </label>
+        )}
+        {toInc && (
+          <label className="check" data-testid="already-included-to">
+            <input type="checkbox" checked={toInc.checked} onChange={(e) => setToIncluded(e.target.checked)} />
+            <span>{ALREADY_INCLUDED_LABEL(formatShortDate(toInc.date), toInc.account.name)}. <span className="hint">{ALREADY_INCLUDED_HINT}</span></span>
           </label>
         )}
         {date > today && <div className="callout">Dated in the future: it will appear as planned in your forecast and count toward your balance on {formatShortDate(date)}.</div>}
@@ -328,7 +351,7 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
             )}
           </div>
         )}
-        {errors.form && <div className="error-text" role="alert">{errors.form}</div>}
+        {(errors.form ?? errors.includedInBalance) && <div className="error-text" role="alert">{errors.form ?? errors.includedInBalance}</div>}
       </form>
     </Dialog>
   );

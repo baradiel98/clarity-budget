@@ -1,9 +1,9 @@
 import {
-  addDays, diffDays, type Account, type Cents, type ColumnMapping, type DateFormat, type DecimalSeparator, type ID, type ISODate,
+  addDays, diffDays, formatShortDate, type Account, type Cents, type ColumnMapping, type DateFormat, type DecimalSeparator, type ID, type ISODate,
   type ImportBatch, type OccurrenceException, type RecurringItem, type SignConvention, type Transaction,
 } from '@clarity/shared';
 import {
-  accountBalance, buildMerchantMemory, cleanMerchant, expandOccurrences, merchantKey, normalizeDescription, similarity,
+  accountBalance, balanceAsOfDate, buildMerchantMemory, cleanMerchant, expandOccurrences, merchantKey, normalizeDescription, similarity,
   suggestOccurrenceMatch, type Occurrence,
 } from '@clarity/engine';
 import { CARD_PAYMENT_RE, REFUND_RE, TRANSFER_RE, suggestCategory, type CategorySource } from './categorize';
@@ -140,6 +140,7 @@ export function suggestSignConvention(table: RawTable, s: Omit<ImportSettings, '
 
 export function buildPreview(table: RawTable, s: ImportSettings, ctx: PreviewContext): ImportPreview {
   const { account } = ctx;
+  const balanceDate = balanceAsOfDate(account, ctx.transactions);
   const flip = s.signConvention === 'invert' ? -1 : 1;
   const errors: ImportRowError[] = [];
   const parsed: Omit<ImportCandidate, 'kind' | 'looksLikeTransfer' | 'categoryId' | 'categorySource' | 'confidence' | 'reasons' | 'duplicate' | 'repeatInFile' | 'occurrenceMatch' | 'include'>[] = [];
@@ -234,6 +235,7 @@ export function buildPreview(table: RawTable, s: ImportSettings, ctx: PreviewCon
       reasons.push('Much larger than the other amounts in this file.');
     }
     if (p.date < account.openingDate) reasons.push('Before the account’s opening date: kept as history, does not change the balance.');
+    else if (p.date < balanceDate) reasons.push(`Before this account’s confirmed balance (${formatShortDate(balanceDate)}): already included in it, kept as history, not added again.`);
     if (looksLikeTransfer) reasons.push('Looks like a transfer between your accounts. Choose the other account to import it as a transfer.');
 
     // Duplicates
@@ -322,6 +324,8 @@ export function reconcilePreview(preview: ImportPreview, included: readonly Impo
     ...included.map((c, i) => ({
       id: `sim${i}`, accountId: ctx.account.id, date: c.date, amountCents: c.amountCents, kind: 'expense', status: 'confirmed', merchant: '',
       categoryId: null, notes: '', provenance: { source: 'import' }, createdAt: 0, updatedAt: 0,
+      // Phase 4A.5.8: rows dated before the confirmed balance date are history only when imported (same rule as commitImport)
+      ...(c.date < balanceAsOfDate(ctx.account, ctx.transactions) ? { includedInBalance: true } : {}),
     }) as Transaction),
   ];
   const app = accountBalance(ctx.account, simulated, date);

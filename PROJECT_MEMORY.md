@@ -342,3 +342,17 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
   - Old adjustments are not rewritten.
 - **[Lesson]** In a randomized reference test, generate only dates that the rule under test covers. A past unrecorded one-off is a separate rule, and one seed failed for that reason; the reference was wrong, not the engine.
 - **[Verified]** Engine tests `pending-credits.test.ts` (33, including 300 invariant scenarios and 200 against an independent model); data `balance-convention.test.ts` (5); web e2e `phase4a56.spec.ts` (4); mobile `pending-credits.test.tsx` (2).
+
+## Phase 4A.5.8 (2026-11-14): balance reconciliation and inclusion safeguards (audit 4A.5.7, D1–D9)
+- **[Fixed] D1** Minus signs were stripped from balance inputs (−$100 saved as +$100). Balances are signed now (`parseSignedAmountInput`, `parseBalanceEntry`, `AmountInput signed`, mobile minus-capable keyboard, onboarding "overdrawn" choice).
+- **[Fixed] D4** Cards used `abs()`; a card in credit couldn't be represented or reconciled. Now entered as Owed / In credit; the data layer takes the signed amount owed (`0 - x`, never −0).
+- **[Fixed] D3/D9** "Already included" is valid only on posted items dated from the opening date through the confirmed date; the data layer refuses otherwise (`inclusionProblem`), the engine ignores invalid legacy flags (`isHistoryOnly`), the UI hides the box for pending items.
+- **[Fixed] D2** Update balance refuses a difference equal to pending items (sets of ≤3, `pendingMatches`) until the item is marked posted (`markTransactionPosted`) or the user confirms it's unrelated (recorded with a note). Never posts automatically.
+- **[Fixed] D5** Transfer legs are decided per account (`includedInBalance` / `toIncludedInBalance`).
+- **[Fixed] D6** **[Confirmed decision, owner, 2026-11-14: "strictly before"]** Posted items dated BEFORE the latest confirmed date are history only by default; ones ON that date count by default (box offered unticked). The literal "on or before" version was implemented first and changed 10 first-day browser flows (a coffee after onboarding wasn't counted), so the owner chose "strictly before". Applies to Add, Capture, mark-paid and import.
+- **[Fixed] D7** History-only labels on web and mobile; **[Fixed] D8** a matching Update balance stores `Account.balanceConfirmedDate`, no $0 transaction.
+- **[Fixed, found while testing]** Editing a balance adjustment turned it into an expense with the opposite sign; adjustments can't be edited now (delete, or Update balance again). A spendable account overdrawn today with nothing paid out wasn't warned about; now "X is overdrawn: −$50.00 today".
+- **[Kept, owner decision open]** A non-spendable account below zero (savings at −$50) isn't counted in Safe to Spend (Phase 4A.4.4 rule). I tried counting it and reverted it: it contradicted that documented rule.
+- **[Lesson]** Reproduce a decision's consequences across existing flows before committing to it: the D6 default looked local but changed every same-day entry.
+- **[Verified]** `packages/data/test/reconciliation-safeguards.test.ts` (40), `reconciliation-ledger.test.ts` (300 random sequences vs an independent ledger after every step), import test; web `e2e/phase4a58.spec.ts` (7); mobile `test/reconciliation.test.tsx` (4, component tests, not a device).
+

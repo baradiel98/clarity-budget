@@ -5,7 +5,7 @@ import { Alert, Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { addTransaction, deleteTransaction, updateTransaction, type TxInput } from '@clarity/data';
 import { addDays, ALREADY_INCLUDED_HINT, ALREADY_INCLUDED_LABEL, centsToDecimalString, formatCents, formatShortDate, parseAmountInput, TERMS } from '@clarity/shared';
-import { balanceAsOfDate, buildMerchantMemory, expandOccurrences, findPossibleDuplicates, merchantKey, suggestOccurrenceMatch } from '@clarity/engine';
+import { balanceAsOfDate, buildMerchantMemory, inclusionProblem, expandOccurrences, findPossibleDuplicates, merchantKey, suggestOccurrenceMatch } from '@clarity/engine';
 import { Check } from '../src/features/Welcome';
 import { takeAddPrefill } from '../src/state/nav';
 import { useData, useRun, useSession, useStore } from '../src/state/session';
@@ -61,17 +61,27 @@ export default function AddScreen() {
   const [date, setDate] = useState(src?.date ?? prefill.date ?? today);
   const [notes, setNotes] = useState(src?.notes ?? '');
   const [pending, setPending] = useState(src?.status === 'pending');
-  const [included, setIncluded] = useState(!!src?.includedInBalance);
+  // Phase 4A.5.8: null = not chosen yet → default rule (ticked when dated before the confirmed date, D6); edits start from the stored state
+  const [included, setIncluded] = useState<boolean | null>(src ? !!src.includedInBalance : null);
+  const [toIncluded, setToIncluded] = useState<boolean | null>(src ? !!existing?.find((t) => t.id !== src.id)?.includedInBalance : null);
   const [more, setMore] = useState(false);
   const [dupConfirmed, setDupConfirmed] = useState(false);
   const [linkOcc, setLinkOcc] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const isEdit = !!existing;
-  // Phase 4A.5.6: a transaction dated on or before the balance the user entered may already be in that balance.
-  const selectedAccount = data.accounts.find((a) => a.id === accountId);
-  const balanceDate = selectedAccount ? balanceAsOfDate(selectedAccount, data.transactions) : null;
-  const canInclude = !!balanceDate && date <= balanceDate && date >= (selectedAccount?.openingDate ?? date);
+  // Phase 4A.5.8: a reconciliation record; the data layer refuses edits too
+  const isAdjustment = !!existing?.some((t) => t.kind === 'adjustment');
+  // Phase 4A.5.6/4A.5.8: only a posted transaction dated from the opening date through the account's confirmed balance
+  // date can already be in that balance; never pending or future-dated; a transfer decides each account separately.
+  const inclusion = (acctId: string, chosen: boolean | null) => {
+    const a = data.accounts.find((x) => x.id === acctId);
+    if (!a || inclusionProblem(a, data.transactions, date, pending ? 'pending' : 'confirmed', today)) return null;
+    const bd = balanceAsOfDate(a, data.transactions);
+    return { account: a, date: bd, checked: chosen ?? date < bd }; // default: ticked only when dated before the confirmed date
+  };
+  const fromInc = inclusion(accountId, included);
+  const toInc = kind === 'transfer' && toAccountId ? inclusion(toAccountId, toIncluded) : null;
 
   const cents = parseAmountInput(amount || '0', cur) ?? 0;
   const memory = useMemo(() => buildMerchantMemory(data.transactions, merchantKey), [data.transactions]);
@@ -112,7 +122,8 @@ export default function AddScreen() {
     const input: TxInput = {
       kind, accountId, ...(kind === 'transfer' ? { toAccountId } : {}), date, amountCents: cents, merchant, categoryId: kind === 'transfer' ? null : categoryId, notes,
       status: pending ? 'pending' : 'confirmed',
-      ...(included && canInclude ? { includedInBalance: true } : {}),
+      includedInBalance: !!fromInc?.checked,
+      ...(kind === 'transfer' ? { toIncludedInBalance: !!toInc?.checked } : {}),
       // Splits are edited on the web app in Phase 1; keep them intact when editing here.
       ...(src?.splits?.length ? { splits: src.splits.map((x) => ({ categoryId: x.categoryId, amountCents: Math.abs(x.amountCents) })) } : {}),
       ...(prefill.occurrenceRef ? { occurrenceRef: prefill.occurrenceRef } : occurrence && linkOcc ? { occurrenceRef: { recurringId: occurrence.recurringId, originalDate: occurrence.originalDate } } : {}),
@@ -165,10 +176,15 @@ export default function AddScreen() {
           </ScrollView>
         )}
         <DateField label="Date" value={date} onChange={setDate} />
-        {canInclude && (
+        {fromInc && (
           <View testID="already-included">
-            <Check label={ALREADY_INCLUDED_LABEL(formatShortDate(balanceDate!))} value={included} onChange={setIncluded} />
+            <Check label={ALREADY_INCLUDED_LABEL(formatShortDate(fromInc.date), kind === 'transfer' ? fromInc.account.name : undefined)} value={fromInc.checked} onChange={setIncluded} />
             <T variant="footnote" color="textSecondary">{ALREADY_INCLUDED_HINT}</T>
+          </View>
+        )}
+        {toInc && (
+          <View testID="already-included-to">
+            <Check label={ALREADY_INCLUDED_LABEL(formatShortDate(toInc.date), toInc.account.name)} value={toInc.checked} onChange={setToIncluded} />
           </View>
         )}
         {occurrence && <Check label={`This ${occurrence.kind === 'income' ? 'is' : 'pays'} ${occurrence.name} ${occurrence.kind === 'income' ? 'expected' : 'due'} ${formatShortDate(occurrence.date)}`} hint="So it isn't counted again in your forecast." value={linkOcc} onChange={setLinkOcc} />}
@@ -187,7 +203,8 @@ export default function AddScreen() {
       </ScrollView>
       <View style={{ paddingHorizontal: 12, paddingBottom: insets.bottom + 8, backgroundColor: c.bg, borderTopWidth: 1, borderTopColor: c.border }}>
         <Keypad value={amount} onChange={setAmount} />
-        <Button title={duplicates.length && dupConfirmed ? 'Save anyway' : 'Save'} busy={busy} onPress={() => void save()} />
+        {isAdjustment && <T color="warning" accessibilityRole="alert" testID="adjustment-locked">Balance adjustments can’t be edited: changing it here would turn it into an expense or income and could flip its sign. Delete it, or use Update balance again.</T>}
+        <Button title={duplicates.length && dupConfirmed ? 'Save anyway' : 'Save'} busy={busy} disabled={isAdjustment} onPress={() => void save()} />
       </View>
     </View>
   );

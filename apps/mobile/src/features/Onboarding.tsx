@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Share, View } from 'react-native';
 import { countedOutflows, engineInput, onboard, type OnboardingInput } from '@clarity/data';
 import { buildDashboard } from '@clarity/engine';
-import { addDays, BALANCE_ENTRY_HINT, formatShortDate, monthNameLong, parseAmountInput, parseISO, TERMS, type Schedule } from '@clarity/shared';
+import { addDays, BALANCE_ENTRY_HINT, formatShortDate, parseBalanceEntry, monthNameLong, parseAmountInput, parseISO, TERMS, type Schedule } from '@clarity/shared';
 import { useData, useRun, useSession } from '../state/session';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -52,6 +52,9 @@ export function Onboarding() {
   const cur = data.settings.baseCurrency;
   const [step, setStep] = useState(0);
   const [balance, setBalance] = useState('');
+  // Phase 4A.5.8: the keypad has no minus key, so an overdrawn balance is an explicit choice; the sign is never dropped
+  const [overdrawn, setOverdrawn] = useState(false);
+  const balanceCents = (() => { const p = parseBalanceEntry(`${overdrawn ? '-' : ''}${balance || '0'}`, cur); return p.ok ? p.cents : 0; })();
   const [freq, setFreq] = useState<Freq>('biweekly');
   const [nextPay, setNextPay] = useState(addDays(s.today, 7));
   const [twice, setTwice] = useState<'1-15' | '15-last'>('1-15');
@@ -73,7 +76,7 @@ export function Onboarding() {
     if (withBill && (!billName.trim() || !billCents)) return setError('Enter the bill name and amount, or skip.');
     const payCents = parseAmountInput(pay, cur);
     const input: OnboardingInput = {
-      checkingBalanceCents: parseAmountInput(balance, cur) ?? 0,
+      checkingBalanceCents: balanceCents,
       ...(freq !== 'none' ? { pay: { schedule: scheduleFor(freq, nextPay, twice), amountCents: varies || !payCents ? null : payCents } } : {}),
       ...(withBill && billCents ? { bill: { name: billName.trim(), amountCents: billCents, date: billDate, monthly: billMonthly } } : {}),
     };
@@ -121,7 +124,8 @@ export function Onboarding() {
       <Panel step={1} footer={<Button title="Continue" onPress={() => setStep(1)} />}>
         <T variant="title1" accessibilityRole="header">What's in your checking account right now?</T>
         <T color="textSecondary">{BALANCE_ENTRY_HINT} You can add savings, cash and cards later.</T>
-        <Money cents={parseAmountInput(balance || '0', cur) ?? 0} currency={cur} variant="hero" style={{ textAlign: 'center', marginVertical: 12 }} />
+        <Money cents={balanceCents} currency={cur} variant="hero" style={{ textAlign: 'center', marginVertical: 12 }} />
+        <Check label="This account is overdrawn (the balance is negative)" value={overdrawn} onChange={setOverdrawn} />
         <Keypad value={balance} onChange={setBalance} />
       </Panel>
     );

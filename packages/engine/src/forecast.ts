@@ -267,7 +267,9 @@ export function buildForecast(input: ForecastInput): Forecast {
   for (const t of transactions) {
     if (t.date <= today || t.date > horizonEnd) continue;
     const acct = accountById.get(t.accountId);
-    if (!acct || t.date < acct.openingDate || t.includedInBalance) continue;
+    // Phase 4A.5.8: an "already included" flag on a future-dated transaction is invalid (it can't be in a balance
+    // confirmed today or earlier), so it is ignored and the transaction is counted, never silently dropped.
+    if (!acct || t.date < acct.openingDate) continue;
     // Phase 4A.5.6: a future-dated credit still marked pending isn't counted until it is posted.
     if (isPendingCredit(t)) {
       excluded.push({ id: `tx:${t.id}`, date: t.date, label: t.merchant || 'Pending credit', source: 'scheduled_tx', legs: [], cashDeltaCents: 0, txId: t.id, estimated: false, excluded: 'pending_credit' });
@@ -489,6 +491,14 @@ export function buildForecast(input: ForecastInput): Forecast {
     for (const [id, labels] of paidOut) {
       const bal = balances.get(id) ?? 0;
       if (cashIds.has(id) && bal < 0) shortfalls.push({ accountId: id, date, lowCents: bal, labels });
+    }
+    // Phase 4A.5.8: a spendable account that is already overdrawn today (a signed balance, e.g. −$50) with nothing
+    // paid out of it today is still a shortfall today (no labels: nothing was paid; it starts the day negative).
+    if (date === today) {
+      for (const id of cashIds) {
+        const bal = balances.get(id) ?? 0;
+        if (bal < 0 && !paidOut.has(id)) shortfalls.push({ accountId: id, date, lowCents: bal, labels: [] });
+      }
     }
     // 3. income, refunds, cash advances
     for (const e of new Set(incoming)) for (const l of e.legs) if (l.deltaCents > 0) apply(l.accountId, l.deltaCents);

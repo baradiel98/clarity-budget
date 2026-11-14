@@ -948,17 +948,30 @@ export function buildDashboard(input: EngineInput): Dashboard {
     const first = list[0]!;
     const deepestDay = list.reduce((a, x) => (x.lowCents < a.lowCents ? x : a));
     const deepest = deepestDay.lowCents;
-    const laterAll = list.slice(1).map((x) => `${formatCents(x.lowCents, c)} on ${formatShortDate(x.date)} (${x.labels.join(', ')})`);
+    const what = (x: AccountShortfall) => (x.labels.length ? x.labels.join(', ') : 'its balance today');
+    const laterAll = list.slice(1).map((x) => `${formatCents(x.lowCents, c)} on ${formatShortDate(x.date)} (${what(x)})`);
     const later = laterAll.length > 4 ? [...laterAll.slice(0, 4), `${laterAll.length - 4} more`] : laterAll;
+    if (list.length === 1 && first.labels.length === 0) {
+      // Phase 4A.5.8: overdrawn today, nothing paid from it today
+      warnings.push({
+        id: `account-short:${id}`,
+        severity: 'warning',
+        title: `${name} is overdrawn: ${formatCents(first.lowCents, c)} today`,
+        detail: `Your other spendable accounts have enough, and Safe to Spend already counts the ${formatCents(-first.lowCents, c)}. Move ${formatCents(-first.lowCents, c)} into ${name} to bring it back to ${formatCents(0, c)}.`,
+        accountId: id,
+        items: [{ date: first.date, label: `${name} balance`, cents: first.lowCents, currency: c }],
+      });
+      continue;
+    }
     warnings.push({
       id: `account-short:${id}`,
       severity: 'warning',
       title: `${name} would go to ${formatCents(first.lowCents, c)} on ${formatShortDate(first.date)}`,
       detail: list.length === 1
-        ? `${first.labels.join(', ')} is paid from ${name}. Your other spendable accounts have enough, and Safe to Spend assumes you move money between them. Move ${formatCents(-first.lowCents, c)} into ${name} before ${formatShortDate(first.date)}, or change the account it's paid from.`
-        : `${first.labels.join(', ')} is paid from ${name}. Later: ${later.join('; ')}. Lowest: ${formatCents(deepest, c)} on ${formatShortDate(deepestDay.date)}. Safe to Spend assumes you move money between your spendable accounts. Move ${formatCents(-deepest, c)} into ${name} before ${formatShortDate(first.date)} to cover all of these, or change the accounts they're paid from.`,
+        ? `${what(first)} is paid from ${name}. Your other spendable accounts have enough, and Safe to Spend assumes you move money between them. Move ${formatCents(-first.lowCents, c)} into ${name} before ${formatShortDate(first.date)}, or change the account it's paid from.`
+        : `${first.labels.length ? `${what(first)} is paid from ${name}` : `${name} is overdrawn today`}. Later: ${later.join('; ')}. Lowest: ${formatCents(deepest, c)} on ${formatShortDate(deepestDay.date)}. Safe to Spend assumes you move money between your spendable accounts. Move ${formatCents(-deepest, c)} into ${name} before ${formatShortDate(first.date)} to cover all of these, or change the accounts they're paid from.`,
       accountId: id,
-      items: list.map((x) => ({ date: x.date, label: `${name} after ${x.labels.join(', ')}`, cents: x.lowCents, currency: c })),
+      items: list.map((x) => ({ date: x.date, label: x.labels.length ? `${name} after ${x.labels.join(', ')}` : `${name} balance`, cents: x.lowCents, currency: c })),
     });
   }
   // Possible duplicates: a planned transaction (not linked to a bill) on the same account, for the same amount,

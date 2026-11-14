@@ -1,8 +1,8 @@
 import { ArrowDown, ArrowUp, ReceiptText, Search, Sparkles, Trash2, Upload } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { deleteTransaction, type Op } from '@clarity/data';
-import { periodTotals } from '@clarity/engine';
-import { addDays, endOfMonth, formatMonthYear, formatShortDate, startOfMonth, TERMS, type Transaction } from '@clarity/shared';
+import { balanceAsOfDate, historyStatus, periodTotals } from '@clarity/engine';
+import { addDays, BEFORE_OPENING_BADGE, BEFORE_OPENING_REASON, endOfMonth, formatMonthYear, formatShortDate, HISTORY_ONLY_BADGE, HISTORY_ONLY_REASON, startOfMonth, TERMS, type Transaction } from '@clarity/shared';
 import { isFresh } from '../state/fresh';
 import { NARROW, useMedia } from '../lib/media';
 import { useRouter } from '../lib/router';
@@ -331,8 +331,13 @@ export function Transactions() {
   }
 
   function badges(t: Transaction) {
+    // Phase 4A.5.8 (D7): kept for history but not added to the balance again, with the reason
+    const acc = data.accounts.find((a) => a.id === t.accountId);
+    const hist = acc ? historyStatus(acc, t, balanceAsOfDate(acc, data.transactions)) : null;
+    const reason = hist ? (hist.kind === 'included' ? HISTORY_ONLY_REASON(formatShortDate(hist.asOf)) : BEFORE_OPENING_REASON(formatShortDate(hist.asOf))) : '';
     return (
       <>
+        {hist && <span className="badge" title={reason} aria-label={reason} data-testid="history-only">{hist.kind === 'included' ? `${HISTORY_ONLY_BADGE} · ${formatShortDate(hist.asOf)}` : BEFORE_OPENING_BADGE}</span>}
         {t.status === 'pending' && <span className="badge warn">Pending</span>}
         {t.kind === 'refund' && <span className="badge pos">Refund</span>}
         {t.kind === 'adjustment' && <span className="badge" title={t.adjustmentReason}>Adjustment</span>}

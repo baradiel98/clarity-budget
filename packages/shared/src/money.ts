@@ -93,6 +93,20 @@ export function parseAmountInput(text: string, currency: CurrencyCode = 'USD'): 
   return cents;
 }
 
+/**
+ * Phase 4A.5.8: parse a signed balance ("-50", "−50.00", "-$50", "$-50", "1,250.00"). A leading minus sign
+ * (hyphen or the "−" character) makes it negative; the sign is never dropped. Returns null when invalid.
+ */
+export function parseSignedAmountInput(text: string, currency: CurrencyCode = 'USD'): Cents | null {
+  const t = text.trim().replace(/[\s$€£¥]/g, '').replace(/\u2212/g, '-');
+  const neg = t.startsWith('-');
+  const rest = neg ? t.slice(1) : t;
+  if (rest.includes('-')) return null;
+  const v = parseAmountInput(rest, currency);
+  if (v === null) return null;
+  return neg ? -v : v;
+}
+
 /** Cents → plain decimal string for inputs / CSV ("-12.30"). */
 export function centsToDecimalString(cents: Cents, currency: CurrencyCode = 'USD'): string {
   assertCents(cents);

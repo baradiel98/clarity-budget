@@ -28,6 +28,11 @@ export interface Account {
   /** Counts toward "available cash" / Safe to Spend. Never true for credit cards. */
   spendable: boolean;
   archived: boolean;
+  /**
+   * Phase 4A.5.8: the latest date the user confirmed this account's posted balance with "Update balance",
+   * including a confirmation that matched exactly (no adjustment needed). The opening date counts as confirmed too.
+   */
+  balanceConfirmedDate?: ISODate;
   createdAt: number;
   updatedAt: number;
 }
@@ -78,6 +83,8 @@ export interface Transaction {
    * "Update balance"). Kept as history (reports, search), never added to the account balance again.
    */
   includedInBalance?: boolean;
+  /** Phase 4A.5.8: the confirmed balance date this transaction is already included in ("as of Nov 20"). */
+  includedAsOf?: ISODate;
   provenance: Provenance;
   createdAt: number;
   updatedAt: number;

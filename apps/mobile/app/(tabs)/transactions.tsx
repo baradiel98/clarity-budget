@@ -4,8 +4,8 @@ import { useMemo, useState } from 'react';
 import { Alert, Pressable, SectionList, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { deleteTransaction } from '@clarity/data';
-import { periodTotals } from '@clarity/engine';
-import { addDays, endOfMonth, formatMonthYear, formatWeekdayDate, startOfMonth, TERMS } from '@clarity/shared';
+import { balanceAsOfDate, historyStatus, periodTotals } from '@clarity/engine';
+import { addDays, BEFORE_OPENING_BADGE, BEFORE_OPENING_REASON, endOfMonth, formatMonthYear, formatShortDate, formatWeekdayDate, HISTORY_ONLY_BADGE, HISTORY_ONLY_REASON, startOfMonth, TERMS } from '@clarity/shared';
 import { setAddPrefill } from '../../src/state/nav';
 import { useData, useRun, useSession, useStore } from '../../src/state/session';
 import { Badge } from '../../src/ui/Card';
@@ -86,12 +86,16 @@ export default function Transactions() {
         )}
         renderItem={({ item: t }) => {
           const cat = t.categoryId ? cats.get(t.categoryId) : undefined;
+          // Phase 4A.5.8 (D7): kept for history but not added to the balance again, with the reason
+          const acc = accts.get(t.accountId);
+          const hist = acc ? historyStatus(acc, t, balanceAsOfDate(acc, data.transactions)) : null;
+          const histReason = hist ? (hist.kind === 'included' ? HISTORY_ONLY_REASON(formatShortDate(hist.asOf)) : BEFORE_OPENING_REASON(formatShortDate(hist.asOf))) : '';
           const other = t.transferGroupId ? data.transactions.find((x) => x.transferGroupId === t.transferGroupId && x.id !== t.id) : undefined;
           const title = t.kind === 'transfer' ? `${t.amountCents < 0 ? 'To' : 'From'} ${other ? accts.get(other.accountId)?.name ?? '' : ''}` : t.merchant || (t.kind === 'income' ? 'Income' : '—');
           return (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={`${title}, ${cat?.name ?? ''}`}
+              accessibilityLabel={`${title}, ${cat?.name ?? ''}${histReason ? `. ${histReason}` : ''}`}
               accessibilityHint="Opens the transaction. Long press to delete."
               onPress={() => { setAddPrefill({ editId: t.id }); router.push('/add'); }}
               onLongPress={() => Alert.alert('Delete this transaction?', title, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: async () => { const r = await run((ctx) => deleteTransaction(ctx, t.id), { undoLabel: 'Delete' }); if (r.ok) toast({ message: 'Transaction deleted', action: { label: 'Undo', run: () => void store.undo() } }); } }])}
@@ -102,9 +106,11 @@ export default function Transactions() {
                 <T numberOfLines={1} style={{ fontFamily: 'Inter_500Medium' }}>{title}</T>
                 <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                   <T variant="caption" color="textTertiary">{t.splits?.length ? 'Split' : t.kind === 'transfer' ? 'Transfer' : cat?.name ?? 'Uncategorized'} · {accts.get(t.accountId)?.name}</T>
+                  {hist && <Badge label={hist.kind === 'included' ? `${HISTORY_ONLY_BADGE} · ${formatShortDate(hist.asOf)}` : BEFORE_OPENING_BADGE} />}
                   {t.status === 'pending' && <Badge label="Pending" tone="warn" />}
                   {t.date > today && <Badge label="Planned" tone="accent" />}
                 </View>
+                {histReason ? <T variant="caption" color="textTertiary" testID="history-only">{histReason}</T> : null}
               </View>
               <Money cents={t.amountCents} currency={cur} sign="always" color={t.amountCents > 0 && t.kind !== 'transfer' ? 'positive' : 'text'} style={{ fontFamily: 'Inter_600SemiBold' }} />
             </Pressable>

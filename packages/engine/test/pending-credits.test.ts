@@ -99,10 +99,12 @@ describe('pending credit lifecycle', () => {
 
 describe('starting balance: "Already included" and the opening day', () => {
   const opened = (bal: number, t: ReturnType<typeof tx>[]) => mk([chk(bal, { openingDate: TODAY })], [], t);
-  it('O1: opened today at $800 that already includes a $300 pending deposit; recorded with "Already included" → $800, not $1,100', () => {
+  it('O1 (Phase 4A.5.8): a pending item can\'t be "already included" in a posted balance; a flag that bypassed the data layer is ignored, so the deposit stays pending: $800 spendable, never $1,100', () => {
+    // Before Phase 4A.5.8 the flag hid the pending deposit (recorded $800, and a pending credit counted as spendable).
     const i = opened(80000, [pend('chk', TODAY, 30000, { includedInBalance: true })]);
     expect(sts(i)).toBe(80000);
-    expect(accountBalance(i.accounts[0]!, i.transactions, TODAY)).toBe(80000);
+    expect(accountBalance(i.accounts[0]!, i.transactions, TODAY)).toBe(110000);
+    expect(pendingCreditTotal(i.accounts[0]!, i.transactions, TODAY)).toBe(30000);
   });
   it('O1 without the box: the pending deposit is still not spendable ($800), though the recorded balance shows it ($1,100)', () => {
     const i = opened(80000, [pend('chk', TODAY, 30000)]);

@@ -96,6 +96,19 @@ describe('signed amounts, newest first', () => {
     const r = reconcilePreview(p, p.candidates, ctx({ account: opening }));
     expect(r).toMatchObject({ statementDate: '2026-09-12', statementBalanceCents: 280501, appBalanceCents: 280501, differenceCents: 0 });
   });
+  it('Phase 4A.5.8: rows dated before the account\'s confirmed balance date (Sep 8) are history; rows on or after it count', () => {
+    // opened 09-03 at 1,206.00, balance confirmed again on 09-08: rows dated 09-03 … 09-07 are already in that balance.
+    const a = acct({ openingBalanceCents: 120600, balanceConfirmedDate: '2026-09-08' });
+    const q = buildPreview(table, settings, ctx({ account: a }));
+    const by = (d: string) => q.candidates.find((c) => c.rawDescription.startsWith(d))!;
+    expect(by('AMAZON MKTPLACE').reasons.join(' ')).toMatch(/Before this account’s confirmed balance \(Sep 8\): already included in it/);
+    expect(by('AMAZON REFUND').reasons.join(' ')).toMatch(/Before this account’s confirmed balance/);
+    expect(by("TRADER JOE'S").reasons.join(' ')).not.toMatch(/confirmed balance/); // dated ON 09-08: counts
+    // counted: −64.12 (09-08), −92.40 (09-10), +1,800.00 (09-12) → 1,206.00 + 1,643.48 = 2,849.48
+    // history: +10.00 (09-03), −31.97 (09-04), −6.25, −6.25 (09-05)
+    const r = reconcilePreview(q, q.candidates, ctx({ account: a }));
+    expect(r).toMatchObject({ appBalanceCents: 284948, differenceCents: 280501 - 284948 });
+  });
   it('reports a mismatch without changing anything', () => {
     const r = reconcilePreview(p, p.candidates.slice(1), ctx({ account: opening }));
     expect(r!.differenceCents).toBe(180000);

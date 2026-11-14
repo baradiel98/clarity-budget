@@ -1,9 +1,9 @@
 import {
-  defaultCategories, formatCents, localISODate, type Account, type AccountType, type Cents, type Category, type ID, type ISODate, type ImportBatch,
+  defaultCategories, formatCents, formatShortDate, localISODate, type Account, type AccountType, type Cents, type Category, type ID, type ISODate, type ImportBatch,
   type MappingProfile, type OccurrenceException, type Provenance, type RecurringAmount, type RecurringItem, type RecurringKind, type Schedule, type Settings,
   type Split, type Transaction, type TxKind, type TxStatus, type WeekendRule, type WorkspaceData,
 } from '@clarity/shared';
-import { accountBalance, postedBalance, validateTransaction, validateTransferPair, type Occurrence, type ValidationIssue } from '@clarity/engine';
+import { accountBalance, balanceAsOfDate, inclusionProblem, pendingMatches, postedBalance, validateTransaction, validateTransferPair, type InclusionProblem, type Occurrence, type ValidationIssue } from '@clarity/engine';
 import type { ImportCandidate, ImportSettings, ReconciliationPreview } from '@clarity/import';
 import { applyOps as applyLocal, type Op } from './ops';
 
@@ -58,7 +58,10 @@ export function seedCategories(ctx: Ctx): Op[] {
 export interface AccountInput {
   name: string;
   type: AccountType;
-  /** Balance today as the user sees it. For cards: amount owed as a POSITIVE number. */
+  /**
+   * Balance today as the user sees it, signed: a negative checking/savings/cash balance is overdrawn.
+   * For cards it is the AMOUNT OWED: positive = owed, negative = the card is in credit (Phase 4A.5.8; never abs()).
+   */
   currentBalanceCents: Cents;
   spendable?: boolean;
 }
@@ -73,7 +76,7 @@ export function createAccount(ctx: Ctx, input: AccountInput): { ops: Op[]; accou
     name,
     type: input.type,
     currency: ctx.data.settings.baseCurrency,
-    openingBalanceCents: isCard ? -Math.abs(input.currentBalanceCents) : input.currentBalanceCents,
+    openingBalanceCents: isCard ? 0 - input.currentBalanceCents : input.currentBalanceCents, // 0 - x: never −0
     openingDate: ctx.today,
     spendable: isCard ? false : (input.spendable ?? input.type !== 'savings'),
     archived: false,
@@ -213,21 +216,98 @@ export function archiveAccount(ctx: Ctx, id: ID, plan: ArchivePlan = {}): Op[] {
  * "Update balance": records an explicit adjustment transaction for the difference between
  * the app's balance and the real balance, with a reason. Never edits history.
  */
-export function adjustBalance(ctx: Ctx, accountId: ID, actualBalanceCents: Cents, reason: string, date: ISODate = ctx.today): { ops: Op[]; tx: Transaction | null } {
+/** Phase 4A.5.8: what "Update balance" would do, without doing it. `bankCents` is entered the same way as adjustBalance's. */
+export interface BalanceUpdatePreview {
+  /** Clarity's posted balance in the account's sign convention (card owed = negative). */
+  postedCents: Cents;
+  /** The bank's figure in the same convention. */
+  bankCents: Cents;
+  differenceCents: Cents;
+  /** Sets of pending items whose amounts add up exactly to the difference (possibly cleared at the bank). */
+  matches: Transaction[][];
+}
+
+export function previewBalanceUpdate(data: WorkspaceData, accountId: ID, enteredCents: Cents, date: ISODate): BalanceUpdatePreview {
+  const a = data.accounts.find((x) => x.id === accountId) ?? fail('Account not found.');
+  // Cards are entered as the amount owed (positive = owed, negative = in credit); stored as the negative of that.
+  const bankCents = a.type === 'credit_card' ? 0 - enteredCents : enteredCents;
+  const postedCents = postedBalance(a, data.transactions, date);
+  const differenceCents = bankCents - postedCents;
+  return { postedCents, bankCents, differenceCents, matches: pendingMatches(a, data.transactions, date, differenceCents) };
+}
+
+/**
+ * "Update balance". The figure entered is the bank's POSTED balance (Phase 4A.5.6), signed (Phase 4A.5.8: overdrawn
+ * accounts are negative; a card's figure is the amount owed, negative when the card is in credit).
+ * - Exact match: no transaction is created; the account's confirmed balance date moves to `date` (Phase 4A.5.8, D8).
+ * - A difference that adds up exactly to pending items is refused unless `unrelatedToPending` is set: one of them may
+ *   have cleared at the bank, and recording it as an adjustment would count it twice once it is marked posted (D2).
+ *   Nothing is marked posted automatically.
+ */
+export function adjustBalance(
+  ctx: Ctx,
+  accountId: ID,
+  actualBalanceCents: Cents,
+  reason: string,
+  date: ISODate = ctx.today,
+  opts: { unrelatedToPending?: boolean } = {},
+): { ops: Op[]; tx: Transaction | null; reconciled: boolean } {
   const a = ctx.data.accounts.find((x) => x.id === accountId) ?? fail('Account not found.');
-  const actual = a.type === 'credit_card' ? -Math.abs(actualBalanceCents) : actualBalanceCents;
-  // Phase 4A.5.6: the figure entered is the bank's POSTED balance, so it is compared with Clarity's posted balance
-  // (pending items left out). Pending items stay pending and are never absorbed into the adjustment.
-  const current = postedBalance(a, ctx.data.transactions, date);
-  const diff = actual - current;
-  if (diff === 0) return { ops: [], tx: null };
+  if (!Number.isSafeInteger(actualBalanceCents)) fail('Enter a valid balance.', 'balance');
+  const p = previewBalanceUpdate(ctx.data, accountId, actualBalanceCents, date);
+  const confirmed: Account = { ...a, balanceConfirmedDate: a.balanceConfirmedDate && a.balanceConfirmedDate > date ? a.balanceConfirmedDate : date, updatedAt: ctx.now };
+  const confirmOp: Op = { t: 'put', table: 'accounts', value: confirmed };
+  if (p.differenceCents === 0) return { ops: [confirmOp], tx: null, reconciled: true };
+  const describe = (t: Transaction) => `${t.merchant || t.kind} ${formatCents(t.amountCents, a.currency, { sign: 'always' })} on ${formatShortDate(t.date)}`;
+  if (p.matches.length && !opts.unrelatedToPending) {
+    const items = [...new Map(p.matches.flat().map((t) => [t.id, t])).values()];
+    throw new CommandError([{ field: 'pending_match', message: `The difference (${formatCents(p.differenceCents, a.currency, { sign: 'always' })}) matches pending ${items.length === 1 ? 'item' : 'items'}: ${items.map(describe).join('; ')}. If it has cleared at your bank, mark it posted first; otherwise confirm the difference isn't related.` }]);
+  }
+  const unrelated = p.matches.length ? [...new Map(p.matches.flat().map((t) => [t.id, t])).values()] : [];
   const tx: Transaction = {
-    id: ctx.newId('tx'), accountId, date, amountCents: diff, kind: 'adjustment', status: 'confirmed', merchant: 'Balance adjustment',
-    categoryId: null, notes: '', adjustmentReason: reason.trim() || 'Balance updated to match bank', provenance: { source: 'manual' },
+    id: ctx.newId('tx'), accountId, date, amountCents: p.differenceCents, kind: 'adjustment', status: 'confirmed', merchant: 'Balance adjustment',
+    categoryId: null, notes: unrelated.length ? `Confirmed not related to pending ${unrelated.length === 1 ? 'item' : 'items'} (kept pending): ${unrelated.map(describe).join('; ')}` : '',
+    adjustmentReason: reason.trim() || 'Balance updated to match bank', provenance: { source: 'manual' },
     createdAt: ctx.now, updatedAt: ctx.now,
   };
   assertValid(tx, ctx);
-  return { ops: [{ t: 'put', table: 'transactions', value: tx }, ...bumpBackupCounter(ctx, 1)], tx };
+  return { ops: [{ t: 'put', table: 'transactions', value: tx }, confirmOp, ...bumpBackupCounter(ctx, 1)], tx, reconciled: true };
+}
+
+/** Phase 4A.5.8: mark a pending transaction (both legs of a transfer) posted. Ids, amounts and history are unchanged. */
+export function markTransactionPosted(ctx: Ctx, id: ID): Op[] {
+  const t = ctx.data.transactions.find((x) => x.id === id) ?? fail('Transaction not found.');
+  const legs = t.transferGroupId ? ctx.data.transactions.filter((x) => x.transferGroupId === t.transferGroupId) : [t];
+  return legs.map((l): Op => ({ t: 'put', table: 'transactions', value: { ...l, status: 'confirmed', updatedAt: ctx.now } }));
+}
+
+const INCLUSION_MESSAGE: Record<InclusionProblem, (name: string, bd: ISODate) => string> = {
+  pending: (n) => `A pending transaction can't already be in ${n}'s posted balance. Mark it posted first, or untick “Already included”.`,
+  future: (n) => `A future-dated transaction can't already be in ${n}'s balance.`,
+  before_opening: (n) => `This is dated before ${n} was added, so it's already history only. Untick “Already included”.`,
+  after_balance_date: (n, bd) => `This is dated after ${n}'s confirmed balance (${formatShortDate(bd)}), so it can't already be included in it.`,
+};
+
+/**
+ * Phase 4A.5.8: "already included" for one account effect (a transaction, or one leg of a transfer), decided against
+ * THAT account's confirmed balance date. `requested` true/false is the user's explicit choice (validated, never
+ * overridden; allowed from the opening date through the confirmed date). Undefined: on a new transaction, a posted one
+ * dated from the opening date to the day BEFORE the confirmed date is history only by default (D6); on an edit, the
+ * transaction keeps its current state.
+ */
+function inclusionFor(ctx: Ctx, accountId: ID, date: ISODate, status: TxStatus, requested: boolean | undefined, prev: Transaction | undefined): Pick<Transaction, 'includedInBalance' | 'includedAsOf'> {
+  const acct = ctx.data.accounts.find((a) => a.id === accountId);
+  if (!acct) return {};
+  const others = prev ? ctx.data.transactions.filter((t) => t.id !== prev.id) : ctx.data.transactions;
+  const problem = inclusionProblem(acct, others, date, status, ctx.today);
+  const bd = balanceAsOfDate(acct, others);
+  // Default (owner decision, Phase 4A.5.8): history only when dated STRICTLY BEFORE the confirmed date; an item dated on
+  // that date counts unless the user ticks it (a same-day purchase after reconciling usually isn't in the bank's figure).
+  const want = requested ?? (prev ? !!prev.includedInBalance : problem === null && date < bd);
+  if (!want) return {};
+  if (problem) fail(INCLUSION_MESSAGE[problem](acct.name, bd), 'includedInBalance');
+  const asOf = prev?.includedInBalance && prev.includedAsOf && prev.includedAsOf >= date ? prev.includedAsOf : bd;
+  return { includedInBalance: true, includedAsOf: asOf };
 }
 
 // ───────────────────────── transactions ─────────────────────────
@@ -250,8 +330,13 @@ export interface TxInput {
   occurrenceRef?: { recurringId: ID; originalDate: ISODate };
   /** Where this came from (defaults to manual). Capture keeps the user's words in `rawDescription`. */
   provenance?: Provenance;
-  /** Phase 4A.5.6: already included in the balance the user entered for the account; kept as history only. */
+  /**
+   * Already included in the account's confirmed balance; kept as history only (Phase 4A.5.6). For a transfer this is the
+   * SENDING account's effect. true/false = the user's explicit choice; omitted = the default rule (Phase 4A.5.8, D6).
+   */
   includedInBalance?: boolean;
+  /** Phase 4A.5.8: the same for the RECEIVING account of a transfer, decided against that account's own balance date. */
+  toIncludedInBalance?: boolean;
 }
 
 function bumpBackupCounter(ctx: Ctx, n: number): Op[] {
@@ -262,12 +347,12 @@ function signFor(kind: TxInput['kind']): 1 | -1 {
   return kind === 'expense' ? -1 : 1;
 }
 
-function buildTxs(ctx: Ctx, input: TxInput, ids: { id?: ID; pairId?: ID; groupId?: ID; createdAt?: number }): Transaction[] {
+function buildTxs(ctx: Ctx, input: TxInput, ids: { id?: ID; pairId?: ID; groupId?: ID; createdAt?: number; prev?: Transaction; prevPair?: Transaction }): Transaction[] {
   if (!Number.isSafeInteger(input.amountCents) || input.amountCents <= 0) fail('Enter an amount greater than zero.', 'amount');
+  const status: TxStatus = input.status ?? 'confirmed';
   const base = {
     date: input.date,
-    status: input.status ?? 'confirmed',
-    ...(input.includedInBalance ? { includedInBalance: true } : {}),
+    status,
     merchant: input.merchant.trim(),
     notes: (input.notes ?? '').trim(),
     provenance: input.provenance ?? { source: 'manual' as const },
@@ -278,9 +363,10 @@ function buildTxs(ctx: Ctx, input: TxInput, ids: { id?: ID; pairId?: ID; groupId
   if (input.kind === 'transfer') {
     if (!input.toAccountId) fail('Choose the account the money goes to.', 'toAccountId');
     const groupId = ids.groupId ?? ctx.newId('tg');
+    // Phase 4A.5.8: each leg is one account's effect; "already included" is decided per leg against that account's date.
     const legs: Transaction[] = [
-      { ...base, id: ids.id ?? ctx.newId('tx'), accountId: input.accountId, amountCents: -input.amountCents, kind: 'transfer', categoryId: null, transferGroupId: groupId, merchant: base.merchant || 'Transfer' },
-      { ...base, id: ids.pairId ?? ctx.newId('tx'), accountId: input.toAccountId!, amountCents: input.amountCents, kind: 'transfer', categoryId: null, transferGroupId: groupId, merchant: base.merchant || 'Transfer' },
+      { ...base, ...inclusionFor(ctx, input.accountId, input.date, status, input.includedInBalance, ids.prev), id: ids.id ?? ctx.newId('tx'), accountId: input.accountId, amountCents: -input.amountCents, kind: 'transfer', categoryId: null, transferGroupId: groupId, merchant: base.merchant || 'Transfer' },
+      { ...base, ...inclusionFor(ctx, input.toAccountId!, input.date, status, input.toIncludedInBalance, ids.prevPair), id: ids.pairId ?? ctx.newId('tx'), accountId: input.toAccountId!, amountCents: input.amountCents, kind: 'transfer', categoryId: null, transferGroupId: groupId, merchant: base.merchant || 'Transfer' },
     ];
     const issues = validateTransferPair(legs, ctx.data.accounts);
     if (issues.length) throw new CommandError(issues);
@@ -292,6 +378,7 @@ function buildTxs(ctx: Ctx, input: TxInput, ids: { id?: ID; pairId?: ID; groupId
   if (input.splits && input.splits.length > 0) splits = input.splits.map((s) => ({ categoryId: s.categoryId, amountCents: sign * s.amountCents }));
   const tx: Transaction = {
     ...base,
+    ...inclusionFor(ctx, input.accountId, input.date, status, input.includedInBalance, ids.prev),
     id: ids.id ?? ctx.newId('tx'),
     accountId: input.accountId,
     amountCents: sign * input.amountCents,
@@ -342,6 +429,8 @@ export function addTransactions(ctx: Ctx, inputs: readonly TxInput[]): { ops: Op
 /** Transfer legs are always edited together. */
 export function updateTransaction(ctx: Ctx, id: ID, input: TxInput): { ops: Op[]; txs: Transaction[] } {
   const existing = ctx.data.transactions.find((t) => t.id === id) ?? fail('Transaction not found.');
+  // Phase 4A.5.8: an adjustment is a reconciliation record; editing it as an expense or income would flip its sign.
+  if (existing.kind === 'adjustment') fail('Balance adjustments can’t be edited. Delete it, or use Update balance again.');
   const legs = existing.transferGroupId ? ctx.data.transactions.filter((t) => t.transferGroupId === existing.transferGroupId) : [existing];
   const source = legs.find((l) => l.amountCents < 0) ?? legs[0]!;
   const pair = legs.find((l) => l.id !== source.id);
@@ -351,6 +440,8 @@ export function updateTransaction(ctx: Ctx, id: ID, input: TxInput): { ops: Op[]
     ...(pair ? { pairId: pair.id } : {}),
     ...(existing.transferGroupId ? { groupId: existing.transferGroupId } : {}),
     createdAt: existing.createdAt,
+    prev: source,
+    ...(pair ? { prevPair: pair } : {}),
   });
   for (const t of txs) {
     const prev = legs.find((l) => l.id === t.id);
@@ -574,7 +665,10 @@ export function commitImport(ctx: Ctx, input: CommitImportInput): { ops: Op[]; b
         id: ctx.newId('tx'), accountId: account.id, date: c.date, amountCents: c.amountCents, kind: 'transfer', status: 'confirmed',
         merchant: d.merchant || c.merchant || 'Transfer', categoryId: null, notes: '', transferGroupId: groupId, provenance, createdAt: ctx.now, updatedAt: ctx.now, ...occurrenceRef,
       };
-      const legB: Transaction = { ...legA, id: ctx.newId('tx'), accountId: d.otherAccountId!, amountCents: -c.amountCents, provenance: { source: 'import', importBatchId: batchId } };
+      // Phase 4A.5.8: "already included" is decided per leg against each account's confirmed balance date (D6, D5).
+      Object.assign(legA, inclusionFor(ctx, account.id, c.date, 'confirmed', undefined, undefined));
+      const legB: Transaction = { ...legA, includedInBalance: undefined, includedAsOf: undefined, ...inclusionFor(ctx, d.otherAccountId!, c.date, 'confirmed', undefined, undefined), id: ctx.newId('tx'), accountId: d.otherAccountId!, amountCents: -c.amountCents, provenance: { source: 'import', importBatchId: batchId } };
+      if (!legB.includedInBalance) { delete legB.includedInBalance; delete legB.includedAsOf; }
       const issues = validateTransferPair([legA, legB], ctx.data.accounts);
       if (issues.length) throw new CommandError(issues.map((i) => ({ ...i, message: `Row ${c.rowNumber}: ${i.message}` })));
       txs.push(legA, legB);
@@ -586,6 +680,8 @@ export function commitImport(ctx: Ctx, input: CommitImportInput): { ops: Op[]; b
       id: ctx.newId('tx'), accountId: account.id, date: c.date, amountCents: amount, kind: d.kind, status: 'confirmed',
       merchant: d.merchant.trim() || c.merchant || c.rawDescription || 'Imported transaction', categoryId: d.categoryId, notes: '', provenance,
       createdAt: ctx.now, updatedAt: ctx.now, ...occurrenceRef,
+      // Phase 4A.5.8 (D6): a row dated before the account's confirmed balance date is already in that balance
+      ...inclusionFor(ctx, account.id, c.date, 'confirmed', undefined, undefined),
     };
     const issues = validateTransaction(tx, ctx.data.accounts, ctx.data.categories);
     if (issues.length) throw new CommandError(issues.map((i) => ({ ...i, message: `Row ${c.rowNumber}: ${i.message}` })));
