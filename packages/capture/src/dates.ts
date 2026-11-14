@@ -10,6 +10,8 @@ export interface DateMatch {
   text: string;
   date: ISODate | null; // null = recognised as a date phrase, but not precise enough ("last week")
   ambiguous: boolean; // e.g. 10/11: October 11 or 10 November
+  /** A bare weekday name ("Friday"): the weakest date signal, often part of a name ("Sunday Market"). */
+  weak: boolean;
 }
 
 const MONTHS: Record<string, number> = {
@@ -23,7 +25,7 @@ const MONTH_RE = '(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|ju
 const DAY_RE = '(\\d{1,2})(?:st|nd|rd|th)?';
 const WD_RE = '(monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tues?|wed|thu(?:rs?)?|fri|sat|sun)';
 
-type Rule = { re: RegExp; resolve: (m: RegExpExecArray, today: ISODate) => { date: ISODate | null; ambiguous?: boolean } };
+type Rule = { re: RegExp; weak?: boolean; resolve: (m: RegExpExecArray, today: ISODate) => { date: ISODate | null; ambiguous?: boolean } };
 
 /** Most recent `wd` strictly before today ("last Friday") or on/before today ("on Friday"). */
 function pastWeekday(today: ISODate, wd: number, strict: boolean): ISODate {
@@ -61,7 +63,7 @@ const RULES: Rule[] = [
   { re: new RegExp(`\\b(?:last|this\\s+past)\\s+${WD_RE}\\b`, 'gi'), resolve: (m, t) => ({ date: pastWeekday(t, WEEKDAYS[m[1]!.toLowerCase()]!, true) }) },
   { re: new RegExp(`\\bon\\s+${WD_RE}\\b`, 'gi'), resolve: (m, t) => ({ date: pastWeekday(t, WEEKDAYS[m[1]!.toLowerCase()]!, false) }) },
   // A bare full weekday name ("Friday I spent…"): the most recent one, today included.
-  { re: /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi, resolve: (m, t) => ({ date: pastWeekday(t, WEEKDAYS[m[1]!.toLowerCase()]!, false) }) },
+  { re: /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi, weak: true, resolve: (m, t) => ({ date: pastWeekday(t, WEEKDAYS[m[1]!.toLowerCase()]!, false) }) },
   // ISO 2026-10-15
   { re: /\b(\d{4})-(\d{2})-(\d{2})\b/g, resolve: (m, t) => ({ date: monthDay(t, Number(m[2]), Number(m[3]), Number(m[1])) }) },
   // October 15, October 15th 2026, Oct. 15
@@ -105,8 +107,10 @@ export function findDates(text: string, today: ISODate): DateMatch[] {
       const start = m.index;
       const end = start + m[0].length;
       if (found.some((f) => start < f.end && end > f.start)) continue;
+      // "at Sunday Market", "from Monday Bakery": a name, not a date
+      if (rule.weak && /\b(?:at|from|to)\s+$/i.test(text.slice(0, start))) continue;
       const r = rule.resolve(m, today);
-      found.push({ start, end, text: m[0], date: r.date, ambiguous: !!r.ambiguous });
+      found.push({ start, end, text: m[0], date: r.date, ambiguous: !!r.ambiguous, weak: !!rule.weak });
     }
   }
   return found.sort((a, b) => a.start - b.start);

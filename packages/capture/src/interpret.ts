@@ -82,11 +82,21 @@ const CUE = {
   paycheck: /\b(?:paycheck|pay\s?check|salary|payroll|wages?)\b/i,
 };
 
-function kindOf(t: string, cardNames: RegExp | null): { kind: DraftKind; role: TransferRole | null } | null {
-  if (CUE.transfer.test(t) && !CUE.card.test(t)) return { kind: 'transfer', role: 'transfer' };
+/** "Visa bill", "card payment", "credit card balance": paying the card, not spending. */
+const CARD_BILL = /\b(?:visa|mastercard|amex|discover|credit\s+card|card)\s+(?:bill|payment|balance)\b/i;
+
+type KindGuess = { kind: DraftKind; role: TransferRole | null; unclear?: boolean };
+
+function kindOf(t: string, cardNames: RegExp | null): KindGuess | null {
+  // A merchant named with "at …" means a purchase ("paid $40 at Target on my Visa" is spending ON the card).
+  const atMerchant = /\bat\s+(?!my\b|the\s+bank\b|\d)[a-z]/i.test(t);
+  const cardPayment = !atMerchant && (CUE.card.test(t) || CARD_BILL.test(t) || (cardNames !== null && cardNames.test(t) && (/\b(?:paid|pay|paying|payment)\b/i.test(t) && /\b(?:toward|towards|to|off|on)\b/i.test(t) || /\b(?:bill|payment|balance)\b/i.test(t))));
+  if (CUE.transfer.test(t) && !cardPayment) return { kind: 'transfer', role: 'transfer' };
   if (CUE.savings.test(t)) return { kind: 'transfer', role: 'savings' };
-  if (CUE.card.test(t) || (cardNames && /\b(?:paid|pay|paying|payment)\b/i.test(t) && /\b(?:toward|towards|to|off|on)\b/i.test(t) && cardNames.test(t))) return { kind: 'transfer', role: 'card_payment' };
-  if (CUE.transfer.test(t)) return { kind: 'transfer', role: 'transfer' };
+  if (cardPayment) return { kind: 'transfer', role: 'card_payment' };
+  // "Cash back" at a store is taking cash out, not a refund; "paid me back" could be income or a reimbursement.
+  if (/\bcash\s*back\b/i.test(t)) return { kind: 'expense', role: null, unclear: true };
+  if (/\bpaid\s+me\s+back\b/i.test(t)) return { kind: 'income', role: null, unclear: true };
   if (CUE.refund.test(t)) return { kind: 'refund', role: null };
   if (CUE.income.test(t) && !/\b(?:spent|bought|paid\s+(?!me))\b/i.test(t)) return { kind: 'income', role: null };
   if (CUE.expense.test(t)) return { kind: 'expense', role: null };
@@ -183,7 +193,7 @@ function wordsAfter(t: string, idx: number): string {
 
 function findMerchant(t: string, kind: DraftKind, known: readonly string[]): string {
   const patterns: RegExp[] =
-    kind === 'refund' ? [/\brefund(?:ed)?\s+from\s+/i, /\bfrom\s+/i, /\bat\s+/i]
+    kind === 'refund' ? [/\brefund(?:ed)?\s+from\s+/i, /\bfrom\s+/i, /\bto\s+(?!my\b|the\b|me\b)/i, /\bat\s+/i]
       : kind === 'income' ? [/\bfrom\s+(?!selling)/i]
         : [/\bat\s+/i, /@\s*/, /\bfrom\s+/i, /\bto\s+(?!my\b|the\b|savings\b|checking\b)/i];
   for (const p of patterns) {
@@ -249,17 +259,22 @@ export function interpretLocal(text: string, ctx: CaptureContext): LocalResult {
       if (/[a-z]{3}/i.test(s.text)) notUnderstood.push(s.text);
       continue;
     }
-    let carriedKind: { kind: DraftKind; role: TransferRole | null } | null = null;
+    let carriedKind: KindGuess | null = null;
     chunks.forEach((c, i) => {
       // Text without the amount and date phrases, for finding words.
       let words = c.text;
-      for (const r of [c.amount, ...c.dates, ...(c.split?.parts.map((p) => p.amount) ?? [])].sort((a, b) => b.start - a.start)) {
+      const blank = c.dates.some((x) => !x.weak) ? c.dates.filter((x) => !x.weak) : c.dates;
+      for (const r of [c.amount, ...blank, ...(c.split?.parts.map((p) => p.amount) ?? [])].sort((a, b) => b.start - a.start)) {
         if (r.start >= 0 && r.end <= words.length) words = `${words.slice(0, r.start)} ${' '.repeat(Math.max(0, r.end - r.start - 1))}${words.slice(r.end)}`;
       }
       const lower = words.toLowerCase();
 
-      // Date
-      const own = c.dates[0];
+      // Date: a stronger phrase wins over a bare weekday name in the same item;
+      // two different strong dates in one item are reported, not resolved silently.
+      const strong = c.dates.filter((x) => !x.weak);
+      const itemDates = strong.length ? strong : c.dates;
+      const conflict = new Set(itemDates.map((x) => x.date)).size > 1;
+      const own = itemDates[0];
       let date: ISODate | null = null;
       let dateSource: CaptureDraft['dateSource'] = 'none';
       let dateText: string | null = null;
@@ -268,7 +283,8 @@ export function interpretLocal(text: string, ctx: CaptureContext): LocalResult {
         date = own.date;
         dateSource = 'words';
         dateText = own.text;
-        dateAmbiguous = own.ambiguous;
+        dateAmbiguous = own.ambiguous || conflict;
+        if (conflict) dateText = itemDates.map((x) => x.text).join(' / ');
       } else if (carriedDate) {
         date = carriedDate;
         dateSource = 'carried';
@@ -286,10 +302,17 @@ export function interpretLocal(text: string, ctx: CaptureContext): LocalResult {
       if (own?.date) carriedDate = own.date;
 
       // Kind
-      const k = kindOf(lower, cardNames) ?? carriedKind;
-      carriedKind = k;
-      const kind: DraftKind = k?.kind ?? 'expense';
-      const role = k?.role ?? null;
+      const ownKind = kindOf(lower, cardNames);
+      const k = ownKind ?? carriedKind;
+      carriedKind = k ? { kind: k.kind, role: k.role } : null; // "unclear" belongs to this item only
+      let kind: DraftKind = k?.kind ?? 'expense';
+      let role = k?.role ?? null;
+      let unclearKind = !!ownKind?.unclear;
+      // "Transferred $100 to Mom": money to a person, not between the user's accounts. Ask.
+      if (kind === 'transfer' && role === 'transfer' && !findAccount(lower, 'to|into', ctx.accounts)) {
+        const person = /\bto\s+(?!my\b|the\b|our\b)([A-Z][\w'’-]*(?:\s+[A-Z][\w'’-]*)?)/.exec(words);
+        if (person) { kind = 'expense'; role = null; unclearKind = true; }
+      }
 
       // Merchant / description
       let merchant = kind === 'transfer' ? '' : findMerchant(words, kind, known);
@@ -382,13 +405,13 @@ export function interpretLocal(text: string, ctx: CaptureContext): LocalResult {
       }
 
       const hasCue = !!kindOf(lower, cardNames);
-      const kindUnclear = kind === 'expense' && !merchant && !categoryId && !c.split && (!hasCue || /^\W*(?:i\s+)?(?:paid|pay)\b/i.test(words.trim()));
+      const kindUnclear = unclearKind || (kind === 'expense' && !merchant && !categoryId && !c.split && (!hasCue || /^\W*(?:i\s+)?(?:paid|pay)\b/i.test(words.trim())));
 
       drafts.push({
         id: `d${drafts.length + 1}`,
         kind,
         role,
-        amountCents: c.amount.cents,
+        amountCents: c.amount.range ? null : c.amount.cents, // a range ("$40-50") is never turned into one number
         approximate: c.amount.approximate,
         currency: c.amount.currency ?? ctx.currency,
         currencyWritten: c.amount.currency !== null,
