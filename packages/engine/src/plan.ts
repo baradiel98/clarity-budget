@@ -180,8 +180,9 @@ function forecastTo(input: EngineInput, horizonEnd: ISODate, includeEstimatedInc
 function eventLine(e: ForecastEvent, cur: CurrencyCode): ExplainLine {
   const base = e.source === 'overdue' ? 'overdue, counted today' : e.estimated ? 'estimated' : e.source === 'hypothetical' ? 'hypothetical' : e.source === 'scheduled_tx' ? 'planned' : undefined;
   const short = e.unfundedCents ? `only ${formatCents(e.cashDeltaCents, cur)} is available to move; ${formatCents(e.unfundedCents, cur)} not counted` : undefined;
-  const cover = e.source === 'archived_balance' ? 'an archived account\'s negative balance; still owed' : e.coverCents ? `the account it's paid from is short; ${formatCents(e.coverCents, cur)} has to come from your spendable accounts` : undefined;
-  const status = [base, short, cover].filter(Boolean).join('; ') || undefined;
+  const cover = e.source === 'archived_balance' ? (e.label.includes('(archived)') ? 'an archived account\'s negative balance; still owed' : 'a negative balance on an account not counted as spendable; still owed') : e.coverCents ? `the account it's paid from is short; ${formatCents(e.coverCents, cur)} has to come from your spendable accounts` : undefined;
+  const repaid = e.repaidCents ? `${formatCents(e.repaidCents, cur)} of it repays an overdrawn balance already counted, so it isn't counted again` : undefined;
+  const status = [base, short, cover, repaid].filter(Boolean).join('; ') || undefined;
   return {
     kind: e.cashDeltaCents < 0 ? 'out' : 'in',
     label: e.label,
@@ -906,6 +907,18 @@ export function buildDashboard(input: EngineInput): Dashboard {
   for (const p of conservative.coveredPayments.filter((x) => x.kind === 'overdrawn')) {
     const name = nameOf(p.accountId);
     const f = (x: Cents) => formatCents(x, curOf(p.accountId));
+    // Phase 4A.5.9: an active account not counted as spendable (savings) can be overdrawn too
+    if (!acctOf(p.accountId)?.archived) {
+      warnings.push({
+        id: `overdrawn:${p.accountId}`,
+        severity: 'warning',
+        title: `${name} is overdrawn by ${f(p.coveredCents)}`,
+        detail: `${name} isn't counted as spendable, but its negative balance is owed, so Safe to Spend counts ${f(p.coveredCents)} against your spendable accounts. Bring ${name} back to ${f(0)} to clear this.`,
+        accountId: p.accountId,
+        items: [{ date: p.date, label: `${name} balance`, cents: p.accountBalanceCents, currency: curOf(p.accountId) }],
+      });
+      continue;
+    }
     warnings.push({
       id: `archived-overdrawn:${p.accountId}`,
       severity: 'warning',

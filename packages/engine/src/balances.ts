@@ -106,6 +106,21 @@ export function pendingMatches(account: Account, transactions: readonly Transact
 }
 
 /**
+ * Phase 4A.5.9: pending items that could explain PART of a difference: same direction as the difference (a deposit
+ * for a positive one, a purchase for a negative one) but not part of an exact match. Linear in the number of pending
+ * items (no combination search); the `limit` closest in amount are returned. A combination of more than 3 items that
+ * adds up exactly isn't detected as exact, but each of its items still appears here, so nothing passes silently.
+ */
+export function pendingPartialMatches(account: Account, transactions: readonly Transaction[], asOf: ISODate, differenceCents: Cents, exact: readonly Transaction[][] = [], limit = 5): Transaction[] {
+  if (differenceCents === 0) return [];
+  const inExact = new Set(exact.flat().map((t) => t.id));
+  return pendingItems(account, transactions, asOf)
+    .filter((t) => !inExact.has(t.id) && Math.sign(t.amountCents) === Math.sign(differenceCents))
+    .sort((a, b) => Math.abs(a.amountCents - differenceCents) - Math.abs(b.amountCents - differenceCents) || (a.date < b.date ? -1 : 1))
+    .slice(0, limit);
+}
+
+/**
  * Recorded balance of one account at the end of `asOf` (inclusive).
  * Pending transactions are included (they are labelled separately in the UI).
  */

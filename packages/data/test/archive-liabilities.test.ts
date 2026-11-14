@@ -31,14 +31,16 @@ describe('the archive review names any debt first', () => {
     ]);
     const note = (n: string) => archiveBalanceReview(data, ids[n]!, TODAY).note;
     expect(note('Old checking')).toBe("Old checking is overdrawn by $500.00. Archiving doesn't clear it: Safe to Spend keeps counting $500.00 against your spendable accounts until Old checking is back to $0.00.");
-    expect(note('Savings')).toBe("Savings is at −$100.00. It isn't marked as spendable, so it isn't counted in Safe to Spend now, and archiving doesn't change that. It stays in your totals as money owed.");
+    // Phase 4A.5.9 (owner decision): a negative savings balance is owed and counts against Safe to Spend
+    expect(note('Savings')).toBe("Savings is overdrawn by $100.00. Archiving doesn't clear it: Safe to Spend keeps counting $100.00 against your spendable accounts until Savings is back to $0.00.");
     expect(note('Visa')).toBe('Visa still owes $1,000.00. Archiving doesn\'t clear it: the card stays in your totals, and the "no payment scheduled" warning stays until it\'s paid or a payment is scheduled.');
     expect(note('Spare')).toBeNull();
-    // and what the note says is what happens: $1,000 − $500 (overdrawn) − $1,000 (Visa, set aside since Phase 4A.5),
-    // the same before and after archiving
+    // and what the note says is what happens: $1,000 − $500 (overdrawn) − $100 (Savings, since Phase 4A.5.9)
+    // − $1,000 (Visa, set aside since Phase 4A.5); Spare (+$20, savings) adds nothing; the same before and after archiving
     const sts = (d: WorkspaceData) => buildDashboard(engineInput(d, TODAY)).safeToSpend.cents;
-    expect(sts(data)).toBe(-50000);
-    expect(sts(applyOps(data, archiveAccount(ctxOf(data), ids['Old checking']!)))).toBe(-50000);
+    expect(sts(data)).toBe(-60000);
+    expect(sts(applyOps(data, archiveAccount(ctxOf(data), ids['Old checking']!)))).toBe(-60000);
+    expect(sts(applyOps(data, archiveAccount(ctxOf(data), ids['Savings']!)))).toBe(-60000);
   });
 });
 

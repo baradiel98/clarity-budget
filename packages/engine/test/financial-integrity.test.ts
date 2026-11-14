@@ -387,6 +387,6 @@ describe('F7/F8: smaller corrections', () => {
   it('audit example: Savings already at −$100 is described as −$100.00, not $0.00', () => {
     const i = input({ today: TODAY, accounts: [chk(30000), sav(-10000)], recurring: [move('m', 'sav', 'chk', '2026-11-25', 50000, { name: 'Top up' })] });
     expect(warning(i, 'unfunded:')!.detail).toContain('which is projected to have −$100.00 then');
-    expect(computeSafeToSpend(i).cents).toBe(30000);
+    expect(computeSafeToSpend(i).cents).toBe(20000); // Phase 4A.5.9: $300 − $100 owed on Savings (was $300)
   });
 });

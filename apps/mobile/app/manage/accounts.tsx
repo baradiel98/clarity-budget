@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Alert, View } from 'react-native';
 import { accountUsage, adjustBalance, archiveAccount, archiveBalanceReview, createAccount, markTransactionPosted, previewBalanceUpdate, updateAccount } from '@clarity/data';
 import { accountBalance, pendingItems, postedBalance } from '@clarity/engine';
-import { BALANCE_ENTRY_HINT, CARD_BALANCE_ENTRY_HINT, cardModeOf, centsToDecimalString, formatCents, formatShortDate, parseBalanceEntry, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, RECONCILED_MESSAGE, UPDATE_BALANCE_HINT, UPDATE_BALANCE_PENDING_NOTE, type Account, type AccountType, type CardBalanceMode } from '@clarity/shared';
+import { BALANCE_ENTRY_HINT, CARD_BALANCE_ENTRY_HINT, cardModeOf, centsToDecimalString, formatCents, formatShortDate, parseBalanceEntry, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, PENDING_PARTIAL_NOTE, PENDING_PARTIAL_TITLE, RECONCILED_MESSAGE, UPDATE_BALANCE_HINT, UPDATE_BALANCE_PENDING_NOTE, type Account, type AccountType, type CardBalanceMode } from '@clarity/shared';
 import { useToast } from '../../src/ui/Toast';
 import { Check } from '../../src/features/Welcome';
 import { useData, useRun, useSession } from '../../src/state/session';
@@ -121,7 +121,9 @@ export function UpdateBalancePanel({ account: a, onDone }: { account: Account; o
   const parsed = parseBalanceEntry(value, cur, isCard ? mode : undefined);
   const preview = parsed.ok ? previewBalanceUpdate(data, a.id, parsed.cents, today) : null;
   const diff = preview?.differenceCents ?? null;
-  const ids = new Set((preview?.matches ?? []).flat().map((t) => t.id));
+  // Phase 4A.5.9: exact matches, and pending items in the same direction that could explain part of the difference
+  const ids = new Set([...(preview?.matches ?? []).flat(), ...(preview?.partial ?? [])].map((t) => t.id));
+  const exactIds = new Set((preview?.matches ?? []).flat().map((t) => t.id));
   const matchItems = pending.filter((t) => ids.has(t.id));
   const blocked = matchItems.length > 0 && !unrelated;
   const shown = (c: number) => (isCard ? -c : c);
@@ -149,8 +151,8 @@ export function UpdateBalancePanel({ account: a, onDone }: { account: Account; o
       </Field>
       {matchItems.length > 0 && (
         <View testID="pending-match" style={{ gap: 6 }}>
-          <T variant="footnote" style={{ fontFamily: 'Inter_600SemiBold' }}>{PENDING_MATCH_TITLE}</T>
-          <T variant="footnote" color="textSecondary">{PENDING_MATCH_NOTE}</T>
+          <T variant="footnote" style={{ fontFamily: 'Inter_600SemiBold' }}>{exactIds.size ? PENDING_MATCH_TITLE : PENDING_PARTIAL_TITLE}</T>
+          <T variant="footnote" color="textSecondary">{exactIds.size ? PENDING_MATCH_NOTE : PENDING_PARTIAL_NOTE(formatCents(shown(diff!), cur, { sign: 'always' }))}</T>
           {(preview?.matches.length ?? 0) > 1 && <T variant="footnote" color="textSecondary">{preview!.matches.length} different combinations add up to {formatCents(shown(diff!), cur, { sign: 'always' })}; Clarity can't tell which, if any, has cleared.</T>}
           {matchItems.map((t) => (
             <View key={t.id} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>

@@ -65,6 +65,11 @@ export interface ForecastEvent {
    * cover: this part has to be moved in from the spendable accounts, so it is counted against them (Phase 4A.4).
    */
   coverCents?: Cents;
+  /**
+   * Phase 4A.5.9: part of the money arriving in an overdrawn non-spendable account that repays its negative balance,
+   * which was already counted against the spendable accounts (so it is given back, never counted twice).
+   */
+  repaidCents?: Cents;
 }
 
 /** A transfer out of a non-spendable asset account (e.g. savings) that asks for more than the account holds. */
@@ -329,13 +334,15 @@ export function buildForecast(input: ForecastInput): Forecast {
     push({ ...base, date: o.date, source: 'occurrence', legs: [], cashDeltaCents: 0 });
   }
 
-  // 2b) Archiving never hides debt (Phase 4A.4.4): an archived account that was counted as spendable and is
-  //     overdrawn today keeps counting against the spendable accounts, exactly as it did before it was archived.
-  //     (A positive archived balance is still not spendable.)
+  // 2b) Debt is never hidden. Archiving (Phase 4A.4.4): an archived account that was counted as spendable and is
+  //     overdrawn today keeps counting against the spendable accounts. Phase 4A.5.9 (owner decision): the same for
+  //     any account NOT counted as spendable (savings), active or archived: a negative balance is owed and reduces
+  //     Safe to Spend; a positive or zero balance has no effect (it is still not spendable).
   for (const a of accounts) {
-    if (!a.archived || !a.spendable || a.type === 'credit_card' || a.currency !== baseCurrency) continue;
+    if (a.type === 'credit_card' || a.currency !== baseCurrency) continue;
+    if (a.spendable && !a.archived) continue; // counted directly as spendable money
     if ((balances.get(a.id) ?? 0) >= 0) continue;
-    push({ id: `overdrawn:${a.id}`, date: today, label: `${a.name} (archived) overdrawn balance`, source: 'archived_balance', legs: [], cashDeltaCents: 0, estimated: false });
+    push({ id: `overdrawn:${a.id}`, date: today, label: `${a.name}${a.archived ? ' (archived)' : ''} overdrawn balance`, source: 'archived_balance', legs: [], cashDeltaCents: 0, estimated: false });
   }
 
   // 3) Hypothetical purchases ("Can I afford this?") — never stored.
@@ -356,6 +363,9 @@ export function buildForecast(input: ForecastInput): Forecast {
   const unfunded: UnfundedTransfer[] = [];
   const shortfalls: AccountShortfall[] = [];
   const covered: CoveredPayment[] = [];
+  // Phase 4A.5.9: overdrawn non-spendable accounts whose negative balance is counted against the spendable accounts;
+  // what is still unpaid. Money arriving in them later repays it first (see repay()).
+  const debtCounted = new Map<ID, Cents>();
   const advanceList: CashAdvance[] = [];
   const conflicts: CurrencyConflict[] = [];
   /** Per card: planned cash-advance money still owed (never more than the card's projected balance owed). */
@@ -403,6 +413,17 @@ export function buildForecast(input: ForecastInput): Forecast {
         m.set(id, (m.get(id) ?? 0) + d);
       }
     };
+    // Phase 4A.5.9: money arriving in an account whose negative balance was counted repays that first; the repaid part
+    // is given back to the spendable accounts on the same event (the debt was already counted), so nothing is
+    // counted twice. Returns what actually lands in the account.
+    const repay = (id: ID, amount: Cents, e: ForecastEvent): Cents => {
+      const owed = debtCounted.get(id) ?? 0;
+      const r = Math.min(owed, Math.max(0, amount));
+      if (r <= 0) return amount;
+      debtCounted.set(id, owed - r);
+      e.repaidCents = (e.repaidCents ?? 0) + r;
+      return amount - r;
+    };
     const typeOf = (id: ID) => accountById.get(id)?.type;
     const coverable = (id: ID) => {
       const a = accountById.get(id);
@@ -429,6 +450,7 @@ export function buildForecast(input: ForecastInput): Forecast {
       if (bal >= 0) continue;
       apply(id, -bal);
       e.coverCents = -bal;
+      debtCounted.set(id, (debtCounted.get(id) ?? 0) - bal);
       covered.push({ eventId: e.id, label: e.label, date, accountId: id, requestedCents: -bal, fundedCents: 0, coveredCents: -bal, accountBalanceCents: bal, kind: 'overdrawn' });
     }
     // 0. Transfers between accounts in different currencies (Phase 4A.4.2): Clarity never converts. The money
@@ -451,7 +473,7 @@ export function buildForecast(input: ForecastInput): Forecast {
       const srcType = typeOf(t.src.accountId);
       if (cashIds.has(t.src.accountId) || (srcType === 'credit_card' && typeOf(t.dst.accountId) === 'credit_card')) {
         apply(t.src.accountId, t.src.deltaCents);
-        apply(t.dst.accountId, t.dst.deltaCents, true);
+        apply(t.dst.accountId, repay(t.dst.accountId, t.dst.deltaCents, e), true);
         noteOut(t.src.accountId, e.label);
       } else if (srcType === 'credit_card') {
         advances.push({ e, src: t.src.accountId, dst: t.dst.accountId, cents: t.dst.deltaCents });
@@ -471,7 +493,8 @@ export function buildForecast(input: ForecastInput): Forecast {
           apply(l.accountId, -funded); // the rest is paid with money moved in from the spendable accounts
           if (funded < requested) {
             e.coverCents = (e.coverCents ?? 0) + (requested - funded);
-            covered.push({ eventId: e.id, label: e.label, date, accountId: l.accountId, requestedCents: requested, fundedCents: funded, coveredCents: requested - funded, accountBalanceCents: bal });
+            // the account's real balance: an overdrawn balance counted separately is still part of it (Phase 4A.5.9)
+            covered.push({ eventId: e.id, label: e.label, date, accountId: l.accountId, requestedCents: requested, fundedCents: funded, coveredCents: requested - funded, accountBalanceCents: bal - (debtCounted.get(l.accountId) ?? 0) });
           }
         } else {
           apply(l.accountId, l.deltaCents);
@@ -501,7 +524,7 @@ export function buildForecast(input: ForecastInput): Forecast {
       }
     }
     // 3. income, refunds, cash advances
-    for (const e of new Set(incoming)) for (const l of e.legs) if (l.deltaCents > 0) apply(l.accountId, l.deltaCents);
+    for (const e of new Set(incoming)) for (const l of e.legs) if (l.deltaCents > 0) apply(l.accountId, repay(l.accountId, l.deltaCents, e));
     for (const a of advances) {
       apply(a.src, -a.cents);
       apply(a.dst, a.cents, true);
@@ -517,7 +540,8 @@ export function buildForecast(input: ForecastInput): Forecast {
     //    spendable accounts (so any shortage lands on the money Safe to Spend would count), shared in proportion.
     //    Repeated so a same-day chain (A -> B -> Checking) can pass money along; it can never create money.
     const sourceBalance = new Map<ID, Cents>();
-    for (const m of reserveMoves) if (!sourceBalance.has(m.src)) sourceBalance.set(m.src, balances.get(m.src) ?? 0);
+    // reported balance = the real one (Phase 4A.5.9: an overdrawn balance counted separately is still part of it)
+    for (const m of reserveMoves) if (!sourceBalance.has(m.src)) sourceBalance.set(m.src, (balances.get(m.src) ?? 0) - (debtCounted.get(m.src) ?? 0));
     for (let pass = 0, progress = true; progress && pass <= reserveMoves.length; pass++) {
       progress = false;
       const sources = [...new Set(reserveMoves.filter((m) => m.funded < m.requested).map((m) => m.src))].sort();
@@ -537,7 +561,7 @@ export function buildForecast(input: ForecastInput): Forecast {
             const sh = shares[k]!;
             if (sh <= 0) return;
             apply(m.src, -sh);
-            apply(m.dst, sh, true);
+            apply(m.dst, repay(m.dst, sh, m.e), true);
             m.funded += sh;
             progress = true;
           });
@@ -569,7 +593,7 @@ export function buildForecast(input: ForecastInput): Forecast {
     let outflow = 0;
     let inflow = 0;
     for (const e of events) {
-      e.cashDeltaCents = e.legs.reduce((s, l) => s + (cashIds.has(l.accountId) ? l.deltaCents : 0), 0) - (e.coverCents ?? 0);
+      e.cashDeltaCents = e.legs.reduce((s, l) => s + (cashIds.has(l.accountId) ? l.deltaCents : 0), 0) - (e.coverCents ?? 0) + (e.repaidCents ?? 0);
       if (e.cashDeltaCents < 0) outflow += e.cashDeltaCents;
       else inflow += e.cashDeltaCents;
     }

@@ -2,12 +2,12 @@ import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native';
 import * as ExpoCrypto from 'expo-crypto';
-import { commitImport, undoImportBatch, type ImportDecision } from '@clarity/data';
+import { commitImport, markTransactionPosted, undoImportBatch, type ImportDecision } from '@clarity/data';
 import {
   buildPreview, checkImportFile, csvParser, dataRowCount, guessMapping, headerSignature, NO_DATA_ROWS_MESSAGE, nonBlankRowCount, reconcilePreview, suggestSignConvention, type ImportCandidate, type ImportPreview,
   type MappingGuess, type RawTable,
 } from '@clarity/import';
-import { formatCents, formatShortDate, TERMS, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
+import { formatCents, formatShortDate, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, TERMS, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
 import { Check } from '../src/features/Welcome';
 import { pickTextFile } from '../src/platform/files';
 import { useData, useRun, useSession } from '../src/state/session';
@@ -113,6 +113,9 @@ export default function ImportScreen() {
   const included = rows.filter((r) => r.include);
   const recon = useMemo(() => (preview && account ? reconcilePreview(preview, included, { account, transactions: data.transactions }) : null), [preview, included, account, data.transactions]);
   const blocking = included.filter((r) => r.editKind === 'transfer' && !r.otherAccountId).length;
+  // Phase 4A.5.9: pending items that could explain the statement difference (cleared at the bank, still pending here)
+  const reconPending = recon && !recon.note && recon.differenceCents !== 0 ? [...new Map([...(recon.pendingMatches ?? []).flat(), ...(recon.pendingPartial ?? [])].map((t) => [t.id, t])).values()] : [];
+  const [reconUnrelated, setReconUnrelated] = useState(false);
   const setRow = (i: number, p: Partial<Row>) => setRows(rows.map((r, j) => (j === i ? { ...r, ...p } : r)));
 
   const commit = async () => {
@@ -125,7 +128,7 @@ export default function ImportScreen() {
         settings: { hasHeader: file.guess.hasHeader, columns: file.guess.columns!, dateFormat, decimalSeparator: decimal, signConvention: sign },
         decisions: included.map((x) => ({ candidate: x, kind: x.editKind, categoryId: x.editKind === 'transfer' ? null : x.editCategory, merchant: x.merchant, ...(x.otherAccountId ? { otherAccountId: x.otherAccountId } : {}), linkOccurrence: x.linkOccurrence })),
         totalRows: rows.length + preview.errors.length, excludedCount: rows.length - included.length, duplicateCount: rows.filter((x) => x.duplicate).length, errorCount: preview.errors.length,
-        reconciliation: recon, applyAdjustment: applyAdj,
+        reconciliation: recon, applyAdjustment: applyAdj && (reconPending.length === 0 || reconUnrelated), adjustmentUnrelatedToPending: reconUnrelated,
       });
       id = res.batch.id;
       return res.ops;
@@ -228,8 +231,21 @@ export default function ImportScreen() {
             <Card title="Balance check">
               {recon.note ? <T color="textSecondary">{recon.note}</T> : (
                 <>
-                  <T color="textSecondary">Statement on {formatShortDate(recon.statementDate)}: <Money cents={recon.statementBalanceCents} currency={cur} /> · Clarity after import: <Money cents={recon.appBalanceCents} currency={cur} /></T>
-                  {recon.differenceCents === 0 ? <T color="positive">Matches</T> : <Check label={`Record a balance adjustment of ${formatCents(recon.differenceCents, cur, { sign: 'always' })} so this account matches the statement`} value={applyAdj} onChange={setApplyAdj} />}
+                  <T color="textSecondary">Statement on {formatShortDate(recon.statementDate)}: <Money cents={recon.statementBalanceCents} currency={cur} /> · Clarity's posted balance after import: <Money cents={recon.appBalanceCents} currency={cur} /> (like the statement, without items still pending in Clarity)</T>
+                  {reconPending.length > 0 && (
+                    <View testID="import-pending-match" style={{ gap: 6 }}>
+                      <T variant="footnote" style={{ fontFamily: 'Inter_600SemiBold' }}>{PENDING_MATCH_TITLE}</T>
+                      <T variant="footnote" color="textSecondary">{PENDING_MATCH_NOTE}</T>
+                      {reconPending.map((t) => (
+                        <View key={t.id} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                          <T variant="footnote" style={{ flex: 1 }}>{formatShortDate(t.date)} · {t.merchant || 'Pending'} · {t.kind} · pending · {formatCents(t.amountCents, cur, { sign: 'always' })}</T>
+                          <Button title="Mark posted" small kind="secondary" onPress={() => void run((ctx) => markTransactionPosted(ctx, t.id), { undoLabel: 'Marked posted' })} />
+                        </View>
+                      ))}
+                      <Check label={PENDING_MATCH_UNRELATED} value={reconUnrelated} onChange={setReconUnrelated} />
+                    </View>
+                  )}
+                  {recon.differenceCents === 0 ? <T color="positive">Matches</T> : (reconPending.length === 0 || reconUnrelated) && <Check label={`Record a balance adjustment of ${formatCents(recon.differenceCents, cur, { sign: 'always' })} so this account matches the statement`} value={applyAdj} onChange={setApplyAdj} />}
                 </>
               )}
             </Card>

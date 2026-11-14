@@ -3,7 +3,7 @@ import {
   type ImportBatch, type OccurrenceException, type RecurringItem, type SignConvention, type Transaction,
 } from '@clarity/shared';
 import {
-  accountBalance, balanceAsOfDate, buildMerchantMemory, cleanMerchant, expandOccurrences, merchantKey, normalizeDescription, similarity,
+  balanceAsOfDate, buildMerchantMemory, pendingMatches, pendingPartialMatches, postedBalance, cleanMerchant, expandOccurrences, merchantKey, normalizeDescription, similarity,
   suggestOccurrenceMatch, type Occurrence,
 } from '@clarity/engine';
 import { CARD_PAYMENT_RE, REFUND_RE, TRANSFER_RE, suggestCategory, type CategorySource } from './categorize';
@@ -71,6 +71,10 @@ export interface ReconciliationPreview {
   /** Whether the file's running balance column agrees with its amounts. */
   runningBalanceConsistent: boolean | null;
   note?: string;
+  /** Phase 4A.5.9: sets of pending items that add up exactly to the difference (possibly cleared at the bank). */
+  pendingMatches?: Pick<Transaction, 'id' | 'date' | 'merchant' | 'kind' | 'amountCents'>[][];
+  /** Phase 4A.5.9: pending items in the same direction that could explain part of the difference. */
+  pendingPartial?: Pick<Transaction, 'id' | 'date' | 'merchant' | 'kind' | 'amountCents'>[];
 }
 
 export interface ImportPreview {
@@ -247,9 +251,17 @@ export function buildPreview(table: RawTable, s: ImportSettings, ctx: PreviewCon
         ((p.externalId && t.provenance.externalId === p.externalId) ||
           (t.provenance.source === 'import' && t.date === p.date && t.amountCents === p.amountCents && normalizeDescription(t.provenance.rawDescription ?? '') === norm)),
     );
+    // Phase 4A.5.9: a statement row is usually a pending transaction clearing (often days later, with the bank's own
+    // description). Same account and amount, dated 3 days before to 10 days after it: flagged and left out by default.
+    // Never posted automatically; the user decides.
+    const pendingTwin = exact ? undefined : acctTx.find((t) => !consumed.has(t.id) && t.status === 'pending' && t.amountCents === p.amountCents && diffDays(p.date, t.date) >= -3 && diffDays(p.date, t.date) <= 10);
     if (exact) {
       consumed.add(exact.id);
       duplicate = { level: 'exact', txId: exact.id, reason: p.externalId && exact.provenance.externalId === p.externalId ? 'Same transaction ID was already imported.' : 'Already imported from a previous statement.' };
+    } else if (pendingTwin) {
+      consumed.add(pendingTwin.id);
+      const n = pendingTwin.merchant || 'a transaction';
+      duplicate = { level: 'likely', txId: pendingTwin.id, reason: `Same amount as “${n}”, still pending in Clarity (${formatShortDate(pendingTwin.date)}). If this row is that transaction clearing, leave it out and mark “${n}” posted instead, so it isn't counted twice.` };
     } else {
       const likely = acctTx.find(
         (t) =>
@@ -319,6 +331,19 @@ export function reconcilePreview(preview: ImportPreview, included: readonly Impo
       note: 'The statement ends before this account’s opening date, so it does not change the current balance.',
     };
   }
+  // Phase 4A.5.9: a statement that ends before the account's confirmed balance (Update balance) can't correct it:
+  // that later confirmation already includes everything on the statement.
+  const confirmedDate = balanceAsOfDate(ctx.account, ctx.transactions);
+  if (date < confirmedDate) {
+    return {
+      statementBalanceCents: closing.balanceCents!,
+      statementDate: date,
+      appBalanceCents: postedBalance(ctx.account, ctx.transactions, date),
+      differenceCents: 0,
+      runningBalanceConsistent: preview.runningBalanceConsistent,
+      note: `The statement ends on ${formatShortDate(date)}, before this account’s confirmed balance (${formatShortDate(confirmedDate)}), so its ending balance isn’t used to adjust it.`,
+    };
+  }
   const simulated: Transaction[] = [
     ...ctx.transactions,
     ...included.map((c, i) => ({
@@ -328,12 +353,19 @@ export function reconcilePreview(preview: ImportPreview, included: readonly Impo
       ...(c.date < balanceAsOfDate(ctx.account, ctx.transactions) ? { includedInBalance: true } : {}),
     }) as Transaction),
   ];
-  const app = accountBalance(ctx.account, simulated, date);
+  // Phase 4A.5.9: a statement shows POSTED transactions, so it is compared with Clarity's posted balance (pending items
+  // left out), the same convention as onboarding, a new account and Update balance.
+  const app = postedBalance(ctx.account, simulated, date);
+  const differenceCents = closing.balanceCents! - app;
+  const slim = (t: Transaction) => ({ id: t.id, date: t.date, merchant: t.merchant, kind: t.kind, amountCents: t.amountCents });
+  const exactSets = pendingMatches(ctx.account, ctx.transactions, date, differenceCents);
   return {
     statementBalanceCents: closing.balanceCents!,
     statementDate: date,
     appBalanceCents: app,
-    differenceCents: closing.balanceCents! - app,
+    differenceCents,
     runningBalanceConsistent: preview.runningBalanceConsistent,
+    pendingMatches: exactSets.map((set) => set.map(slim)),
+    pendingPartial: pendingPartialMatches(ctx.account, ctx.transactions, date, differenceCents, exactSets).map(slim),
   };
 }

@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { accountUsage, adjustBalance, archiveAccount, markTransactionPosted, previewBalanceUpdate, archiveBalanceReview, archiveTargets, createAccount, createCategory, describeUsage, exportTransactionsCsv, PAUSE_NOTE, updateAccount, updateCategory, updateSettings, WorkspaceStore, type ArchivePlan } from '@clarity/data';
 import { accountBalance, pendingItems, postedBalance } from '@clarity/engine';
 import { BACKUP_EXTENSION } from '@clarity/security';
-import { BALANCE_ENTRY_HINT, CARD_BALANCE_ENTRY_HINT, cardModeOf, centsToDecimalString, formatShortDate, NO_SYNC_NOTICE, parseAmountInput, parseBalanceEntry, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, RECONCILED_MESSAGE, TERMS, UPDATE_BALANCE_HINT, UPDATE_BALANCE_PENDING_NOTE, type Account, type AccountType, type CardBalanceMode } from '@clarity/shared';
+import { BALANCE_ENTRY_HINT, CARD_BALANCE_ENTRY_HINT, cardModeOf, centsToDecimalString, formatShortDate, NO_SYNC_NOTICE, parseAmountInput, parseBalanceEntry, formatCents, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, PENDING_PARTIAL_NOTE, PENDING_PARTIAL_TITLE, RECONCILED_MESSAGE, TERMS, UPDATE_BALANCE_HINT, UPDATE_BALANCE_PENDING_NOTE, type Account, type AccountType, type CardBalanceMode } from '@clarity/shared';
 import { useRouter } from '../lib/router';
 import { downloadText, pickFile, stamp } from '../platform/files';
 import { buildId, checkForUpdate } from '../platform/update';
@@ -328,7 +328,9 @@ function BalanceDialog({ account, onClose }: { account: Account; onClose: () => 
   const parsed = parseBalanceEntry(value, cur, isCard ? cardMode : undefined);
   const preview = parsed.ok ? previewBalanceUpdate(data, account.id, parsed.cents, today) : null;
   const diff = preview?.differenceCents ?? null;
-  const matchIds = new Set((preview?.matches ?? []).flat().map((t) => t.id));
+  // Phase 4A.5.9: exact matches, and pending items in the same direction that could explain part of the difference
+  const matchIds = new Set([...(preview?.matches ?? []).flat(), ...(preview?.partial ?? [])].map((t) => t.id));
+  const exactIds = new Set((preview?.matches ?? []).flat().map((t) => t.id));
   const matchItems = pending.filter((t) => matchIds.has(t.id));
   const blocked = matchItems.length > 0 && !unrelated;
   const shown = (c: number) => (isCard ? -c : c);
@@ -358,14 +360,14 @@ function BalanceDialog({ account, onClose }: { account: Account; onClose: () => 
         <Field label={isCard ? (cardMode === 'owed' ? 'Posted amount owed per bank' : 'Posted credit per bank') : 'Posted balance per bank'} error={error ?? (!parsed.ok && value.trim() ? parsed.message : undefined)}>{(id) => <AmountInput id={id} value={value} onChange={(v) => { setValue(v); setError(null); setUnrelated(false); }} currency={cur} signed autoFocus />}</Field>
         {matchItems.length > 0 && (
           <div className="callout warn" data-testid="pending-match" role="alert">
-            <strong>{PENDING_MATCH_TITLE}</strong>
-            <div className="hint">{PENDING_MATCH_NOTE}</div>
+            <strong>{exactIds.size ? PENDING_MATCH_TITLE : PENDING_PARTIAL_TITLE}</strong>
+            <div className="hint">{exactIds.size ? PENDING_MATCH_NOTE : PENDING_PARTIAL_NOTE(formatCents(shown(diff!), cur, { sign: 'always' }))}</div>
             {(preview?.matches.length ?? 0) > 1 && <div className="hint">{preview!.matches.length} different combinations add up to <Money cents={shown(diff!)} currency={cur} sign="always" />; Clarity can't tell which, if any, has cleared.</div>}
             <ul className="warning-items with-action">
               {matchItems.map((t) => (
                 <li key={t.id}>
                   <span>{formatShortDate(t.date)}</span>
-                  <span>{t.merchant || 'Pending'} · {KIND_LABEL[t.kind]} · pending</span>
+                  <span>{t.merchant || 'Pending'} · {KIND_LABEL[t.kind]} · pending{exactIds.size && !exactIds.has(t.id) ? ' · could be part of it' : ''}</span>
                   <span className="num"><Money cents={shown(t.amountCents)} currency={cur} sign="always" /></span>
                   <button type="button" className="btn btn-ghost btn-sm" onClick={() => markPosted(t.id)} aria-label={`Mark ${t.merchant || 'pending item'} posted`}>Mark posted</button>
                 </li>

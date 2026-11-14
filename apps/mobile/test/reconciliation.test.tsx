@@ -97,3 +97,14 @@ it('Transactions: a backdated item after a confirmed balance is labelled history
   expect(ui.getByText('Already in balance · Nov 13')).toBeTruthy();
   expect(ui.getAllByTestId('history-only').map((n) => n.props.children)).toEqual(['Already included in balance as of Nov 13. Kept in history, not added again.']);
 });
+
+it('Phase 4A.5.9: a +$200 difference with a $300 pending deposit is flagged as possibly part of it; recording needs confirmation', async () => {
+  mockData = withPendingRefund();
+  const ui = await render(<UpdateBalancePanel account={chkOf(mockData)} onDone={jest.fn()} />);
+  await act(async () => { fireEvent.changeText(ui.getByTestId('update-balance-input'), '3071.23'); });
+  expect(ui.getByText('Pending items could explain part of this difference')).toBeTruthy();
+  expect(ui.getByText(/If you record \+\$200\.00 now instead and that item clears later/)).toBeTruthy();
+  expect(ui.getByRole('button', { name: 'Record adjustment' }).props.accessibilityState.disabled).toBe(true);
+  await act(async () => { fireEvent.press(ui.getByText(/The difference isn't related/)); });
+  expect(ui.getByRole('button', { name: 'Record adjustment' }).props.accessibilityState.disabled).toBe(false);
+});

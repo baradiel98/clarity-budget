@@ -14,7 +14,8 @@ import { addTransaction, adjustBalance, applyOps, CommandError, createAccount, d
  *   - Update balance: difference = bank posted − (counted − pending); refused when a set of ≤3 pending items adds up to
  *     it (unless confirmed unrelated); an exact match creates no transaction; either way the confirmed date moves;
  *   - Safe to Spend (no scheduled items, reserve 0) = Σ spendable accounts (counted − pending credits)
- *     − max(0, card owed with pending card credits added back). Savings never count; the EUR account never counts.
+ *     − max(0, card owed with pending card credits added back) − max(0, −(savings counted − pending credits))
+ *     (Phase 4A.5.9: a negative savings balance is owed; a positive one adds nothing). The EUR account never counts.
  * Accounts: checking and cash (spendable, may start negative), savings, a EUR checking, a card (owed or in credit).
  */
 type Item = { id: string; acct: string; cents: number; pending: boolean; history: boolean; date: string; group?: string; kind: TxInput['kind'] | 'adjustment' };
@@ -22,7 +23,7 @@ const NOW = Date.UTC(2026, 10, 13, 12);
 let seq = 0;
 
 it('300 random sequences equal the independent ledger after every step', () => {
-  const tally = { runs: 0, steps: 0, adjustments: 0, exactMatches: 0, pendingMatches: 0, resolvedByPosting: 0, unrelated: 0, history: 0, refusedFlags: 0, transfers: 0, splitTransfers: 0 };
+  const tally = { runs: 0, steps: 0, partialOnly: 0, adjustments: 0, exactMatches: 0, pendingMatches: 0, resolvedByPosting: 0, unrelated: 0, history: 0, refusedFlags: 0, transfers: 0, splitTransfers: 0 };
   for (let run = 0; run < 300; run++) {
     let s = (run * 2654435761 + 99) >>> 0;
     const r = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 2 ** 32; };
@@ -48,7 +49,7 @@ it('300 random sequences equal the independent ledger after every step', () => {
     const pendingOf = (k: string) => items.filter((x) => x.acct === k && !x.history && !before(x) && x.pending);
     const pendingCredits = (k: string) => pendingOf(k).filter((x) => x.cents > 0 && !x.group).reduce((a, x) => a + x.cents, 0);
     const posted = (k: string) => counted(k) - pendingOf(k).reduce((a, x) => a + x.cents, 0);
-    const expectedSts = () => (counted('chk') - pendingCredits('chk')) + (counted('wal') - pendingCredits('wal')) - Math.max(0, pendingCredits('visa') - counted('visa'));
+    const expectedSts = () => (counted('chk') - pendingCredits('chk')) + (counted('wal') - pendingCredits('wal')) - Math.max(0, pendingCredits('visa') - counted('visa')) - Math.max(0, pendingCredits('sav') - counted('sav'));
     const eligible = (k: string, date: string, pending: boolean) => !pending && date >= '2026-11-01' && date <= confirmed[k]! && date <= today;
     const choice = (k: string, date: string, pending: boolean): { flag: boolean | undefined; history: boolean; refused: boolean } => {
       const roll = r();
@@ -127,8 +128,18 @@ it('300 random sequences equal the independent ledger after every step', () => {
         const bankPosted = posted(k) + delta;
         const enteredFigure = k === 'visa' ? -bankPosted : bankPosted; // a card is entered as the amount owed
         const matches = subsetsMatching(k, delta);
+        // Phase 4A.5.9: any pending item in the same direction (not in an exact set) could explain part of it
+        const inExact = new Set(matches.flat().map((x) => x.id));
+        const partial = delta === 0 ? [] : pendingOf(k).filter((x) => x.date <= today && !inExact.has(x.id) && Math.sign(x.cents) === Math.sign(delta));
         const before = data.transactions.length;
-        if (matches.length) {
+        if (!matches.length && partial.length) {
+          expect(() => adjustBalance(ctx(), ids[k]!, enteredFigure, 'x')).toThrow(/could be pending/);
+          const res = adjustBalance(ctx(), ids[k]!, enteredFigure, 'x', today, { unrelatedToPending: true });
+          expect(res.tx!.amountCents).toBe(delta);
+          data = applyOps(data, res.ops);
+          items.push({ id: res.tx!.id, acct: k, cents: delta, pending: false, history: false, date: today, kind: 'adjustment' });
+          tally.partialOnly++;
+        } else if (matches.length) {
           tally.pendingMatches++;
           expect(() => adjustBalance(ctx(), ids[k]!, enteredFigure, 'x')).toThrow(/matches pending/);
           if (r() < 0.5) {
@@ -137,7 +148,7 @@ it('300 random sequences equal the independent ledger after every step', () => {
               data = applyOps(data, markTransactionPosted(ctx(), it.id));
               for (const x of items) if (x.id === it.id || (it.group && x.group === it.group)) x.pending = false;
             }
-            const res = adjustBalance(ctx(), ids[k]!, enteredFigure, 'x');
+            const res = adjustBalance(ctx(), ids[k]!, enteredFigure, 'x', today, { unrelatedToPending: true }); // other same-direction items may remain
             const left = delta - matches[0]!.reduce((a, x) => a + x.cents, 0); // 0: the set was the difference
             expect(res.tx?.amountCents ?? 0).toBe(left);
             data = applyOps(data, res.ops);
@@ -185,5 +196,5 @@ it('300 random sequences equal the independent ledger after every step', () => {
   }
   // the generator really exercised every path
   expect(tally.runs).toBe(300);
-  for (const k of ['adjustments', 'exactMatches', 'pendingMatches', 'resolvedByPosting', 'unrelated', 'history', 'refusedFlags', 'splitTransfers'] as const) expect(tally[k], k).toBeGreaterThan(5);
+  for (const k of ['partialOnly', 'adjustments', 'exactMatches', 'pendingMatches', 'resolvedByPosting', 'unrelated', 'history', 'refusedFlags', 'splitTransfers'] as const) expect(tally[k], k).toBeGreaterThan(5);
 }, 120_000);

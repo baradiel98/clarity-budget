@@ -444,8 +444,23 @@ The step-by-step checklist is in `docs/device-test-script.md`.
 - **Changed expectations:** tests that encoded the defects (4A.5.6 "Already included" on a pending item; O1 legacy flag) now assert the corrected behaviour. No other expectation changed after the owner's "strictly before" decision.
 - **Not verified:** physical devices, simulators, Safari, screen readers.
 
+## 7p. Phase 4A.5.9: final reconciliation integrity audit
+
+| Scenario | Before | After |
+|---|---:|---:|
+| Checking $1,000 + Savings −$50 + Cash $100 | $1,100 | **$1,050** |
+| Same + $100 transfer checking → savings Nov 20 | — | $1,000 (debt repaid once, not $950) |
+| Archived savings −$50 | $1,100 | **$1,050** |
+| Import: pending $300 deposit not on the statement | $690 (then $990 posted) | **$990** (then $1,290) |
+| Import: pending $120 purchase not on the statement | $990 | **$870** |
+| Import: pending deposit cleared, bank's own description | duplicate + −$300 adjustment | row flagged; Mark posted → $1,290, no adjustment |
+| Update balance +$200 with a $300 pending deposit | recorded silently | named as possible partial match; confirmation needed |
+
+- **Tests:** engine `savings-liability.test.ts` (16, incl. 300 random scenarios vs an independent model); data `import-reconciliation.test.ts` (17: import, partial matches, transfers); the 4A.5.8 ledger now includes partial matches and negative savings; web `e2e/phase4a59.spec.ts` (3); mobile component test (1 more).
+- **Changed expectations:** 4 tests that encoded the old savings rule; 1 that encoded "partial match not flagged".
+- **Not verified:** physical devices, simulators, Safari, screen readers.
+
 ## 8. Owner decisions still open
-- Phase 4A.5.8: whether a non-spendable account below zero (savings at −$50) should count against Safe to Spend (currently not, per the Phase 4A.4.4 rule).
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.
 - Pricing / business model.

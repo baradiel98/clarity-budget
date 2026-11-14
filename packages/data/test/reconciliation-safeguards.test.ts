@@ -67,13 +67,14 @@ describe('D1/D4: signed balances on every account type; the sign is never droppe
     expect(w.warnings().some((t) => /Short by/.test(t))).toBe(false);
   });
 
-  it('savings at −$50 (not spendable) next to $500 checking: recorded −$50; Safe to Spend $500 (documented Phase 4A.4.4 rule); update to −$20', () => {
+  it('savings at −$50 (not spendable) next to $500 checking: recorded −$50; Safe to Spend $450 (Phase 4A.5.9); update to −$20 → $480', () => {
     const w = new W();
     w.acct('Checking', 'checking', 50000);
     const s = w.acct('Savings', 'savings', -5000);
-    expect([w.rec(s), w.sts()]).toEqual([-5000, 50000]);
+    expect([w.rec(s), w.sts()]).toEqual([-5000, 45000]);
+    expect(w.warnings()).toContain('Savings is overdrawn by $50.00');
     expect(w.adjust(s, -2000)!.amountCents).toBe(3000);
-    expect([w.rec(s), w.sts()]).toEqual([-2000, 50000]);
+    expect([w.rec(s), w.sts()]).toEqual([-2000, 48000]);
   });
 
   it('cash at −$50 next to $500 checking: Safe to Spend $450 and the wallet is named as overdrawn; update to $10 clears it', () => {
@@ -181,11 +182,14 @@ describe('D2: Update balance never counts a pending item twice', () => {
     expect(w.tx(dep!.id).status).toBe('pending');
     expect([w.rec(c), w.sts()]).toEqual([110000, 80000]); // 500 + 300 adj + 300 pending; spendable excludes the pending 300
   });
-  it('partial: a $350 difference with one $300 pending item is not a match; recorded normally', () => {
+  it('partial (Phase 4A.5.9): a $350 difference with one $300 pending deposit is not exact, but the deposit could explain part of it → asked first; confirmed unrelated → recorded, deposit kept pending', () => {
     const { w, c } = base();
-    w.add(inc(c, '2026-11-12', 30000, P));
-    expect(previewBalanceUpdate(w.data, c, 85000, w.today).matches).toEqual([]);
-    expect(w.adjust(c, 85000)!.amountCents).toBe(35000);
+    const [d] = w.add(inc(c, '2026-11-12', 30000, { ...P, merchant: 'Store return' }));
+    const p = previewBalanceUpdate(w.data, c, 85000, w.today);
+    expect([p.matches, p.partial.map((t) => t.id)]).toEqual([[], [d!.id]]);
+    expect(errorOf(() => w.adjust(c, 85000))).toMatchObject({ field: 'pending_match', message: expect.stringMatching(/^Part of the difference \(\+\$350\.00\) could be pending item that cleared: Store return \+\$300\.00 on Nov 12/) });
+    const adj = w.adjust(c, 85000, { unrelatedToPending: true })!;
+    expect([adj.amountCents, adj.notes, w.tx(d!.id).status]).toEqual([35000, 'Confirmed not related to pending item (kept pending): Store return +$300.00 on Nov 12', 'pending']);
   });
   it('two pending deposits of the same amount: two separate matches, neither assumed; posting either one reconciles', () => {
     const { w, c } = base();

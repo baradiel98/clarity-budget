@@ -1,10 +1,10 @@
 import { AlertTriangle, CheckCircle2, CopyCheck, FileUp, Link2, ListChecks, ShieldCheck, Upload } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { commitImport, undoImportBatch as undoImport, type ImportDecision } from '@clarity/data';
+import { commitImport, markTransactionPosted, undoImportBatch as undoImport, type ImportDecision } from '@clarity/data';
 import {
   checkImportFile, dataRowCount, DATE_FORMATS, headerSignature, NO_DATA_ROWS_MESSAGE, reconcilePreview, type ImportCandidate, type ImportPreview, type ImportSettings,
 } from '@clarity/import';
-import { formatShortDate, TERMS, type ColumnMapping, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
+import { formatShortDate, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, TERMS, type ColumnMapping, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
 import { useRouter } from '../lib/router';
 import { sha256Hex } from '../platform/files';
 import { useData, useRun, useSession } from '../state/session';
@@ -124,6 +124,9 @@ export function ImportPage() {
   const included = rows.filter((r) => r.include);
   const recon = useMemo(() => (preview && account ? reconcilePreview(preview, included, { account, transactions: data.transactions }) : null), [preview, included, account, data.transactions]);
   const blocking = included.filter((r) => r.editKind === 'transfer' && !r.otherAccountId);
+  // Phase 4A.5.9: pending items that could explain the statement difference (cleared at the bank, still pending here)
+  const reconPending = recon && !recon.note && recon.differenceCents !== 0 ? [...new Map([...(recon.pendingMatches ?? []).flat(), ...(recon.pendingPartial ?? [])].map((t) => [t.id, t])).values()] : [];
+  const [reconUnrelated, setReconUnrelated] = useState(false);
 
   const commit = async () => {
     if (!preview || !account || !file || !columns || !dateFormat || !analysis) return;
@@ -135,7 +138,7 @@ export function ImportPage() {
         settings: { hasHeader, columns, dateFormat, decimalSeparator: decimal, signConvention: sign },
         decisions: included.map((x) => ({ candidate: x, kind: x.editKind, categoryId: x.editKind === 'transfer' ? null : x.editCategory, merchant: x.merchant, ...(x.otherAccountId ? { otherAccountId: x.otherAccountId } : {}), linkOccurrence: x.linkOccurrence })),
         totalRows: rows.length + preview.errors.length, excludedCount: rows.length - included.length, duplicateCount: rows.filter((x) => x.duplicate).length, errorCount: preview.errors.length,
-        reconciliation: recon, applyAdjustment: applyAdj,
+        reconciliation: recon, applyAdjustment: applyAdj && (reconPending.length === 0 || reconUnrelated), adjustmentUnrelatedToPending: reconUnrelated,
       });
       batchId = res.batch.id;
       return res.ops;
@@ -364,13 +367,31 @@ export function ImportPage() {
                 <>
                   <div className="facts" style={{ borderTop: 0, marginTop: 8, paddingTop: 0 }}>
                     <div><div className="k">Statement balance on {formatShortDate(recon.statementDate)}</div><div className="v"><Money cents={recon.statementBalanceCents} currency={cur} /></div></div>
-                    <div><div className="k">Clarity after this import</div><div className="v"><Money cents={recon.appBalanceCents} currency={cur} /></div></div>
+                    <div><div className="k">Clarity's posted balance after this import</div><div className="v"><Money cents={recon.appBalanceCents} currency={cur} /></div></div>
                     <div><div className="k">Difference</div><div className={`v ${recon.differenceCents ? 'warn' : 'pos'}`}>{recon.differenceCents === 0 ? <><CheckCircle2 size={14} /> Matches</> : <Money cents={recon.differenceCents} currency={cur} sign="always" />}</div></div>
                   </div>
                   {recon.runningBalanceConsistent === false && <p className="t-footnote warn">The file's running balance doesn't agree with its amounts. Check the “money out” setting.</p>}
+                  <p className="t-footnote muted">Like the statement, this leaves out items still pending in Clarity.</p>
+                  {reconPending.length > 0 && (
+                    <div className="callout warn" data-testid="import-pending-match" role="alert">
+                      <strong>{PENDING_MATCH_TITLE}</strong>
+                      <div className="hint">{PENDING_MATCH_NOTE}</div>
+                      <ul className="warning-items with-action">
+                        {reconPending.map((t) => (
+                          <li key={t.id}>
+                            <span>{formatShortDate(t.date)}</span>
+                            <span>{t.merchant || 'Pending'} · {t.kind} · pending</span>
+                            <span className="num"><Money cents={t.amountCents} currency={cur} sign="always" /></span>
+                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => void run((ctx) => markTransactionPosted(ctx, t.id), { undoLabel: 'Marked posted' })} aria-label={`Mark ${t.merchant || 'pending item'} posted`}>Mark posted</button>
+                          </li>
+                        ))}
+                      </ul>
+                      <label className="check"><input type="checkbox" checked={reconUnrelated} onChange={(e) => setReconUnrelated(e.target.checked)} data-testid="import-pending-unrelated" /><span>{PENDING_MATCH_UNRELATED}</span></label>
+                    </div>
+                  )}
                   {recon.differenceCents !== 0 && (
                     <label className="check" style={{ marginTop: 12 }}>
-                      <input type="checkbox" checked={applyAdj} onChange={(e) => setApplyAdj(e.target.checked)} />
+                      <input type="checkbox" checked={applyAdj && (reconPending.length === 0 || reconUnrelated)} disabled={reconPending.length > 0 && !reconUnrelated} onChange={(e) => setApplyAdj(e.target.checked)} />
                       <span>Record a balance adjustment of <Money cents={recon.differenceCents} currency={cur} sign="always" /> so this account matches the statement. <span className="hint">Usually caused by transactions from before you started using Clarity, or rows you excluded.</span></span>
                     </label>
                   )}

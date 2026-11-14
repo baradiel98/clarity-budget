@@ -59,9 +59,9 @@ describe('1. Archiving never hides a negative balance', () => {
     expect([sts(i), sts(archive(i, 'wal'))]).toEqual([80000, 80000]);
   });
 
-  it('savings (not spendable) at −$100: not counted before, not counted after — archiving changes nothing', () => {
+  it('savings (not spendable) at −$100: counted before and after (Phase 4A.5.9 owner decision) — archiving changes nothing', () => {
     const i = input({ today: TODAY, accounts: [chk(100000), A('sav', 'Savings', 'savings', -10000)] });
-    expect([sts(i), sts(archive(i, 'sav'))]).toEqual([100000, 100000]);
+    expect([sts(i), sts(archive(i, 'sav'))]).toEqual([90000, 90000]); // before Phase 4A.5.9: [100000, 100000]
     expect(buildDashboard(archive(i, 'sav')).balances.totalAssetsCents).toBe(90000); // still in the totals as owed
   });
 

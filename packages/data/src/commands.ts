@@ -3,7 +3,7 @@ import {
   type MappingProfile, type OccurrenceException, type Provenance, type RecurringAmount, type RecurringItem, type RecurringKind, type Schedule, type Settings,
   type Split, type Transaction, type TxKind, type TxStatus, type WeekendRule, type WorkspaceData,
 } from '@clarity/shared';
-import { accountBalance, balanceAsOfDate, inclusionProblem, pendingMatches, postedBalance, validateTransaction, validateTransferPair, type InclusionProblem, type Occurrence, type ValidationIssue } from '@clarity/engine';
+import { accountBalance, balanceAsOfDate, inclusionProblem, pendingMatches, pendingPartialMatches, postedBalance, validateTransaction, validateTransferPair, type InclusionProblem, type Occurrence, type ValidationIssue } from '@clarity/engine';
 import type { ImportCandidate, ImportSettings, ReconciliationPreview } from '@clarity/import';
 import { applyOps as applyLocal, type Op } from './ops';
 
@@ -131,10 +131,9 @@ export function archiveBalanceNote(account: Account, balanceCents: Cents, baseCu
   if (account.currency !== baseCurrency) {
     return `${name} is at ${f(balanceCents)}. It's in ${account.currency}, so it isn't counted in Safe to Spend (${baseCurrency}), before or after archiving.`;
   }
-  if (account.spendable) {
-    return `${name} is overdrawn by ${f(-balanceCents)}. Archiving doesn't clear it: Safe to Spend keeps counting ${f(-balanceCents)} against your spendable accounts until ${name} is back to ${f(0)}.`;
-  }
-  return `${name} is at ${f(balanceCents)}. It isn't marked as spendable, so it isn't counted in Safe to Spend now, and archiving doesn't change that. It stays in your totals as money owed.`;
+  // Phase 4A.5.9 (owner decision): a negative balance counts against Safe to Spend whether or not the account is
+  // spendable (savings included), before and after archiving.
+  return `${name} is overdrawn by ${f(-balanceCents)}. Archiving doesn't clear it: Safe to Spend keeps counting ${f(-balanceCents)} against your spendable accounts until ${name} is back to ${f(0)}.`;
 }
 
 export function accountUsage(data: WorkspaceData, accountId: ID, today: ISODate): AccountUsage {
@@ -225,6 +224,8 @@ export interface BalanceUpdatePreview {
   differenceCents: Cents;
   /** Sets of pending items whose amounts add up exactly to the difference (possibly cleared at the bank). */
   matches: Transaction[][];
+  /** Phase 4A.5.9: pending items in the same direction that could explain part of the difference. */
+  partial: Transaction[];
 }
 
 export function previewBalanceUpdate(data: WorkspaceData, accountId: ID, enteredCents: Cents, date: ISODate): BalanceUpdatePreview {
@@ -233,7 +234,8 @@ export function previewBalanceUpdate(data: WorkspaceData, accountId: ID, entered
   const bankCents = a.type === 'credit_card' ? 0 - enteredCents : enteredCents;
   const postedCents = postedBalance(a, data.transactions, date);
   const differenceCents = bankCents - postedCents;
-  return { postedCents, bankCents, differenceCents, matches: pendingMatches(a, data.transactions, date, differenceCents) };
+  const matches = pendingMatches(a, data.transactions, date, differenceCents);
+  return { postedCents, bankCents, differenceCents, matches, partial: pendingPartialMatches(a, data.transactions, date, differenceCents, matches) };
 }
 
 /**
@@ -263,7 +265,11 @@ export function adjustBalance(
     const items = [...new Map(p.matches.flat().map((t) => [t.id, t])).values()];
     throw new CommandError([{ field: 'pending_match', message: `The difference (${formatCents(p.differenceCents, a.currency, { sign: 'always' })}) matches pending ${items.length === 1 ? 'item' : 'items'}: ${items.map(describe).join('; ')}. If it has cleared at your bank, mark it posted first; otherwise confirm the difference isn't related.` }]);
   }
-  const unrelated = p.matches.length ? [...new Map(p.matches.flat().map((t) => [t.id, t])).values()] : [];
+  // Phase 4A.5.9: a pending item in the same direction could explain part of the difference
+  if (p.partial.length && !opts.unrelatedToPending) {
+    throw new CommandError([{ field: 'pending_match', message: `Part of the difference (${formatCents(p.differenceCents, a.currency, { sign: 'always' })}) could be pending ${p.partial.length === 1 ? 'item' : 'items'} that cleared: ${p.partial.map(describe).join('; ')}. If one has cleared, mark it posted first; otherwise confirm the difference isn't related.` }]);
+  }
+  const unrelated = [...new Map([...p.matches.flat(), ...p.partial].map((t) => [t.id, t])).values()];
   const tx: Transaction = {
     id: ctx.newId('tx'), accountId, date, amountCents: p.differenceCents, kind: 'adjustment', status: 'confirmed', merchant: 'Balance adjustment',
     categoryId: null, notes: unrelated.length ? `Confirmed not related to pending ${unrelated.length === 1 ? 'item' : 'items'} (kept pending): ${unrelated.map(describe).join('; ')}` : '',
@@ -640,6 +646,8 @@ export interface CommitImportInput {
   reconciliation: ReconciliationPreview | null;
   /** Explicit user choice to record the reconciliation difference as an adjustment. */
   applyAdjustment: boolean;
+  /** Phase 4A.5.9: the user confirmed the difference isn't explained by the pending items the reconciliation names. */
+  adjustmentUnrelatedToPending?: boolean;
 }
 
 /** Writes every approved row, the batch record and the saved column mapping in one atomic batch. */
@@ -691,9 +699,15 @@ export function commitImport(ctx: Ctx, input: CommitImportInput): { ops: Op[]; b
 
   let adjustmentId: ID | undefined;
   if (input.applyAdjustment && input.reconciliation && input.reconciliation.differenceCents !== 0 && !input.reconciliation.note) {
+    // Phase 4A.5.9: the same safeguard as Update balance: a difference that pending items could explain isn't recorded
+    // until the user resolves them (mark posted) or confirms it isn't related; nothing is posted automatically.
+    const named = [...(input.reconciliation.pendingMatches ?? []).flat(), ...(input.reconciliation.pendingPartial ?? [])];
+    const items = [...new Map(named.map((t) => [t.id, t])).values()];
+    const list = items.map((t) => `${t.merchant || t.kind} ${formatCents(t.amountCents, account.currency, { sign: 'always' })} on ${formatShortDate(t.date)}`).join('; ');
+    if (items.length && !input.adjustmentUnrelatedToPending) fail(`The statement difference could be pending ${items.length === 1 ? 'item' : 'items'} that cleared: ${list}. Mark it posted first, or confirm the difference isn't related.`, 'pending_match');
     const adj: Transaction = {
       id: ctx.newId('tx'), accountId: account.id, date: input.reconciliation.statementDate, amountCents: input.reconciliation.differenceCents,
-      kind: 'adjustment', status: 'confirmed', merchant: 'Balance adjustment', categoryId: null, notes: '',
+      kind: 'adjustment', status: 'confirmed', merchant: 'Balance adjustment', categoryId: null, notes: items.length ? `Confirmed not related to pending ${items.length === 1 ? 'item' : 'items'} (kept pending): ${list}` : '',
       adjustmentReason: `Matched closing balance on imported statement ${input.fileName}`, provenance: { source: 'import', importBatchId: batchId },
       createdAt: ctx.now, updatedAt: ctx.now,
     };
