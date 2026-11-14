@@ -572,6 +572,10 @@ tr.fresh > td:first-child { animation-name: fresh; }
 .month-body[data-dir='next'] { animation: month-next var(--motion-base) var(--ease-out); }
 .month-body[data-dir='prev'] { animation: month-prev var(--motion-base) var(--ease-out); }
 .warning-row .d { font-size: 13px; color: var(--c-text-secondary); }
+/* Phase 4A.4.2: every dated amount behind a warning, in the full list (Planning) */
+.warning-items { list-style: none; margin: 6px 0 0; padding: 0; font-size: 13px; }
+.warning-items li { display: grid; grid-template-columns: 4.5em 1fr auto; gap: 8px; padding: 2px 0; }
+.warning-items li span:nth-child(2) { min-width: 0; overflow-wrap: anywhere; }
 
 /* ───────── charts ───────── */
 .chart-box { display: flex; flex-direction: column; margin-top: 18px; touch-action: pan-y; }

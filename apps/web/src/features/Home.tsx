@@ -249,7 +249,7 @@ export function Home() {
                     </div>
                   </div>
                 ))}
-                {d.warnings.length > 5 && <button className="btn-link" onClick={() => navigate('/planning')}>{d.warnings.length - 5} more in Planning</button>}
+                {d.warnings.length > 5 && <button className="btn-link" data-testid="more-warnings" onClick={() => navigate('/planning#warnings')}>{d.warnings.length - 5} more in Planning</button>}
               </section>
             )}
 

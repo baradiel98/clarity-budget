@@ -298,6 +298,24 @@ The step-by-step checklist is in `docs/device-test-script.md`.
   - `apps/mobile/test/financial-integrity.test.tsx`: 1 test, same F1 result as web ($1,927.17).
 - **Not verified:** physical devices, Safari, real card terms (interest, fees, limits), bank transfer timing.
 
+## 7i. Phase 4A.4.2: archived accounts, complete warnings, currency safeguards
+
+| Issue | Example | Before | After |
+|---|---|---|---|
+| Archived account | Checking $1,000; archived account $0 pays rent $800 | $1,000, no warning | **$200**, "Rent: Old checking can't cover it" + archived-items warning |
+| Archived account with money | Same, archived account $2,000 | $1,000 | $1,000 (it pays the rent; its balance isn't spendable) |
+| Hidden warnings | 6+ warnings | sixth onward shown nowhere | Home: 5 + "N more in Planning"; Planning lists all, with every date |
+| Competing transfers | Savings $500 → Holiday $500 and Rent top-up $500 | "other transfers … are paid first" | names Holiday fund, requested/counted/not counted, "cautious assumption" |
+| Currency | €500 EUR savings → USD checking, rent $500, checking $100 | +$100 (€ added as $) | **−$400** (nothing arrives in USD), warning |
+
+- **Archiving:** a review (web dialog, mobile screen) lists every active scheduled item. Each item can be kept, moved to another active account, or paused; Cancel changes nothing.
+- **Tests:**
+  - `packages/engine/test/archived-currency-warnings.test.ts`: 18 tests;
+  - `packages/data/test/archive.test.ts`: 7;
+  - `apps/web/e2e/phase4a42.spec.ts`: 3;
+  - `apps/mobile/test/warnings.test.tsx`: 2.
+- **Not verified:** physical devices, Safari, rendering of the routed mobile screens (archive review, Planning list) on a device.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

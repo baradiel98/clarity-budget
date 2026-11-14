@@ -77,6 +77,26 @@ export interface UnfundedTransfer {
   fundedCents: Cents;
   /** The sending account's projected balance when the transfer was due (may be negative). */
   sourceBalanceCents: Cents;
+  /**
+   * Other transfers from the same account that day that received money (Phase 4A.4.2). sameGroup = shared in
+   * proportion with this one; otherwise it was funded first under the same-day priority (a forecast assumption).
+   */
+  competing: { label: string; requestedCents: Cents; fundedCents: Cents; sameGroup: boolean }[];
+}
+
+/** A transfer between accounts in different currencies (Phase 4A.4.2). Never converted. */
+export interface CurrencyConflict {
+  eventId: string;
+  label: string;
+  date: ISODate;
+  fromAccountId: ID;
+  toAccountId: ID;
+  fromCurrency: CurrencyCode;
+  toCurrency: CurrencyCode;
+  /** Signed amount leaving the sending account, in its own currency. */
+  cents: Cents;
+  /** false = not counted at all (a full-balance card payment has no amount in the sender's currency). */
+  counted: boolean;
 }
 
 /** A payment due from a non-spendable account (savings) that holds less than the payment (Phase 4A.4). */
@@ -145,6 +165,8 @@ export interface Forecast {
   coveredPayments: CoveredPayment[];
   /** Planned cash advances (borrowed money; not counted in Safe to Spend until repaid). */
   cashAdvances: CashAdvance[];
+  /** Transfers between accounts in different currencies: only the money leaving is counted (Phase 4A.4.2). */
+  currencyConflicts: CurrencyConflict[];
 }
 
 function legsForOccurrence(o: Occurrence, amount: Cents): Leg[] {
@@ -282,6 +304,7 @@ export function buildForecast(input: ForecastInput): Forecast {
   const shortfalls: AccountShortfall[] = [];
   const covered: CoveredPayment[] = [];
   const advanceList: CashAdvance[] = [];
+  const conflicts: CurrencyConflict[] = [];
   /** Per card: planned cash-advance money still owed (never more than the card's projected balance owed). */
   const advanceOwed = new Map<ID, Cents>();
   const total = diffDays(horizonEnd, today);
@@ -314,7 +337,8 @@ export function buildForecast(input: ForecastInput): Forecast {
     const typeOf = (id: ID) => accountById.get(id)?.type;
     const coverable = (id: ID) => {
       const a = accountById.get(id);
-      return !!a && !cashIds.has(id) && a.type !== 'credit_card' && !a.archived && a.currency === baseCurrency;
+      // Archived accounts too (Phase 4A.4.2): archiving never removes what is scheduled from them.
+      return !!a && !cashIds.has(id) && a.type !== 'credit_card' && a.currency === baseCurrency;
     };
     const paidOut = new Map<ID, string[]>();
     const noteOut = (id: ID, label: string) => paidOut.set(id, [...(paidOut.get(id) ?? []), label]);
@@ -327,6 +351,19 @@ export function buildForecast(input: ForecastInput): Forecast {
     const reserveMoves: Move[] = [];
     const payments: ForecastEvent[] = [];
     const incoming: ForecastEvent[] = [];
+    // 0. Transfers between accounts in different currencies (Phase 4A.4.2): Clarity never converts. The money
+    //    leaving the sending account is counted there; nothing is counted as arriving. A full-balance card payment
+    //    across currencies has no amount in the sender's currency, so it is not counted at all (and warned about).
+    for (const e of events) {
+      const t = transferLegs(e);
+      if (!t) continue;
+      const fromCur = accountById.get(t.src.accountId)?.currency;
+      const toCur = accountById.get(t.dst.accountId)?.currency;
+      if (!fromCur || !toCur || fromCur === toCur) continue;
+      const cardBalance = e.occurrence?.amountBasis === 'card_balance';
+      conflicts.push({ eventId: e.id, label: e.label, date, fromAccountId: t.src.accountId, toAccountId: t.dst.accountId, fromCurrency: fromCur, toCurrency: toCur, cents: t.src.deltaCents, counted: !cardBalance });
+      e.legs = cardBalance ? [] : [t.src];
+    }
     // 1a. moves out of spendable accounts (and card-to-card), both legs
     for (const e of events) {
       const t = transferLegs(e);
@@ -425,7 +462,10 @@ export function buildForecast(input: ForecastInput): Forecast {
       } else {
         m.e.legs = [{ accountId: m.src, deltaCents: -m.funded }, { accountId: m.dst, deltaCents: m.funded }];
         m.e.unfundedCents = short;
-        unfunded.push({ eventId: m.e.id, label: m.e.label, date, fromAccountId: m.src, toAccountId: m.dst, requestedCents: m.requested, fundedCents: m.funded, sourceBalanceCents: sourceBalance.get(m.src) ?? 0 });
+        const competing = reserveMoves
+          .filter((o) => o !== m && o.src === m.src && o.funded > 0)
+          .map((o) => ({ label: o.e.label, requestedCents: o.requested, fundedCents: o.funded, sameGroup: o.cls === m.cls }));
+        unfunded.push({ eventId: m.e.id, label: m.e.label, date, fromAccountId: m.src, toAccountId: m.dst, requestedCents: m.requested, fundedCents: m.funded, sourceBalanceCents: sourceBalance.get(m.src) ?? 0, competing });
       }
     }
     syncAdvances();
@@ -458,6 +498,7 @@ export function buildForecast(input: ForecastInput): Forecast {
     accountShortfalls: shortfalls,
     coveredPayments: covered,
     cashAdvances: advanceList,
+    currencyConflicts: conflicts,
   };
 }
 

@@ -1,9 +1,9 @@
 import { Archive, ArchiveRestore, Download, KeyRound, Pencil, Plus, RefreshCw, Scale, ShieldCheck, Trash2, Upload } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { adjustBalance, createAccount, createCategory, exportTransactionsCsv, updateAccount, updateCategory, updateSettings, WorkspaceStore } from '@clarity/data';
+import { accountUsage, adjustBalance, archiveAccount, archiveTargets, createAccount, createCategory, describeUsage, exportTransactionsCsv, updateAccount, updateCategory, updateSettings, WorkspaceStore, type ArchivePlan } from '@clarity/data';
 import { accountBalance } from '@clarity/engine';
 import { BACKUP_EXTENSION } from '@clarity/security';
-import { centsToDecimalString, NO_SYNC_NOTICE, parseAmountInput, TERMS, type Account, type AccountType } from '@clarity/shared';
+import { centsToDecimalString, formatShortDate, NO_SYNC_NOTICE, parseAmountInput, TERMS, type Account, type AccountType } from '@clarity/shared';
 import { useRouter } from '../lib/router';
 import { downloadText, pickFile, stamp } from '../platform/files';
 import { buildId, checkForUpdate } from '../platform/update';
@@ -36,7 +36,7 @@ export function Settings() {
   const run = useRun();
   const toast = useToast();
   const cur = data.settings.baseCurrency;
-  const [dialog, setDialog] = useState<null | { kind: 'account'; account?: Account } | { kind: 'balance'; account: Account } | { kind: 'category' } | { kind: 'passphrase' } | { kind: 'recovery'; key?: string } | { kind: 'restore' } | { kind: 'csv' } | { kind: 'delete' }>(null);
+  const [dialog, setDialog] = useState<null | { kind: 'account'; account?: Account } | { kind: 'balance'; account: Account } | { kind: 'category' } | { kind: 'passphrase' } | { kind: 'recovery'; key?: string } | { kind: 'restore' } | { kind: 'csv' } | { kind: 'delete' } | { kind: 'archive'; account: Account }>(null);
   const [reserve, setReserve] = useState(centsToDecimalString(data.settings.minReserveCents));
 
   useEffect(() => {
@@ -72,7 +72,13 @@ export function Settings() {
                       <span className="num" style={{ fontWeight: 600 }}>{a.type === 'credit_card' ? <>Owed <Money cents={-bal} currency={cur} /></> : <Money cents={bal} currency={cur} />}</span>
                       <button className="icon-btn" title="Update balance" aria-label={`Update balance of ${a.name}`} onClick={() => setDialog({ kind: 'balance', account: a })}><Scale size={15} /></button>
                       <button className="icon-btn" aria-label={`Edit ${a.name}`} onClick={() => setDialog({ kind: 'account', account: a })}><Pencil size={15} /></button>
-                      <button className="icon-btn" aria-label={a.archived ? `Restore ${a.name}` : `Archive ${a.name}`} onClick={() => void run((ctx) => updateAccount(ctx, a.id, { archived: !a.archived }))}>{a.archived ? <ArchiveRestore size={15} /> : <Archive size={15} />}</button>
+                      <button className="icon-btn" aria-label={a.archived ? `Restore ${a.name}` : `Archive ${a.name}`} onClick={() => {
+                        if (a.archived) return void run((ctx) => updateAccount(ctx, a.id, { archived: false }));
+                        // Phase 4A.4.2: review what still uses the account before archiving it
+                        const u = accountUsage(data, a.id, today);
+                        if (u.recurring.length || u.planned.length) setDialog({ kind: 'archive', account: a });
+                        else void run((ctx) => archiveAccount(ctx, a.id));
+                      }}>{a.archived ? <ArchiveRestore size={15} /> : <Archive size={15} />}</button>
                     </div>
                   </div>
                 );
@@ -158,8 +164,65 @@ export function Settings() {
       {dialog?.kind === 'recovery' && dialog.key && <Dialog title="New recovery key" onClose={() => setDialog(null)}><RecoveryKeyStep recoveryKey={dialog.key} inDialog onDone={() => setDialog(null)} /></Dialog>}
       {dialog?.kind === 'restore' && <RestoreDialog onClose={() => setDialog(null)} />}
       {dialog?.kind === 'csv' && <CsvDialog onClose={() => setDialog(null)} />}
+      {dialog?.kind === 'archive' && <ArchiveDialog account={dialog.account} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'delete' && <DeleteEverything onClose={() => setDialog(null)} onDone={() => setDialog(null)} />}
     </div>
+  );
+}
+
+/**
+ * Archive an account that scheduled items still use (Phase 4A.4.2). Each item is left as it is unless the user
+ * explicitly moves it to another active account or pauses it. Cancel changes nothing.
+ */
+function ArchiveDialog({ account, onClose }: { account: Account; onClose: () => void }) {
+  const data = useData();
+  const { today } = useSession();
+  const run = useRun();
+  const cur = data.settings.baseCurrency;
+  const usage = accountUsage(data, account.id, today);
+  const [choice, setChoice] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
+  const confirm = async () => {
+    const plan: ArchivePlan = { reassign: {}, pause: [] };
+    for (const [id, c] of Object.entries(choice)) {
+      if (c === 'pause') plan.pause!.push(id);
+      else if (c.startsWith('move:')) plan.reassign![id] = c.slice(5);
+    }
+    const r = await run((ctx) => archiveAccount(ctx, account.id, plan), { undoLabel: `Archived ${account.name}` });
+    if (!r.ok) return setError(r.errors[0]?.message ?? 'Could not archive.');
+    onClose();
+  };
+  return (
+    <Dialog
+      title={`Archive ${account.name}?`}
+      onClose={onClose}
+      footer={<><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" onClick={() => void confirm()} data-testid="archive-confirm">Archive account</button></>}
+    >
+      <div className="stack" data-testid="archive-review">
+        <p className="t-callout" style={{ margin: 0 }}>These are still scheduled with {account.name}. Choose what happens to each one. Nothing changes unless you choose it.</p>
+        {usage.recurring.map((u) => (
+          <Field key={u.item.id} label={describeUsage(u, data.accounts)}>
+            {(id) => (
+              <select id={id} className="select" value={choice[u.item.id] ?? 'keep'} onChange={(e) => setChoice({ ...choice, [u.item.id]: e.target.value })}>
+                <option value="keep">Keep with {account.name} (still counted)</option>
+                {archiveTargets(u, data.accounts, account.id).map((a) => <option key={a.id} value={`move:${a.id}`}>Move to {a.name}</option>)}
+                <option value="pause">Pause it (not counted until you resume it)</option>
+              </select>
+            )}
+          </Field>
+        ))}
+        {usage.planned.length > 0 && (
+          <div>
+            <div className="t-footnote" style={{ fontWeight: 600 }}>Planned transactions (they stay with {account.name}; edit them in Transactions)</div>
+            <ul className="warning-items">{usage.planned.map((t) => <li key={t.id}><span>{formatShortDate(t.date)}</span><span>{t.merchant || 'Planned transaction'}</span><span className="num"><Money cents={t.amountCents} currency={cur} /></span></li>)}</ul>
+          </div>
+        )}
+        <p className="hint" style={{ margin: 0 }}>
+          Kept items are still counted: bills and transfers out are paid from what {account.name} holds, and anything it can't cover is counted against your spendable accounts. Money going into an archived account isn't counted as spendable. Paused items aren't counted in Safe to Spend until you resume them in Planning.
+        </p>
+        {error && <p className="t-footnote neg" role="alert" style={{ margin: 0 }}>{error}</p>}
+      </div>
+    </Dialog>
   );
 }
 

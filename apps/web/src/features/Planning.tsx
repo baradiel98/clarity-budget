@@ -6,7 +6,7 @@ import {
   type RecurringInput,
 } from '@clarity/data';
 import {
-  annualEquivalentCents, applyWeekendRule, balanceOnDate, buildForecast, computeSafeToSpend, describeSchedule, monthlyEquivalentCents, nextScheduleDate, planningWindowEnd, type Occurrence,
+  annualEquivalentCents, applyWeekendRule, balanceOnDate, buildDashboard, buildForecast, computeSafeToSpend, describeSchedule, monthlyEquivalentCents, nextScheduleDate, planningWindowEnd, type Occurrence,
 } from '@clarity/engine';
 import {
   addDays, centsToDecimalString, endOfMonth, formatCents, formatShortDate, formatWeekdayDate, parseAmountInput, parseISO, TERMS, type RecurringAmount,
@@ -22,6 +22,7 @@ import { Segmented } from '../ui/Segmented';
 import { useToast } from '../ui/Toast';
 import { AccountSelect, CategorySelect } from './AddTransaction';
 import { statusBadge } from './Home';
+import { WarningList } from '../ui/WarningList';
 
 type Group = 'income' | 'bills' | 'transfers';
 const GROUP_KINDS: Record<Group, RecurringKind[]> = { income: ['income'], bills: ['bill', 'subscription'], transfers: ['transfer', 'savings'] };
@@ -67,6 +68,12 @@ export function Planning() {
 
   const horizon = useMemo(() => planningWindowEnd(engineInput(data, today)), [data, today]);
   const stsScope = useMemo(() => computeSafeToSpend(engineInput(data, today)), [data, today]);
+  // The complete warning list (Phase 4A.4.2): Home shows the first five and links here.
+  const allWarnings = useMemo(() => buildDashboard(engineInput(data, today)).warnings, [data, today]);
+  const warningsRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (window.location.hash === '#warnings') warningsRef.current?.scrollIntoView({ block: 'start' });
+  }, []);
   const forecast = useMemo(
     () => buildForecast({ today, horizonEnd: horizon, accounts: data.accounts, transactions: data.transactions, recurring: data.recurring, exceptions: data.exceptions, baseCurrency: cur, includeEstimatedIncome: true }),
     [data, today, horizon, cur],
@@ -124,6 +131,12 @@ export function Planning() {
         </div>
       </div>
 
+      {allWarnings.length > 0 && (
+        <section className="card" id="warnings" ref={warningsRef} aria-labelledby="h-allwarn" data-testid="all-warnings" style={{ marginBottom: 16 }}>
+          <div className="card-head"><h2 className="card-title" id="h-allwarn">Needs attention · {allWarnings.length}</h2><span className="hint">Every warning from your forecast</span></div>
+          <WarningList warnings={allWarnings} currency={cur} />
+        </section>
+      )}
       <div className="grid plan-grid">
         <section className="card" aria-labelledby="tl">
           <div className="card-head"><h2 className="card-title" id="tl">Through {formatShortDate(horizon)}</h2><span className="hint">Balance shown is projected available cash at the end of each day</span></div>

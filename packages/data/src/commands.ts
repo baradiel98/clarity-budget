@@ -95,6 +95,89 @@ export function updateAccount(ctx: Ctx, id: ID, patch: Partial<Pick<Account, 'na
   return ops;
 }
 
+// ───────────────────────── archiving (Phase 4A.4.2) ─────────────────────────
+
+/** What still uses an account: active scheduled items (paid from it or into it) and planned future transactions. */
+export interface AccountUsage {
+  recurring: { item: RecurringItem; role: 'from' | 'to' }[];
+  planned: Transaction[];
+}
+
+export function accountUsage(data: WorkspaceData, accountId: ID, today: ISODate): AccountUsage {
+  const recurring: AccountUsage['recurring'] = [];
+  for (const r of data.recurring) {
+    if (r.paused || (r.endDate && r.endDate < today)) continue;
+    // a one-time item already in the past and recorded is done
+    if (r.schedule.freq === 'once' && r.schedule.date < today && data.transactions.some((t) => t.occurrenceRef?.recurringId === r.id)) continue;
+    if (r.accountId === accountId) recurring.push({ item: r, role: 'from' });
+    else if (r.toAccountId === accountId) recurring.push({ item: r, role: 'to' });
+  }
+  const planned = data.transactions.filter((t) => t.accountId === accountId && t.date > today);
+  return { recurring, planned };
+}
+
+/** One line describing how a scheduled item uses the account (shared by web and mobile). */
+export function describeUsage(use: AccountUsage['recurring'][number], accounts: readonly Account[]): string {
+  const name = (id?: ID) => accounts.find((a) => a.id === id)?.name ?? 'another account';
+  const r = use.item;
+  if (r.kind === 'income') return `${r.name}: income paid into ${name(r.accountId)}`;
+  if (r.toAccountId) return `${r.name}: ${r.amount.type === 'card_full_balance' ? 'card payment' : 'transfer'} from ${name(r.accountId)} to ${name(r.toAccountId)}`;
+  return `${r.name}: ${r.kind === 'subscription' ? 'subscription' : 'bill'} paid from ${name(r.accountId)}`;
+}
+
+/** Active accounts a scheduled item can be moved to instead of the account being archived. */
+export function archiveTargets(use: AccountUsage['recurring'][number], accounts: readonly Account[], archivingId: ID): Account[] {
+  const r = use.item;
+  return accounts.filter((a) =>
+    !a.archived && a.id !== archivingId && a.id !== r.accountId && a.id !== r.toAccountId &&
+    (use.role !== 'to' || r.amount.type !== 'card_full_balance' || a.type === 'credit_card'));
+}
+
+/** The user's explicit choice for each scheduled item before archiving. Items not mentioned stay as they are. */
+export interface ArchivePlan {
+  /** recurring item id → active account to use instead (on the side that uses the archived account). */
+  reassign?: Record<ID, ID>;
+  /** recurring item ids to pause (paused items are not counted until resumed). */
+  pause?: ID[];
+}
+
+/**
+ * Archive an account, applying only the changes the user chose for its scheduled items (Phase 4A.4.2).
+ * Nothing is reassigned, paused or deleted unless it is in the plan; items left alone stay counted
+ * (paid from what the archived account holds; the rest is counted against the spendable accounts).
+ */
+export function archiveAccount(ctx: Ctx, id: ID, plan: ArchivePlan = {}): Op[] {
+  const account = ctx.data.accounts.find((a) => a.id === id) ?? fail('Account not found.');
+  if (account.archived) fail('This account is already archived.');
+  const usage = accountUsage(ctx.data, id, ctx.today);
+  let data = ctx.data;
+  const ops: Op[] = [];
+  const step = (r: Op[]) => {
+    ops.push(...r);
+    data = applyLocal(data, r);
+  };
+  const c = (): Ctx => ({ ...ctx, data });
+  for (const [recId, targetId] of Object.entries(plan.reassign ?? {})) {
+    const use = usage.recurring.find((u) => u.item.id === recId) ?? fail('That scheduled item no longer uses this account.');
+    if (plan.pause?.includes(recId)) fail('Choose either a new account or pause, not both.');
+    const target = data.accounts.find((a) => a.id === targetId);
+    if (!target || target.archived || target.id === id) fail(`Choose an active account for ${use.item.name}.`, 'accountId');
+    const r = use.item;
+    step(updateRecurring(c(), r.id, {
+      name: r.name, kind: r.kind, categoryId: r.categoryId, schedule: r.schedule, amount: r.amount, weekendRule: r.weekendRule,
+      startDate: r.startDate, ...(r.endDate ? { endDate: r.endDate } : {}),
+      accountId: use.role === 'from' ? targetId : r.accountId,
+      ...(use.role === 'to' ? { toAccountId: targetId } : r.toAccountId ? { toAccountId: r.toAccountId } : {}),
+    }));
+  }
+  for (const recId of plan.pause ?? []) {
+    if (!usage.recurring.some((u) => u.item.id === recId)) fail('That scheduled item no longer uses this account.');
+    step(setRecurringPaused(c(), recId, true));
+  }
+  step(updateAccount(c(), id, { archived: true }));
+  return ops;
+}
+
 /**
  * "Update balance": records an explicit adjustment transaction for the difference between
  * the app's balance and the real balance, with a reason. Never edits history.

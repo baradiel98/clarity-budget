@@ -116,6 +116,23 @@ Events in the timeline:
   - Every day a spendable account is projected below zero after that day's money going out is recorded.
   - The dashboard shows one warning per account when, on at least one of those days, the combined total is still at or above zero (otherwise the overall shortfall warning covers it). It lists every later date and amount, and the amount to move is the deepest one, before the first date ("Move $600.00 into Cash before Nov 20 to cover all of these").
   - The engine never creates or schedules a transfer itself.
+- **Archived accounts (Phase 4A.4.2).** Archiving never removes what is scheduled.
+  - An archived account is never spendable: its balance is not in Safe to Spend.
+  - Bills and transfers out of it are still counted. It pays from what it holds; anything it can't cover is counted against the spendable accounts, the same rule as savings (the "covered payment" rule in step 2 above).
+  - Money going into it (income, transfers in) is not counted as spendable.
+  - Audit example: Checking $1,000, archived account $0, rent $800 from it → **$200** (was $1,000 with no warning). With $2,000 in the archived account, it pays the rent itself and Safe to Spend stays $1,000.
+  - Dashboard warning: "N scheduled items still use Old checking, which is archived", listing each item and date.
+  - **Archiving workflow** (web Settings, mobile Accounts): if active scheduled items use the account (`accountUsage`), a review lists each one. For each, the user chooses: keep it (still counted, as above), move it to another active account, or pause it (not counted until resumed). Nothing changes unless chosen; Cancel changes nothing. Planned future transactions are listed and stay on the account. `archiveAccount` applies only the chosen changes. Accounts that nothing uses are archived directly.
+- **Different currencies (Phase 4A.4.2).** Clarity never converts currencies and never adds amounts in different currencies.
+  - Accounts in another currency are left out of totals; their scheduled items are listed in the currency notice and are not counted.
+  - A transfer between currencies counts only the money leaving the sending account; nothing is counted as arriving (`Forecast.currencyConflicts`, warning "… isn't converted"). So USD → EUR lowers Safe to Spend; EUR → USD adds nothing.
+  - A full-balance card payment to a card in another currency has no amount in the sender's currency: it is not counted, and a warning says so.
+  - "Can I afford this?" from an account in another currency answers "Can't check this: <account> is in <currency>", never "Yes".
+  - Accounts in other currencies can't be created in the app today; this only protects existing data.
+- **Warnings (Phase 4A.4.2).** The engine returns every warning, ordered critical, then warning, then info.
+  - Each warning can carry `accountId` and `items`: every dated amount behind it. Account shortfalls list every date, and the short text always names the lowest amount and date ("Lowest: −$2,100.00 on Dec 17"), even when it summarises the others ("7 more").
+  - Home shows the first five and "N more in Planning". Planning (web and mobile) shows the complete list, grouped by severity, with every date and amount. The same engine list is used on every screen, so nothing is duplicated or dropped.
+- **Competing transfers from one account (Phase 4A.4.2).** When a transfer gets less than requested because other same-day transfers from the same account were funded first (step 5's priority) or shared with it, the warning names them and gives the amounts. Example: "Requested $500.00; counted $0.00; not counted $500.00. Counted first: Holiday fund ($500.00 of $500.00)." It also states that this order is a cautious forecast assumption, not how the bank will necessarily process them. The priority itself is unchanged.
 - **Possible duplicates (Phase 4A.2).** A planned transaction not linked to a bill, on the same account, for the same amount, within 3 days of a scheduled bill, is flagged ("Possible duplicate: Rent on Dec 1").
   - Since Phase 4A.4, when more than one bill matches, the bill is named only if the transaction's description clearly matches that bill's name best. Otherwise the warning lists the candidates and says it isn't clear which one it pays.
   - Both stay counted, the conservative choice, until the user resolves it. Nothing is merged automatically.

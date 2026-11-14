@@ -1,6 +1,7 @@
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { Alert, View } from 'react-native';
-import { adjustBalance, createAccount, updateAccount } from '@clarity/data';
+import { accountUsage, adjustBalance, archiveAccount, createAccount, updateAccount } from '@clarity/data';
 import { accountBalance } from '@clarity/engine';
 import { parseAmountInput, type AccountType } from '@clarity/shared';
 import { Check } from '../../src/features/Welcome';
@@ -55,7 +56,16 @@ export default function Accounts() {
                   Alert.alert(a.name, undefined, [
                     { text: 'Update balance', onPress: () => setAdjust({ id: a.id, value: '' }) },
                     ...(a.type !== 'credit_card' ? [{ text: a.spendable ? 'Don’t count as available cash' : 'Count as available cash', onPress: () => void run((ctx) => updateAccount(ctx, a.id, { spendable: !a.spendable })) }] : []),
-                    { text: a.archived ? 'Restore' : 'Archive', onPress: () => void run((ctx) => updateAccount(ctx, a.id, { archived: !a.archived })) },
+                    {
+                      text: a.archived ? 'Restore' : 'Archive',
+                      onPress: () => {
+                        if (a.archived) return void run((ctx) => updateAccount(ctx, a.id, { archived: false }));
+                        // Phase 4A.4.2: review what still uses the account before archiving it
+                        const u = accountUsage(data, a.id, today);
+                        if (u.recurring.length || u.planned.length) router.push({ pathname: '/manage/archive', params: { id: a.id } });
+                        else void run((ctx) => archiveAccount(ctx, a.id));
+                      },
+                    },
                     { text: 'Cancel', style: 'cancel' },
                   ])
                 }

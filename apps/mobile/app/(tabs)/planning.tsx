@@ -3,7 +3,7 @@ import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, Plus } from 'lucide-react-
 import { useMemo, useState } from 'react';
 import { ActionSheetIOS, Alert, Platform, Pressable, View } from 'react-native';
 import { clearOccurrenceException, deleteRecurring, engineInput, estimateNote, recurringAmountView, setOccurrenceException, setRecurringPaused } from '@clarity/data';
-import { annualEquivalentCents, applyWeekendRule, balanceOnDate, buildForecast, computeSafeToSpend, describeSchedule, monthlyEquivalentCents, nextScheduleDate, planningWindowEnd, type Occurrence } from '@clarity/engine';
+import { annualEquivalentCents, applyWeekendRule, balanceOnDate, buildDashboard, buildForecast, computeSafeToSpend, describeSchedule, monthlyEquivalentCents, nextScheduleDate, planningWindowEnd, type Occurrence } from '@clarity/engine';
 import { addDays, endOfMonth, formatCents, formatShortDate, formatWeekdayDate, TERMS, type RecurringItem } from '@clarity/shared';
 import { setAddPrefill, setExplain } from '../../src/state/nav';
 import { useData, useRun, useSession, useStore } from '../../src/state/session';
@@ -17,6 +17,7 @@ import { StatusBadge } from '../../src/ui/status';
 import { T } from '../../src/ui/Text';
 import { useTheme } from '../../src/ui/theme';
 import { useToast } from '../../src/ui/Toast';
+import { WarningList } from '../../src/ui/WarningList';
 import { setRecurringEdit } from '../recurring';
 
 /** Small cross-platform action sheet. */
@@ -42,6 +43,8 @@ export default function Planning() {
   const [target, setTarget] = useState(endOfMonth(today));
   const windowEnd = useMemo(() => planningWindowEnd(engineInput(data, today)), [data, today]);
   const stsScope = useMemo(() => computeSafeToSpend(engineInput(data, today)), [data, today]);
+  // The complete warning list (Phase 4A.4.2): Home shows the first five and links here; it is first on the screen.
+  const allWarnings = useMemo(() => buildDashboard(engineInput(data, today)).warnings, [data, today]);
   const forecast = useMemo(() => buildForecast({ today, horizonEnd: windowEnd, accounts: data.accounts, transactions: data.transactions, recurring: data.recurring, exceptions: data.exceptions, baseCurrency: cur, includeEstimatedIncome: true }), [data, today, cur, windowEnd]);
   const onDate = useMemo(() => balanceOnDate(engineInput(data, today), target), [data, today, target]);
 
@@ -102,6 +105,11 @@ export default function Planning() {
 
   return (
     <Screen title={TERMS.tabs.planning} subtitle="Income, bills and transfers that shape your forecast.">
+      {allWarnings.length > 0 && (
+        <Card title={`Needs attention · ${allWarnings.length}`}>
+          <View testID="all-warnings"><WarningList warnings={allWarnings} currency={cur} /></View>
+        </Card>
+      )}
       <Card title="Balance on a date">
         <DateField label="Date" value={target} minimum={today} onChange={setTarget} />
         <Money cents={onDate.cents} currency={cur} variant="title1" style={{ marginTop: 10 }} />

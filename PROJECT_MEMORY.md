@@ -259,3 +259,20 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
   - An advance into savings is still counted as owed (conservative).
   - Foreign-currency or archived non-spendable accounts are not covered by F1.
 - **[Lesson]** Probe the audit scenarios before and after with the same script. Every 4A.3 example is now a named test in `packages/engine/test/financial-integrity.test.ts`.
+
+## Phase 4A.4.2 (2026-11-14): archived accounts, complete warnings, currency safeguards
+- **[Verified defect, fixed]** Bills on archived accounts were dropped from Safe to Spend. Archived base-currency accounts now follow the savings rule: pay from what they hold, cover the rest from spendable cash.
+  - Audit case: $1,000 → **$200**.
+  - An archived account's balance is never spendable.
+  - The warning "N scheduled items still use X, which is archived" lists each item.
+- **[Decision] Archiving workflow.** `accountUsage` and `archiveAccount(ctx, id, { reassign, pause })` live in packages/data, with `describeUsage` and `archiveTargets` shared by web and mobile.
+  - The web dialog (Settings) and mobile screen (`app/manage/archive.tsx`) offer keep / move / pause per item. Nothing changes unless chosen.
+- **[Verified defect, fixed]** "N more in Planning" led to a page with no warnings. Planning (web and mobile) now shows the complete engine list, grouped by severity.
+  - `Warning.items` and `Warning.accountId` were added.
+  - The engine sorts warnings critical → warning → info.
+  - Account-shortfall text always states the lowest amount and date.
+- **[Transparency]** An unfunded transfer that competed with others names them, with requested / counted / not-counted amounts, and says the order is a cautious assumption. The priority is unchanged.
+- **[Defensive]** Transfers between currencies count only the sender's debit. A cross-currency full-balance card payment is not counted and is warned about. "Can I afford this?" from a foreign-currency account is `unverified`.
+- **[Limitations]**
+  - The mobile archive screen and mobile Planning list are tested at component/data level, not by rendering the routed screens.
+  - Planned future transactions on an archived account are listed but not reassigned (edit them in Transactions).
