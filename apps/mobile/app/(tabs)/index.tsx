@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { AlertTriangle, ArrowDownLeft, ArrowUpRight, CircleAlert, Info } from 'lucide-react-native';
+import { AlertTriangle, ArrowDownLeft, ArrowUpRight, CircleAlert, Info, Sparkles } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
 import { Pressable, View } from 'react-native';
 import { backupDue, engineInput } from '@clarity/data';
@@ -38,6 +38,14 @@ export default function Home() {
 
   return (
     <Screen title={formatMonthYear(today).split(' ')[0]} subtitle={formatWeekdayDate(today)}>
+      <Pressable testID="capture-launch" accessibilityRole="button" accessibilityLabel="Clarity Capture. Tell Clarity what you spent." onPress={() => router.push('/capture')}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: c.surface, borderRadius: 16, padding: 14, borderWidth: 1, borderColor: c.accentSoft }}>
+        <View style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: c.accentSoft, alignItems: 'center', justifyContent: 'center' }}><Sparkles size={16} color={c.accent} /></View>
+        <View style={{ flex: 1 }}>
+          <T style={{ fontFamily: 'Inter_600SemiBold' }}>Clarity Capture</T>
+          <T variant="footnote" color="textSecondary">Tell Clarity what you spent. We’ll organize it for you.</T>
+        </View>
+      </Pressable>
       {backup.due && (
         <Pressable onPress={() => router.push('/manage/backup')} accessibilityRole="button" style={{ flexDirection: 'row', gap: 10, alignItems: 'center', backgroundColor: c.surface, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: c.border }}>
           <Info size={18} color={c.textTertiary} />

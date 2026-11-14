@@ -29,4 +29,7 @@ Describe financial activity in plain language ("Yesterday I spent $45 at Walmart
 - `apps/web/e2e/capture.spec.ts`: the UI flows, including a simulated IndexedDB failure.
 
 ## Not in this phase
-Voice, receipts, recurring descriptions, conversational corrections, a cloud model, and the native mobile app screen (the package is shared and ready for it).
+Voice, receipts, recurring descriptions, conversational corrections, a cloud model.
+
+## Mobile app
+`apps/mobile/app/capture.tsx` (a modal) with `src/features/Capture.tsx` (`CaptureView`). It uses the same package and rules, approves through `addTransactions` in one atomic write, and gives a success haptic. Entry points: a card on Home and the sparkle button on the Transactions tab. Drafts live in memory (`src/state/capture.ts`) and are cleared by `lock()`, including the automatic lock after time in the background. Tests: `apps/mobile/test/capture.test.tsx` renders the real view against an encrypted in-memory workspace.

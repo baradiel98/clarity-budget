@@ -135,5 +135,6 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Verified]** `packages/capture` (pure TypeScript, shared with mobile): the interpreter, `parseDrafts` (validates untrusted output), `reviewDraft` (deterministic issues), `toTxInput`. `addTransactions` in data is atomic. Provenance source `'capture'` keeps the user's words.
 - **[Decision]** Dates that weren't mentioned are filled with today but block approval until confirmed. Approximate amounts and possible duplicates must be confirmed. Card payments and savings are transfers. Categories are never invented.
 - **[Lesson]** Transactions dated before an account's opening date are history (no balance change). Capture now says so, because users backfilling recent purchases would otherwise be confused.
-- **[Open]** Mobile app UI for Capture; voice and receipt input; a cloud interpreter.
+- **[Verified]** Mobile app Capture screen (modal; Home card and Transactions button). Logic tests pass and the iOS/Android bundles build. Not yet tried on a device.
+- **[Open]** Voice and receipt input; a cloud interpreter.
 

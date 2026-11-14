@@ -60,6 +60,7 @@ function Unlocked() {
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="add" options={{ presentation: 'modal' }} />
+            <Stack.Screen name="capture" options={{ presentation: 'modal' }} />
             <Stack.Screen name="afford" options={{ presentation: 'modal' }} />
             <Stack.Screen name="explain" options={{ presentation: 'modal' }} />
             <Stack.Screen name="recurring" options={{ presentation: 'modal' }} />

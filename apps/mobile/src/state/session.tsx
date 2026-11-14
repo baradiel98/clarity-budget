@@ -6,6 +6,7 @@ import { localISODate, TABLES, type ISODate, type WorkspaceData } from '@clarity
 import { biometricSupport, disableBiometric, enableBiometric, isBiometricEnabled, readBiometricKey, type BiometricSupport } from '../platform/biometrics';
 import { provider } from '../platform/crypto';
 import { SQLiteAdapter } from '../platform/sqliteAdapter';
+import { captureStore } from './capture';
 
 type Phase = { kind: 'loading' } | { kind: 'welcome' } | { kind: 'locked' } | { kind: 'ready'; store: WorkspaceStore; demo: boolean };
 
@@ -65,6 +66,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const lock = useCallback(() => {
+    captureStore.clear(); // drafts may describe spending: never keep them past a lock
     setPhase((p) => {
       if (p.kind !== 'ready') return p;
       p.store.lock();

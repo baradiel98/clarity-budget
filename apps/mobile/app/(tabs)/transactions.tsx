@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { Search, Upload } from 'lucide-react-native';
+import { Search, Sparkles, Upload } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
 import { Alert, Pressable, SectionList, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -58,6 +58,7 @@ export default function Transactions() {
           <View style={{ gap: 14, marginBottom: 8 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <T variant="display" accessibilityRole="header">{TERMS.tabs.transactions}</T>
+              <Pressable accessibilityRole="button" accessibilityLabel="Clarity Capture" onPress={() => router.push('/capture')} hitSlop={10}><Sparkles size={22} color={c.accent} /></Pressable>
               <Pressable accessibilityRole="button" accessibilityLabel={TERMS.importStatement} onPress={() => router.push('/import')} hitSlop={10}><Upload size={22} color={c.accent} /></Pressable>
             </View>
             <View>
