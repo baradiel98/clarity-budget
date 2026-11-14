@@ -199,3 +199,20 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Lesson]** Sticky-footer checks must wait for the sheet's opening slide to finish; measuring right after the click reads a 40px-shifted position.
 - **[Lesson, test]** `storage.test.ts` scanned ciphertext JSON for "650". It matched real-clock timestamps (`1794650…`, an ~11-day window) and could match random base64. The test now uses a fixed clock, seeded test-only random bytes, and checks decoded ciphertext for ≥8-byte plaintext fragments, with a positive control.
 - **[Not verified]** VoiceOver/TalkBack. Screen-reader behaviour is checked through the accessibility tree in Chromium only.
+
+## Phase 4A (2026-11-14): Safe to Spend horizon (financial correctness)
+- **[Verified defect, fixed]** Safe to Spend's horizon was "the later of this month-end and the first fixed paycheck on/after today". When a paycheck fell before month-end, a bill due just after month-end (rent on the 1st) was dropped from the forecast. Safe to Spend could then report money needed days later.
+  - Engine-reproduced: Nov 28, $1,850.25, no income, rent $1,400 on Dec 1 → reported $1,850.25.
+  - The sample data had the same defect: $2,579.83 ignored the Dec 1 rent.
+- **[Decision]** The horizon is the **later of the end of next month and the first dependable paycheck after this month** (`horizonFor`, documented in `docs/calculation-rules.md`).
+  - Only fixed-amount income counts, on its date. Outflows are applied before inflows on the same day.
+  - Rejected: "through the first paycheck after month-end" alone (a small paycheck just before a large bill hides a shortfall), and a pure rolling window (doesn't fit the month-based product).
+- **[Decision]** Everything Safe to Spend counts must be findable:
+  - `Dashboard.upcomingLater` / `upcomingLaterUntil` power the "Later · also counted in Safe to Spend" list (first 4 + "N more through <date>");
+  - Planning's timeline runs to `planningWindowEnd` (≥ horizon);
+  - the onboarding overview lists the counted outflows.
+
+  The dashboard chart (`Dashboard.forecast`) stays on the Upcoming window.
+- **[Verified]** Sample Nov 13: Safe to Spend **$2,427.17** (low $2,627.17 on Dec 1, $200 reserve). The cross-platform fixture is updated; golden data was regenerated and each change reviewed.
+- **[Lesson]** The engine test builder defaults `trackFrom` to 2026-09-01. A recurring item must get `startDate`/`trackFrom` at its first real date, or earlier months show up as overdue and distort the result.
+- **[Limitation]** Anything after the horizon is not counted. "Why this number?" says so and Planning shows it.

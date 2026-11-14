@@ -55,6 +55,16 @@ describe('mobile Home shows the same figures as web (sample data, Nov 13, 2026)'
     expect(help).toHaveTextContent(STATUS_HELP.expected(false), { exact: false });
   });
 
+  it('Later · also counted in Safe to Spend: the Dec 1 rent is listed (Phase 4A)', async () => {
+    const ui = await show(data);
+    const later = ui.getByTestId('upcoming-later');
+    expect(later).toHaveTextContent('Later · also counted in Safe to Spend', { exact: false });
+    const rows = ui.getAllByTestId('upcoming-later-row');
+    expect(rows).toHaveLength(X.upcomingLater.length);
+    X.upcomingLater.forEach(([date, name, amount], i) => expect(rows[i]).toHaveTextContent(`${date}${name}${amount}`));
+    expect(later).toHaveTextContent(X.upcomingLaterMore, { exact: false });
+  });
+
   it('Recent transactions, newest first', async () => {
     const ui = await show(data);
     const rows = ui.getAllByTestId('recent-row');
@@ -83,7 +93,7 @@ describe('mobile Home edge cases', () => {
 
     const empty: WorkspaceData = { ...base, recurring: [], transactions: [] };
     const ui2 = await show(empty);
-    expect(ui2.getByTestId('upcoming-empty')).toHaveTextContent('No bills, paychecks or planned expenses through Nov 30.');
+    expect(ui2.getByTestId('upcoming-empty')).toHaveTextContent('No bills, paychecks or planned expenses through Dec 31.'); // the Safe to Spend horizon (Phase 4A)
     expect(ui2.getByTestId('recent-empty')).toBeTruthy();
     expect(ui2.getByTestId('lowest-before-income')).toHaveTextContent('No income with a known amount is scheduled', { exact: false });
   });
@@ -93,7 +103,7 @@ describe('mobile Home edge cases', () => {
     const big = { ...base.recurring.find((r) => r.name === 'Phone')!, id: 'big', name: 'Mortgage', amount: { type: 'fixed' as const, cents: 123456789 } };
     const ui = await show({ ...base, recurring: [...base.recurring, big] });
     const sts = ui.getByTestId('safe-to-spend');
-    expect(sts).toHaveTextContent(/Short by\$1,2\d\d,\d{3}\.\d\d/);
+    expect(sts).toHaveTextContent(/Short by\$\d,\d{3},\d{3}\.\d\d/); // seven figures, in full (the bill now counts in Nov and Dec)
     expect(ui.getByTestId('month-end').props.adjustsFontSizeToFit).toBe(true);
   });
 });

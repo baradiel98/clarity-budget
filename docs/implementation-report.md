@@ -244,6 +244,26 @@ The step-by-step checklist is in `docs/device-test-script.md`.
 - **Verification:** Chromium `e2e/phase3c.spec.ts` (17 tests) plus the full suites; see the commit message for results.
 - **Not verified:** physical devices, Safari, VoiceOver/TalkBack.
 
+## 7f. Phase 4A: Safe to Spend horizon and Upcoming consistency
+- **Root cause:** the Safe to Spend horizon ended at this month-end whenever the next fixed paycheck fell before it. Scheduled items after the horizon are dropped from the forecast, so a bill due just after month-end was ignored.
+- **Rule now:** the horizon is the later of the end of next month and the first dependable paycheck after this month. Only fixed income counts. Spending Safe to Spend today keeps projected cash at or above the reserve every day through the horizon, if scheduled fixed income arrives.
+
+  | Case | Before | After |
+  |---|---|---|
+  | B: Nov 28, $1,850.25, no income, rent $1,400 on Dec 1 | $1,850.25 | **$450.25** |
+  | A (restated): Nov 20, $1,000 paycheck already received, next pay Dec 4 | $450.25 (already correct by chance) | **$450.25** |
+  | A (as audited): Nov 13, $1,000 paycheck Nov 20 before the rent | $1,850.25 | **$1,450.25** |
+  | Sample Nov 13 | $2,579.83 | **$2,427.17** |
+
+- **Visibility:**
+  - the dashboard lists "Later · also counted in Safe to Spend" with a link to Planning;
+  - Planning runs at least to the horizon;
+  - the onboarding overview lists counted outflows.
+
+  Native mobile matches.
+- **Tests:** `packages/engine/test/safe-to-spend-horizon.test.ts` (16 tests), cross-platform fixture updates, `apps/web/e2e/phase4a.spec.ts` (2 tests) and a mobile jest test.
+- **Not verified:** physical devices, Safari, and real users' schedules beyond the tested cases.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

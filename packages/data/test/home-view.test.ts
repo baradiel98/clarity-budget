@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { formatCents as f, formatShortDate as s, formatWeekdayDate as w, INCOME_STATUS_LABEL, OCCURRENCE_STATUS_LABEL } from '@clarity/shared';
 import { buildDashboard } from '@clarity/engine';
-import { buildDemoWorkspace, buildHomeView, engineInput, recentRow } from '../src';
+import { buildDemoWorkspace, buildHomeView, engineInput, recentRow, upcomingLaterPreview } from '../src';
 import { HOME_SAMPLE as X, SAMPLE_NOW, SAMPLE_TODAY } from './fixtures/home-sample-nov13';
 
 describe('shared Home view model', () => {
@@ -27,6 +27,10 @@ describe('shared Home view model', () => {
     expect([f(d.endOfDay.cents), v.quietToday]).toEqual([X.endOfDay, true]);
     expect(s(d.upcomingUntil)).toBe(X.upcomingUntil);
     expect(d.upcoming.map((u) => [w(u.date), u.label, (u.isIncome ? INCOME_STATUS_LABEL : OCCURRENCE_STATUS_LABEL)[u.status], `${u.status === 'estimated' ? '≈' : ''}${f(u.cents, 'USD', { sign: 'always' })}`])).toEqual(X.upcoming);
+    const later = upcomingLaterPreview(d);
+    expect(later.shown.map((u) => [s(u.date), `${u.label}${u.affectsCash ? '' : ' · card'}`, `${u.status === 'estimated' ? '≈' : ''}${f(u.cents, 'USD', { sign: 'always' })}`])).toEqual(X.upcomingLater);
+    expect(`${later.more} more through ${s(later.until)}.`).toBe(X.upcomingLaterMore);
+    expect(later.shown[0]).toMatchObject({ label: 'Rent', date: '2026-12-01' }); // counted in Safe to Spend, and shown
     const cats = new Map(data.categories.map((c) => [c.id, c.name]));
     expect(v.recent.map((t) => { const r = recentRow(t, t.categoryId ? cats.get(t.categoryId) : undefined); return [s(t.date), r.title, r.meta, f(r.cents, 'USD', { sign: r.sign })]; })).toEqual(X.recent);
   });

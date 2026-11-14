@@ -22,12 +22,15 @@ describe('dashboard reconciliation (sample data)', () => {
       ['2026-11-30', 'Savings', -25000],
     ]);
     expect(d.upcomingUntil).toBe('2026-11-30');
-    // Safe to Spend: low on Nov 18 (after Electricity, before the paycheck); later items are explained, not hidden
+    // Safe to Spend (Phase 4A): the horizon runs to the end of next month, so the $1,450 rent on Dec 1 counts.
+    // Low on Dec 1: 2,871.23 + 1,860.00 − (91.40 + 65.00 + 247.66 + 250.00 + 1,450.00) = 2,627.17; minus the 200.00 reserve.
+    // (Before Phase 4A the horizon stopped at Nov 30 and reported 2,579.83, ignoring that rent.)
     const s = d.safeToSpend;
-    expect([s.cents, s.lowPoint.cents, s.lowPoint.date, s.horizonEnd]).toEqual([257983, 277983, '2026-11-18', '2026-11-30']);
-    expect(s.afterLow.events.map((e) => e.label)).toEqual(['Paycheck', 'Phone', 'Card payment', 'Savings']);
-    expect([s.afterLow.inCents, s.afterLow.outCents]).toEqual([186000, 56266]);
-    expect(s.afterLow.note).toBe("Phone, Card payment and Savings ($562.66) come after Nov 18, once $1,860.00 has come in. Your balance stays at or above the Nov 18 low through Nov 30, so they don't lower Safe to Spend.");
+    expect([s.cents, s.lowPoint.cents, s.lowPoint.date, s.horizonEnd]).toEqual([242717, 262717, '2026-12-01', '2026-12-31']);
+    expect(s.lowPoint.obligations.map((e) => [e.label, e.cashDeltaCents])).toEqual([['Electricity', -9140], ['Phone', -6500], ['Card payment', -24766], ['Savings', -25000], ['Rent', -145000]]);
+    expect(s.afterLow.events.map((e) => e.label)).toEqual(['Paycheck', 'Paycheck', 'Electricity', 'Phone', 'Card payment', 'Savings', 'Paycheck']);
+    expect([s.afterLow.inCents, s.afterLow.outCents]).toEqual([558000, 42189]);
+    expect(s.afterLow.note).toBe("Electricity, Phone, Card payment and Savings ($421.89) come after Dec 1, once $5,580.00 has come in. Your balance stays at or above the Dec 1 low through Dec 31, so they don't lower Safe to Spend.");
   });
 
   it('on every day for 90 days: available cash + listed cash items through month-end = projected month-end', () => {

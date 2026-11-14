@@ -1,9 +1,9 @@
 import { AlertTriangle, ArrowDownLeft, ArrowUpRight, CircleAlert, CircleHelp, Info, Sparkles } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
 import { Pressable, View } from 'react-native';
-import { buildHomeView, recentRow } from '@clarity/data';
+import { buildHomeView, recentRow, upcomingLaterPreview } from '@clarity/data';
 import type { Explanation, UpcomingItem } from '@clarity/engine';
-import { formatCents, formatShortDate, formatWeekdayDate, INCOME_STATUS_LABEL, OCCURRENCE_STATUS_LABEL, STATUS_HELP, TERMS, UPCOMING_NOTE, type ISODate, type WorkspaceData } from '@clarity/shared';
+import { formatCents, formatShortDate, formatWeekdayDate, INCOME_STATUS_LABEL, OCCURRENCE_STATUS_LABEL, STATUS_HELP, TERMS, UPCOMING_LATER_TITLE, UPCOMING_NOTE, type ISODate, type WorkspaceData } from '@clarity/shared';
 import type { AddPrefill } from '../state/nav';
 import { Button, LinkButton } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -37,6 +37,7 @@ export function HomeView({ data, today, backup, actions }: { data: WorkspaceData
   const cats = useMemo(() => new Map(data.categories.map((x) => [x.id, x])), [data.categories]);
   const lb = d.lowestBeforeNextIncome;
   const delta = view.monthEndDeltaCents;
+  const later = upcomingLaterPreview(d);
   const statuses = [...new Map(d.upcoming.map((u) => [`${u.status}:${u.isIncome}`, u])).values()];
 
   return (
@@ -137,11 +138,12 @@ export function HomeView({ data, today, backup, actions }: { data: WorkspaceData
 
       {/* 4. Upcoming: names shown in full (they wrap), estimated amounts marked ≈, statuses explained on request */}
       <Card title={`${TERMS.upcoming} · through ${formatShortDate(d.upcomingUntil)}`}>
-        {d.upcoming.length === 0 ? (
-          <T color="textSecondary" testID="upcoming-empty">No bills, paychecks or planned expenses through {formatShortDate(d.upcomingUntil)}.</T>
+        {d.upcoming.length === 0 && d.upcomingLater.length === 0 ? (
+          <T color="textSecondary" testID="upcoming-empty">No bills, paychecks or planned expenses through {formatShortDate(d.upcomingLaterUntil)}.</T>
         ) : (
           <View testID="upcoming">
             <T variant="footnote" color="textTertiary" style={{ marginBottom: 4 }}>{UPCOMING_NOTE}</T>
+            {d.upcoming.length === 0 && <T color="textSecondary" testID="upcoming-none">Nothing scheduled through {formatShortDate(d.upcomingUntil)}.</T>}
             {d.upcoming.map((u, i) => (
               <ListRow
                 key={u.id}
@@ -163,6 +165,22 @@ export function HomeView({ data, today, backup, actions }: { data: WorkspaceData
                   : {})}
               />
             ))}
+            {later.shown.length > 0 && (
+              <View testID="upcoming-later" style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: c.border, gap: 6 }}>
+                <T variant="overline" color="textSecondary" accessibilityRole="header">{UPCOMING_LATER_TITLE}</T>
+                {later.shown.map((u) => (
+                  <View key={u.id} testID="upcoming-later-row" style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start' }} accessible accessibilityLabel={upcomingSpoken(u, cur).replace(/ Tap to .*$/, '')}>
+                    <T variant="footnote" color="textTertiary" style={{ width: 52 }}>{formatShortDate(u.date)}</T>
+                    <T variant="callout" style={{ flex: 1 }}>{u.label}{!u.affectsCash ? ' · card' : ''}</T>
+                    <UpcomingAmount u={u} cur={cur} />
+                  </View>
+                ))}
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 4 }}>
+                  <T variant="footnote" color="textTertiary">{later.more > 0 ? `${later.more} more through ${formatShortDate(later.until)}.` : `Safe to Spend looks through ${formatShortDate(later.until)}.`}</T>
+                  <LinkButton title="See all in Planning" onPress={() => actions.open('/planning')} />
+                </View>
+              </View>
+            )}
             <LinkButton title={showHelp ? 'Hide what the labels mean' : 'What do these labels mean?'} onPress={() => setShowHelp((v) => !v)} />
             {showHelp && (
               <View testID="status-help" style={{ gap: 8, marginTop: 4 }}>

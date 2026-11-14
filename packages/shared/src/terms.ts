@@ -59,3 +59,6 @@ export const STATUS_HELP: Record<keyof typeof OCCURRENCE_STATUS_LABEL, (income: 
 
 /** Shown above the Upcoming list on both apps. */
 export const UPCOMING_NOTE = 'Nothing here is recorded until you record it or mark it paid. Estimated amounts (≈) may change.';
+
+/** Heading for items after the Upcoming window that Safe to Spend still counts (both apps). */
+export const UPCOMING_LATER_TITLE = 'Later · also counted in Safe to Spend';

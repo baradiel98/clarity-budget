@@ -53,3 +53,20 @@ export function recentRow(t: Transaction, categoryName: string | undefined): { t
     inflow: t.amountCents > 0 && !transfer,
   };
 }
+
+/** How many items of `Dashboard.upcomingLater` Home lists before "N more through <date>" (both apps). */
+export const UPCOMING_LATER_PREVIEW = 4;
+
+/** The later items Home shows, and how many more are counted in Safe to Spend through the horizon. */
+export function upcomingLaterPreview(d: Dashboard): { shown: Dashboard['upcomingLater']; more: number; until: string } {
+  return { shown: d.upcomingLater.slice(0, UPCOMING_LATER_PREVIEW), more: Math.max(0, d.upcomingLater.length - UPCOMING_LATER_PREVIEW), until: d.upcomingLaterUntil };
+}
+
+/**
+ * Money going out that Safe to Spend counts (Upcoming + Later), for the first overview after onboarding,
+ * so a bill entered during setup is visibly accounted for (Phase 4A). First `limit` items + how many more.
+ */
+export function countedOutflows(d: Dashboard, limit = 4): { items: Dashboard['upcoming']; more: number; until: string } {
+  const all = [...d.upcoming, ...d.upcomingLater].filter((u) => u.cents < 0 && u.affectsCash);
+  return { items: all.slice(0, limit), more: Math.max(0, all.length - limit), until: d.upcomingLaterUntil };
+}

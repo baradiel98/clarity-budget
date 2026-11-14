@@ -1,8 +1,8 @@
 import { AlertTriangle, ArrowDownLeft, ArrowUpRight, CalendarClock, CircleAlert, CircleHelp, Info, Plus, TrendingDown, TrendingUp } from 'lucide-react';
 import { useMemo, useState, type CSSProperties } from 'react';
-import { backupDue, buildHomeView, recentRow } from '@clarity/data';
+import { backupDue, buildHomeView, recentRow, upcomingLaterPreview } from '@clarity/data';
 import { buildForecast, cashHistory, type Explanation, type UpcomingItem } from '@clarity/engine';
-import { addDays, formatCents, formatMonthYear, formatShortDate, formatWeekdayDate, INCOME_STATUS_LABEL, OCCURRENCE_STATUS_LABEL, STATUS_HELP, TERMS, UPCOMING_NOTE } from '@clarity/shared';
+import { addDays, formatCents, formatMonthYear, formatShortDate, formatWeekdayDate, INCOME_STATUS_LABEL, OCCURRENCE_STATUS_LABEL, STATUS_HELP, TERMS, UPCOMING_LATER_TITLE, UPCOMING_NOTE } from '@clarity/shared';
 import { isFresh } from '../state/fresh';
 import { CaptureLauncher } from './Capture';
 import { useRouter } from '../lib/router';
@@ -44,6 +44,7 @@ export function Home() {
   );
   const history = useMemo(() => cashHistory(data.accounts, data.transactions, addDays(today, -14), addDays(today, -1), cur), [data.accounts, data.transactions, today, cur]);
 
+  const later = upcomingLaterPreview(d);
   const { monthEndDeltaCents: delta, stsBillsBeforeCents: billsBefore, stsIncomeBeforeCents: incomeBefore, sameLow, quietToday, recent } = view;
   const cats = useMemo(() => new Map(data.categories.map((c) => [c.id, c])), [data.categories]);
   const Why = ({ ex, label }: { ex: Explanation; label: string }) => (
@@ -177,16 +178,17 @@ export function Home() {
               <h2 className="card-title" id="h-up">{TERMS.upcoming} <span className="faint" style={{ fontWeight: 500 }}>· through {formatShortDate(d.upcomingUntil)}</span></h2>
               <button className="btn-link" onClick={() => navigate('/planning')}>Open Planning</button>
             </div>
-            {d.upcoming.length === 0 ? (
+            {d.upcoming.length === 0 && d.upcomingLater.length === 0 ? (
               <div className="empty">
                 <div className="ico"><CalendarClock size={24} /></div>
                 <div className="t-headline">Nothing scheduled</div>
-                <div className="t-callout">No bills, paychecks or planned expenses through {formatShortDate(d.upcomingUntil)}.</div>
+                <div className="t-callout">No bills, paychecks or planned expenses through {formatShortDate(d.upcomingLaterUntil)}.</div>
                 <button className="btn btn-secondary btn-sm" style={{ marginTop: 8 }} onClick={() => navigate('/planning')}>Add a bill or income</button>
               </div>
             ) : (
               <>
               <p className="hint upcoming-note">{UPCOMING_NOTE}</p>
+              {d.upcoming.length === 0 && <p className="t-callout muted" data-testid="upcoming-none">Nothing scheduled through {formatShortDate(d.upcomingUntil)}.</p>}
               <div className="list" data-testid="upcoming">
                 {d.upcoming.map((u) => (
                   <div key={u.id} className="list-row up-row">
@@ -210,6 +212,24 @@ export function Home() {
                   </div>
                 ))}
               </div>
+              {later.shown.length > 0 && (
+                <div className="up-later" data-testid="upcoming-later" aria-labelledby="h-later">
+                  <h3 className="overline" id="h-later">{UPCOMING_LATER_TITLE}</h3>
+                  <ul className="up-later-list">
+                    {later.shown.map((u) => (
+                      <li key={u.id}>
+                        <span className="up-later-date">{formatShortDate(u.date)}</span>
+                        <span className="up-later-name">{u.label}{u.status === 'estimated' && <span className="sr-only"> (estimated)</span>}{!u.affectsCash && <span className="faint"> · card</span>}</span>
+                        <span className={`num ${u.cents > 0 ? 'pos' : ''}`}>{u.status === 'unknown' ? <span className="faint">—</span> : <>{u.status === 'estimated' && <span className="approx" aria-hidden>≈</span>}<Money cents={u.cents} currency={cur} sign="always" /></>}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="hint up-later-more">
+                    {later.more > 0 ? `${later.more} more through ${formatShortDate(later.until)}. ` : `Safe to Spend looks through ${formatShortDate(later.until)}. `}
+                    <button className="btn-link" onClick={() => navigate('/planning')}>See all in Planning</button>
+                  </p>
+                </div>
+              )}
               </>
             )}
           </section>

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Share, View } from 'react-native';
-import { engineInput, onboard, type OnboardingInput } from '@clarity/data';
+import { countedOutflows, engineInput, onboard, type OnboardingInput } from '@clarity/data';
 import { buildDashboard } from '@clarity/engine';
 import { addDays, formatShortDate, monthNameLong, parseAmountInput, parseISO, type Schedule } from '@clarity/shared';
 import { useData, useRun, useSession } from '../state/session';
@@ -86,6 +86,7 @@ export function Onboarding() {
 
   if (step === 3 && dash) {
     const low = dash.lowestThroughMonthEnd;
+    const counted = countedOutflows(dash);
     return (
       <Panel step={4} footer={<Button title="Go to my dashboard" onPress={s.finishIntro} />}>
         <T variant="overline" color="textSecondary">Your first overview</T>
@@ -98,6 +99,19 @@ export function Onboarding() {
           <Card title="Safe to Spend" style={{ flex: 1 }}><Money cents={dash.safeToSpend.cents} currency={cur} variant="title2" color={dash.safeToSpend.cents < 0 ? 'negative' : 'text'} /></Card>
         </View>
         <T color="textSecondary">{low.explanation.summary}</T>
+        {counted.items.length > 0 && (
+          <View testID="overview-counted" style={{ gap: 4 }}>
+            <T variant="footnote" color="textSecondary">Counted in Safe to Spend through {formatShortDate(counted.until)}</T>
+            {counted.items.map((u) => (
+              <View key={u.id} style={{ flexDirection: 'row', gap: 10 }}>
+                <T variant="footnote" color="textTertiary" style={{ width: 52 }}>{formatShortDate(u.date)}</T>
+                <T variant="callout" style={{ flex: 1 }}>{u.label}</T>
+                <Money cents={u.cents} currency={cur} sign="always" variant="callout" />
+              </View>
+            ))}
+            {counted.more > 0 && <T variant="footnote" color="textTertiary">and {counted.more} more</T>}
+          </View>
+        )}
       </Panel>
     );
   }

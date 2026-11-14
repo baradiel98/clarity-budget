@@ -63,7 +63,11 @@ export interface SafeToSpend {
   /** > 0 when Safe to Spend is negative (shown as "Short by"). */
   shortfallCents: Cents;
   horizonEnd: ISODate;
-  horizonReason: 'month_end' | 'next_income';
+  /**
+   * Why the horizon ends where it does: 'next_month_end' = the end of next month;
+   * 'next_income' = the first dependable paycheck after this month, when that is later.
+   */
+  horizonReason: 'next_month_end' | 'next_income';
   availableCashCents: Cents;
   reserveCents: Cents;
   lowPoint: LowPoint;
@@ -85,16 +89,36 @@ const ASSUMPTIONS_BASE = [
 /** Look this far past month-end for the next paycheck when choosing the Safe to Spend horizon. */
 export const INCOME_LOOKAHEAD_DAYS = 62;
 
-function horizonFor(input: EngineInput): { end: ISODate; reason: 'month_end' | 'next_income'; next: IncomeRef | null } {
+/**
+ * Safe to Spend horizon (docs/calculation-rules.md): the LATER of
+ *  - the end of next month (so every bill next month counts, including one on the 1st), and
+ *  - the first dependable (fixed-amount) paycheck after this month ends (so a long gap before the
+ *    next paycheck is covered in full).
+ * Before Phase 4A the horizon was the later of this month-end and the first paycheck on/after today,
+ * which dropped a bill due just after month-end whenever a paycheck fell earlier in the month.
+ */
+function horizonFor(input: EngineInput): { end: ISODate; reason: 'next_month_end' | 'next_income'; next: IncomeRef | null } {
   const eom = endOfMonth(input.today);
+  const nextMonthEnd = endOfMonth(addDays(eom, 1));
   const occ = expandOccurrences(input.recurring, input.exceptions, input.transactions, {
     from: input.today,
     to: addDays(eom, INCOME_LOOKAHEAD_DAYS),
     today: input.today,
   });
   const next = nextIncome(occ, input.today, false);
-  if (next && next.date > eom) return { end: next.date, reason: 'next_income', next };
-  return { end: eom, reason: 'month_end', next };
+  const firstAfterMonth = nextIncome(occ, addDays(eom, 1), false);
+  if (firstAfterMonth && firstAfterMonth.date > nextMonthEnd) return { end: firstAfterMonth.date, reason: 'next_income', next };
+  return { end: nextMonthEnd, reason: 'next_month_end', next };
+}
+
+/**
+ * Last day of the Planning timeline: at least 45 days, and never shorter than the Safe to Spend horizon,
+ * so every item Safe to Spend counts can be found in Planning (Phase 4A).
+ */
+export function planningWindowEnd(input: EngineInput): ISODate {
+  const h = horizonFor(input).end;
+  const d45 = addDays(input.today, 45);
+  return h > d45 ? h : d45;
 }
 
 /** Next income occurrence on/after today. countEstimated=false → only fixed (known) amounts. */
@@ -174,7 +198,7 @@ export function computeSafeToSpend(input: EngineInput, hypotheticals?: readonly 
     { kind: 'result', label: cents >= 0 ? 'Safe to Spend' : 'Short by', cents },
     ...excludedIncome.map(excludedLine),
   ];
-  const horizonText = h.reason === 'next_income' ? `your next known paycheck on ${formatShortDate(h.end)}` : `the end of the month (${formatShortDate(h.end)})`;
+  const horizonText = h.reason === 'next_income' ? `your first known paycheck after this month (${formatShortDate(h.end)})` : `the end of next month (${formatShortDate(h.end)})`;
   const summary =
     cents >= 0
       ? `You can spend up to ${formatCents(cents, cur)} today and still cover everything scheduled through ${horizonText}, keeping your ${formatCents(reserve, cur)} reserve. Your balance is lowest on ${formatShortDate(low.date)}${afterOut > 0 ? '; everything after that is covered' : ''}.`
@@ -199,6 +223,7 @@ export function computeSafeToSpend(input: EngineInput, hypotheticals?: readonly 
         ...ASSUMPTIONS_BASE,
         'Only income with a fixed amount is counted. Estimated or unknown income is listed but not counted.',
         'Credit card purchases only reduce cash when a card payment is scheduled.',
+        `Covers everything scheduled from today through ${formatShortDate(h.end)}. Anything scheduled after ${formatShortDate(h.end)} is not included yet; Planning shows what comes later.`,
       ],
     },
   };
@@ -270,9 +295,15 @@ export interface Dashboard {
   upcoming: UpcomingItem[];
   /** Last date covered by `upcoming` (never before month-end). */
   upcomingUntil: ISODate;
+  /**
+   * Items after `upcomingUntil` through the Safe to Spend horizon (`upcomingLaterUntil`): they are counted in
+   * Safe to Spend, so the dashboard must let the user find them (Phase 4A). Sorted by date.
+   */
+  upcomingLater: UpcomingItem[];
+  upcomingLaterUntil: ISODate;
   warnings: Warning[];
   recordedBalanceExplanation: Explanation;
-  /** Inclusive forecast (estimated income counted) through month end / horizon, for charts. */
+  /** Inclusive forecast (estimated income counted) through `upcomingUntil`, for the month chart: the same days as Upcoming. */
   forecast: Forecast;
 }
 
@@ -353,31 +384,37 @@ export function buildDashboard(input: EngineInput): Dashboard {
     const twoWeeks = d ? d.date : input.today;
     return twoWeeks > eom ? twoWeeks : eom;
   })();
-  const upcoming: UpcomingItem[] = [];
-  for (const o of inclusive.occurrences) {
-    if (o.status === 'confirmed') continue;
-    if (o.status !== 'overdue' && (o.date < input.today || o.date > until)) continue;
-    const ev = inclusive.days.flatMap((d) => d.events).find((e) => e.occurrence?.key === o.key);
-    const sign = o.kind === 'income' ? 1 : -1;
-    upcoming.push({
-      id: `occ:${o.key}`,
-      date: o.date,
-      label: o.name,
-      cents: ev ? ev.cashDeltaCents || (ev.legs.find((l) => l.accountId === o.accountId)?.deltaCents ?? 0) : sign * o.amountCents,
-      affectsCash: !ev || ev.cashDeltaCents !== 0 || ev.legs.length === 0,
-      status: o.status,
-      occurrence: ev?.occurrence ?? o,
-      isIncome: o.kind === 'income',
-    });
-  }
-  for (const d of inclusive.days) {
-    if (d.date > until) break;
-    for (const e of d.events) {
-      if (e.source !== 'scheduled_tx' || !e.txId) continue;
-      upcoming.push({ id: e.id, date: e.date, label: e.label, cents: e.cashDeltaCents || e.legs[0]!.deltaCents, affectsCash: e.cashDeltaCents !== 0, status: 'scheduled_tx', txId: e.txId, isIncome: e.legs[0]!.deltaCents > 0 });
+  /** Upcoming items between two dates (overdue ones only in the first list). */
+  const itemsBetween = (from: ISODate, to: ISODate, withOverdue: boolean): UpcomingItem[] => {
+    const out: UpcomingItem[] = [];
+    for (const o of inclusive.occurrences) {
+      if (o.status === 'confirmed') continue;
+      if (o.status === 'overdue' ? !withOverdue : o.date < from || o.date > to) continue;
+      const ev = inclusive.days.flatMap((d) => d.events).find((e) => e.occurrence?.key === o.key);
+      const sign = o.kind === 'income' ? 1 : -1;
+      out.push({
+        id: `occ:${o.key}`,
+        date: o.date,
+        label: o.name,
+        cents: ev ? ev.cashDeltaCents || (ev.legs.find((l) => l.accountId === o.accountId)?.deltaCents ?? 0) : sign * o.amountCents,
+        affectsCash: !ev || ev.cashDeltaCents !== 0 || ev.legs.length === 0,
+        status: o.status,
+        occurrence: ev?.occurrence ?? o,
+        isIncome: o.kind === 'income',
+      });
     }
-  }
-  upcoming.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    for (const d of inclusive.days) {
+      if (d.date < from) continue;
+      if (d.date > to) break;
+      for (const e of d.events) {
+        if (e.source !== 'scheduled_tx' || !e.txId) continue;
+        out.push({ id: e.id, date: e.date, label: e.label, cents: e.cashDeltaCents || e.legs[0]!.deltaCents, affectsCash: e.cashDeltaCents !== 0, status: 'scheduled_tx', txId: e.txId, isIncome: e.legs[0]!.deltaCents > 0 });
+      }
+    }
+    return out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  };
+  const upcoming = itemsBetween(input.today, until, true);
+  const upcomingLater = sts.horizonEnd > until ? itemsBetween(addDays(until, 1), sts.horizonEnd, false) : [];
 
   // Warnings
   const warnings: Warning[] = [];
@@ -446,6 +483,8 @@ export function buildDashboard(input: EngineInput): Dashboard {
     nextIncome: next,
     upcoming,
     upcomingUntil: until,
+    upcomingLater,
+    upcomingLaterUntil: sts.horizonEnd > until ? sts.horizonEnd : until,
     warnings,
     recordedBalanceExplanation: {
       title: 'Current recorded balance',
@@ -454,7 +493,7 @@ export function buildDashboard(input: EngineInput): Dashboard {
       lines: recordedLines,
       assumptions: ['Pending transactions are included.', 'Credit card balances are shown separately and never counted as cash.'],
     },
-    forecast: inclusive,
+    forecast: { ...inclusive, horizonEnd: until, days: inclusive.days.filter((d) => d.date <= until), excludedEvents: inclusive.excludedEvents.filter((e) => e.date <= until) },
   };
 }
 

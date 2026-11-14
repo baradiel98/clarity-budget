@@ -83,7 +83,7 @@ test.describe('Upcoming rows on narrow screens', () => {
     await page.getByRole('button', { name: 'Skip' }).click();
     await page.getByRole('button', { name: 'Skip' }).click();
     await toDashboard(page);
-    await expect(page.getByText('No bills, paychecks or planned expenses through Sep 30.')).toBeVisible();
+    await expect(page.getByText('No bills, paychecks or planned expenses through Oct 31.')).toBeVisible(); // the Safe to Spend horizon (Phase 4A)
   });
 });
 
@@ -186,6 +186,10 @@ test.describe('web Home shows the cross-platform sample figures (Nov 13, 2026)',
         await expect(rows.nth(i).locator('.meta')).toContainText(`${date} ${status}`);
         await expect(rows.nth(i).locator('.up-amount')).toHaveText(amount);
       }
+      const later = page.getByTestId('upcoming-later');
+      await expect(later.locator('li')).toHaveCount(X.upcomingLater.length);
+      for (const [i, [date, name, amount]] of X.upcomingLater.entries()) await expect(later.locator('li').nth(i)).toHaveText(`${date}${name}${amount}`);
+      await expect(later).toContainText(X.upcomingLaterMore);
       const recent = page.getByTestId('recent').locator('.list-row');
       await expect(recent).toHaveCount(X.recent.length);
       for (const [i, [date, title, cat, amount]] of X.recent.entries()) await expect(recent.nth(i)).toHaveText(`${title}${date} · ${cat}${amount}`);

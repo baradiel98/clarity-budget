@@ -12,9 +12,10 @@ export const SAMPLE_NOW = Date.UTC(2026, 10, 13);
 export const HOME_SAMPLE = {
   monthEnd: '$4,077.17',
   monthEndDelta: '$1,205.94 more than you have today, by Nov 30.',
-  safeToSpend: '$2,579.83',
-  safeToSpendLine: 'What you can spend today and still cover everything scheduled through Nov 30. Your balance is lowest on Nov 18.',
-  safeToSpendAfterLow: "Phone, Card payment and Savings ($562.66) come after Nov 18, once $1,860.00 has come in. Your balance stays at or above the Nov 18 low through Nov 30, so they don't lower Safe to Spend.",
+  // Phase 4A: includes the Dec 1 rent (horizon = end of next month); was $2,579.83 when the horizon stopped at Nov 30.
+  safeToSpend: '$2,427.17',
+  safeToSpendLine: 'What you can spend today and still cover everything scheduled through Dec 31. Your balance is lowest on Dec 1.',
+  safeToSpendAfterLow: "Electricity, Phone, Card payment and Savings ($421.89) come after Dec 1, once $5,580.00 has come in. Your balance stays at or above the Dec 1 low through Dec 31, so they don't lower Safe to Spend.",
   recordedBalance: '$2,871.23',
   lowest: '$2,779.83',
   lowestSub: 'Nov 18 · through month-end',
@@ -31,6 +32,17 @@ export const HOME_SAMPLE = {
     ['Wed, Nov 25', 'Card payment', 'Estimated', '≈−$247.66'],
     ['Mon, Nov 30', 'Savings', 'Scheduled', '−$250.00'],
   ],
+  /**
+   * Phase 4A: after the Upcoming window, Home lists what Safe to Spend still counts through its horizon.
+   * [date, name (+ " · card" when charged to a card), amount as shown] — the first 4, then "N more".
+   */
+  upcomingLater: [
+    ['Dec 1', 'Rent', '−$1,450.00'],
+    ['Dec 3', 'Paycheck', '+$1,860.00'],
+    ['Dec 9', 'Streaming · card', '−$15.49'],
+    ['Dec 17', 'Paycheck', '+$1,860.00'],
+  ],
+  upcomingLaterMore: '5 more through Dec 31.',
   /** [date, title, category, amount] newest first */
   recent: [
     ['Nov 12', 'Whole Foods', 'Groceries', '−$64.12'],

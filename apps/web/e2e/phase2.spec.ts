@@ -20,8 +20,9 @@ test.describe('dashboard (sample data, Nov 13 2026)', () => {
     for (const [name, amt] of [['Electricity', '−$91.40'], ['Paycheck', '+$1,860.00'], ['Phone', '−$65.00'], ['Card payment', '−$247.66'], ['Savings', '−$250.00']] as const) {
       await expect(up.locator('.list-row', { hasText: name })).toContainText(amt);
     }
-    await expect(page.getByTestId('safe-to-spend')).toHaveText('$2,579.83');
-    await expect(page.getByTestId('sts-after')).toHaveText("Phone, Card payment and Savings ($562.66) come after Nov 18, once $1,860.00 has come in. Your balance stays at or above the Nov 18 low through Nov 30, so they don't lower Safe to Spend.");
+    // Phase 4A: Safe to Spend now covers the Dec 1 rent (horizon = end of next month); it was $2,579.83 when it stopped at Nov 30.
+    await expect(page.getByTestId('safe-to-spend')).toHaveText('$2,427.17');
+    await expect(page.getByTestId('sts-after')).toHaveText("Electricity, Phone, Card payment and Savings ($421.89) come after Dec 1, once $5,580.00 has come in. Your balance stays at or above the Dec 1 low through Dec 31, so they don't lower Safe to Spend.");
     // "Why this number?" lists the later items too
     await page.getByTestId('why-sts').click();
     await expect(page.getByRole('dialog')).toContainText("after the lowest point, doesn't lower it");

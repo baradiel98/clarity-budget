@@ -6,7 +6,7 @@ export const GOLDEN_EXPECTED: Record<string, unknown> = {
     "monthEnd": 465000,
     "endOfDay": 120000,
     "safeToSpend": 95000,
-    "horizon": "2026-09-30",
+    "horizon": "2026-10-31",
     "lowest": [
       "2026-09-12",
       105000
@@ -191,7 +191,7 @@ export const GOLDEN_EXPECTED: Record<string, unknown> = {
     "monthEnd": 100000,
     "endOfDay": 50000,
     "safeToSpend": -50000,
-    "horizon": "2026-09-30",
+    "horizon": "2026-10-31",
     "lowest": [
       "2026-09-05",
       -50000
@@ -366,8 +366,8 @@ export const GOLDEN_EXPECTED: Record<string, unknown> = {
     "cardOwed": 20000,
     "monthEnd": 62500,
     "endOfDay": 92500,
-    "safeToSpend": 57500,
-    "horizon": "2026-02-28",
+    "safeToSpend": 37500,
+    "horizon": "2026-03-31",
     "lowest": [
       "2026-02-28",
       62500
@@ -385,9 +385,17 @@ export const GOLDEN_EXPECTED: Record<string, unknown> = {
         "paycard",
         -20000,
         "estimated"
+      ],
+      [
+        "2026-03-01",
+        "pay",
+        0,
+        "unknown"
       ]
     ],
-    "warnings": [],
+    "warnings": [
+      "unknown:occ:pay|2026-03-01"
+    ],
     "days": [
       [
         "2026-02-20",
@@ -431,6 +439,36 @@ export const GOLDEN_EXPECTED: Record<string, unknown> = {
       ],
       [
         "2026-02-28",
+        62500,
+        62500
+      ],
+      [
+        "2026-03-01",
+        62500,
+        62500
+      ],
+      [
+        "2026-03-02",
+        62500,
+        62500
+      ],
+      [
+        "2026-03-03",
+        62500,
+        62500
+      ],
+      [
+        "2026-03-04",
+        62500,
+        62500
+      ],
+      [
+        "2026-03-05",
+        62500,
+        62500
+      ],
+      [
+        "2026-03-06",
         62500,
         62500
       ]

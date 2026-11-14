@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { engineInput, onboard, type OnboardingInput } from '@clarity/data';
+import { countedOutflows, engineInput, onboard, type OnboardingInput } from '@clarity/data';
 import { buildDashboard, scheduleDates } from '@clarity/engine';
 import { addDays, formatMonthYear, formatShortDate, formatWeekdayDate, monthNameLong, parseAmountInput, parseISO, type ISODate, type Schedule } from '@clarity/shared';
 import { Plus, X } from 'lucide-react';
@@ -109,6 +109,7 @@ export function Onboarding() {
   if (step === 3 && dash) {
     const m = parseISO(session.today).m;
     const low = dash.lowestThroughMonthEnd;
+    const counted = countedOutflows(dash);
     return (
       <div className="center-screen">
         <div className="panel">
@@ -126,6 +127,17 @@ export function Onboarding() {
               <div><div className="k">Safe to Spend</div><div className={`v ${dash.safeToSpend.cents < 0 ? 'neg' : ''}`}><Money cents={dash.safeToSpend.cents} currency={cur} /></div></div>
             </div>
             <p className="t-callout muted" style={{ margin: 0 }}>{dash.lowestThroughMonthEnd.explanation.summary}</p>
+            {counted.items.length > 0 && (
+              <div data-testid="overview-counted">
+                <div className="t-footnote muted">Counted in Safe to Spend through {formatShortDate(counted.until)}</div>
+                <ul className="up-later-list">
+                  {counted.items.map((u) => (
+                    <li key={u.id}><span className="up-later-date">{formatShortDate(u.date)}</span><span className="up-later-name">{u.label}</span><span className="num"><Money cents={u.cents} currency={cur} sign="always" /></span></li>
+                  ))}
+                </ul>
+                {counted.more > 0 && <div className="t-footnote muted">and {counted.more} more</div>}
+              </div>
+            )}
             {dash.warnings.filter((w) => w.id.startsWith('unknown:')).map((w) => (
               <div key={w.id} className="callout">{w.title}. {w.detail}</div>
             ))}

@@ -3,7 +3,7 @@ import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, Plus } from 'lucide-react-
 import { useMemo, useState } from 'react';
 import { ActionSheetIOS, Alert, Platform, Pressable, View } from 'react-native';
 import { clearOccurrenceException, deleteRecurring, engineInput, estimateNote, recurringAmountView, setOccurrenceException, setRecurringPaused } from '@clarity/data';
-import { annualEquivalentCents, applyWeekendRule, balanceOnDate, buildForecast, describeSchedule, monthlyEquivalentCents, nextScheduleDate, type Occurrence } from '@clarity/engine';
+import { annualEquivalentCents, applyWeekendRule, balanceOnDate, buildForecast, describeSchedule, monthlyEquivalentCents, nextScheduleDate, planningWindowEnd, type Occurrence } from '@clarity/engine';
 import { addDays, endOfMonth, formatCents, formatShortDate, formatWeekdayDate, TERMS, type RecurringItem } from '@clarity/shared';
 import { setAddPrefill, setExplain } from '../../src/state/nav';
 import { useData, useRun, useSession, useStore } from '../../src/state/session';
@@ -40,7 +40,8 @@ export default function Planning() {
   const { c } = useTheme();
   const cur = data.settings.baseCurrency;
   const [target, setTarget] = useState(endOfMonth(today));
-  const forecast = useMemo(() => buildForecast({ today, horizonEnd: addDays(today, 45), accounts: data.accounts, transactions: data.transactions, recurring: data.recurring, exceptions: data.exceptions, baseCurrency: cur, includeEstimatedIncome: true }), [data, today, cur]);
+  const windowEnd = useMemo(() => planningWindowEnd(engineInput(data, today)), [data, today]);
+  const forecast = useMemo(() => buildForecast({ today, horizonEnd: windowEnd, accounts: data.accounts, transactions: data.transactions, recurring: data.recurring, exceptions: data.exceptions, baseCurrency: cur, includeEstimatedIncome: true }), [data, today, cur, windowEnd]);
   const onDate = useMemo(() => balanceOnDate(engineInput(data, today), target), [data, today, target]);
 
   const occActions = (o: Occurrence, isIncome: boolean) =>
@@ -107,7 +108,7 @@ export default function Planning() {
         <LinkButton title={TERMS.whyThisNumber} onPress={() => { setExplain(onDate.explanation); router.push('/explain'); }} />
       </Card>
 
-      <Card title="Next 45 days">
+      <Card title={`Through ${formatShortDate(windowEnd)}`}>
         {forecast.days.filter((d) => d.events.length).length === 0 && <T color="textSecondary">Nothing scheduled yet.</T>}
         {forecast.days.filter((d) => d.events.length || forecast.excludedEvents.some((e) => e.date === d.date)).map((d) => (
           <View key={d.date} style={{ borderTopWidth: 1, borderTopColor: c.border, paddingVertical: 8 }}>

@@ -31,7 +31,7 @@ describe('Scenario A: normal month', () => {
   });
   it('Safe to Spend = lowest − reserve', () => {
     expect(d.safeToSpend.cents).toBe(95000);
-    expect(d.safeToSpend.horizonReason).toBe('month_end');
+    expect(d.safeToSpend.horizonReason).toBe('next_month_end'); // Phase 4A: horizon covers next month too
   });
   it('end of today has nothing scheduled', () => {
     expect(d.endOfDay.cents).toBe(120000);
@@ -78,7 +78,7 @@ describe('Bill and paycheck on the same day', () => {
   });
 });
 
-describe('Horizon extends to next known paycheck when it is after month-end', () => {
+describe('Horizon covers the 1st of next month (Phase 4A: the later of next month-end and the first paycheck after this month)', () => {
   it('includes the rent due on the 1st before a paycheck on the 2nd', () => {
     const i = input({
       today: '2026-09-25',
@@ -89,9 +89,9 @@ describe('Horizon extends to next known paycheck when it is after month-end', ()
       ],
     });
     const s = computeSafeToSpend(i);
-    expect(s.horizonEnd).toBe('2026-10-02');
-    expect(s.horizonReason).toBe('next_income');
-    expect(s.cents).toBe(50000);
+    expect(s.horizonEnd).toBe('2026-10-31');
+    expect(s.horizonReason).toBe('next_month_end');
+    expect(s.cents).toBe(50000); // unchanged: the Oct 1 rent was and is counted
   });
 });
 

@@ -68,11 +68,24 @@ Events in the timeline:
 ## Headline numbers
 - **Projected end of today** = today's recorded cash + today's remaining scheduled items.
 - **Upcoming (dashboard)** lists overdue items and everything from today through **at least month-end** (or 14 days, whichever is later). The cash items listed therefore add up to the projected month-end; a test checks this identity on 90 consecutive days of sample data.
+- **Later, counted in Safe to Spend (dashboard, Phase 4A):** items after the Upcoming window through the Safe to Spend horizon (`Dashboard.upcomingLater`). The dashboard shows the first few and says how many more there are through the horizon date, with a link to Planning. Nothing Safe to Spend depends on is hidden from the user.
 - **Projected month-end balance** = timeline value at the end of the last day of the month. It **includes estimated income**, and the explanation says how much of it is estimated.
 - **Lowest projected balance (through month-end)** = minimum daily low from today to month-end. It shows the date and the obligations that cause it, and whether payday comes before or after.
 - **Lowest before next income** = minimum daily low from today to the next paycheck with a fixed amount. If no such paycheck is scheduled, it isn't shown.
 - **Safe to Spend** = (lowest daily low of available cash from today to the horizon) − minimum cash reserve.
-  - The horizon is the later of month-end and the next paycheck with a fixed amount.
+  - **Horizon (Phase 4A):** the **later** of
+    1. the **end of next month**, and
+    2. the **first dependable paycheck after this month ends** (fixed amount, expected; searched up to 62 days past month-end).
+
+    Every scheduled outflow from today through the horizon counts: bills, subscriptions, planned transactions, savings transfers and card payments. That includes a bill on the 1st of next month and any bill before the next paycheck.
+  - **Why this rule:**
+    - *Before Phase 4A* the horizon was "the later of this month-end and the first paycheck on or after today". When a paycheck fell earlier in the month, a bill due right after month-end (rent on the 1st) was dropped. Safe to Spend could then report money that is needed days later.
+    - *"Through the first paycheck after month-end" alone* is not enough. A small paycheck just before a large bill (e.g. $500 on Dec 4, rent $1,400 on Dec 5) would hide the shortfall.
+    - *Covering all of next month* is the smallest month-based window that cannot drop a bill on the 1st.
+
+    Dependable income in the window still counts on the day it arrives (outflows first on the same day). So a normal pay cycle doesn't make Safe to Spend artificially low; it only drops when a known shortfall exists before the horizon.
+  - **What Safe to Spend promises:** spend it today, and your projected available cash stays at or above the minimum reserve on every day through the horizon, provided the dependable income arrives as scheduled.
+  - **Not promised:** anything scheduled after the horizon (stated in "Why this number?"; Planning shows it), and income that is irregular, estimated or of unknown amount (never counted).
   - Only fixed-amount income counts. Estimated income is excluded and listed.
   - Savings and card payments are already in the timeline as transfers, so nothing is subtracted twice.
   - Card purchases with no payment scheduled are **not** deducted; a warning says so.
