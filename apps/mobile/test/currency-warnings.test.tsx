@@ -34,5 +34,6 @@ it('an archived card that still owes money keeps its warning on mobile Home (sam
   const ui = await render(<HomeView data={data} today={SAMPLE_TODAY} backup={{ due: false, reason: null }} actions={actions} />);
   expect(ui.getByText(w.title)).toBeTruthy();
   expect(ui.getByText(w.detail)).toBeTruthy();
-  expect(ui.getByTestId('safe-to-spend')).toHaveTextContent('$2,427.17');
+  // Phase 4A.5.2 (Policy B): no payment is scheduled for the $250, so it is owed now: 2,427.17 − 250 (Phase 4A.4.4: $2,427.17)
+  expect(ui.getByTestId('safe-to-spend')).toHaveTextContent('$2,177.17');
 });

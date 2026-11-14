@@ -146,14 +146,43 @@ Events in the timeline:
   - When a card owes both purchases and a planned cash advance, the payment is applied to the purchases first, so the advance stays counted as borrowed as long as the card still owes at least that much (conservative). Purchases on the same day as a payment count as owed before it.
   - Since Phase 4A.5 the card debt still owed at the end of the forecast is set aside (below), so the audit scenario ($500, $90 advance Nov 20, $400 payment Dec 21, $400 purchases) is **$100** whether the purchases are on Dec 20, 21 or 22 (Phase 4A.4.4: $190 for Dec 22).
   - New warning: a card projected to owe money at the end of the forecast that no later scheduled payment (within 62 days) pays — "Visa is projected to owe $90.00 on Dec 31, and no payment is scheduled for it". Not shown when the "no payment scheduled" warning for today's balance already applies.
-- **Card liability (Phase 4A.5, owner decision).** Safe to Spend accounts for card debt even when no payment is scheduled.
-  - **Calculation:** the forecast moves every base-currency card's balance on the actual dates: starting balance owed today, plus purchases (bills and subscriptions charged to the card, planned card transactions, "Can I afford this?" purchases on the card) and cash advances, minus refunds and payments (scheduled or recorded ahead of time; full-balance payments use the balance at the start of their day). At the end of the forecast (the Safe to Spend horizon), what each card still owes, `max(0, owed)`, is set aside from the spendable cash projected at the end of that day (archived cards included; a card in credit counts as owing nothing).
-  - **Safe to Spend** = min(lowest daily own-money low, end-of-forecast cash − card debt still owed) − reserve. `SafeToSpend.cardsOwedAtHorizon` lists the amounts; "Why this number?" shows "Visa still owed on Dec 31".
-  - **No double counting:** a payment lowers the cash and the card's debt by the same amount; an advance raises both. Paying the card on Dec 31 or after the horizon gives the same result.
-  - **Assumption:** debt with no scheduled payment must be covered by the end of the forecast, the same as any other obligation dated then. Income arriving before then can cover it, so it lowers Safe to Spend only when the cash at the end of the forecast (less the debt) is the lowest point. Example: sample data plus an archived card owing $250 → end cash $7,785.28 − $250 is still above the Dec 1 low, so Safe to Spend stays $2,427.17. (The more conservative alternative, treating it as owed today, would make scheduling a payment raise Safe to Spend; not chosen.)
-  - **Worked examples (Nov 13, horizon Dec 31):** Checking $1,000 + Visa owes $1,000, nothing scheduled → $0; with a full-balance payment Nov 25 → $0 (counted once); owes $300, pays $100 → $700; owes $300, $100 purchase Dec 10, paid Dec 31 or Jan 15 → $600 either way; $200 purchase Dec 5 and $50 refund Dec 10 → $350; owes $100, pays $300 → $200 (credit not spendable); rent $800 Dec 1 + pay $500 Dec 15 + card owes $300 → $200 (the Dec 1 low governs).
-  - **Cannot be calculated:** a card in another currency that owes money or has scheduled activity, or a card with something scheduled of unknown amount, is named ("Euro card's balance isn't included in Safe to Spend") and "Can I afford this?" never answers plainly ("Yes, through Dec 31 — not counting Euro card").
-  - Warnings: "no payment scheduled" (today's balance, no payment ever scheduled) and "projected to owe … and no payment is scheduled for it" (end balance no later payment covers) now say the amount is set aside.
+- **Card liability (Phase 4A.5 → Policy B in Phase 4A.5.2, owner decisions).** Card debt is counted even when no payment is scheduled. Card debt that no payment the user scheduled covers is **owed now**; a scheduled payment (or refund) sets when the debt it covers is counted. Clarity stores no statement due dates: a scheduled payment's date is the user's planned date, never presented as a verified due date.
+  - **Per day, per base-currency card (archived included), at the day's low point (after the day's money going out):**
+    - *owed* = what the card owes then (`max(0, −balance)`; a card in credit owes nothing and its credit is never spendable);
+    - *covering* = payments and refunds credited to the card after that point: later that day, later in the forecast, and within 62 days after it (the existing lookahead);
+    - *uncovered* = `max(0, owed − covering)`, reserved that day. Payments pay the oldest debt first, so a later payment always covers debt that already exists before any later purchase, and never a purchase that hasn't happened yet.
+    - The planned cash-advance part stays borrowed until repaid (Phase 4A.4); because payments go to purchases first, an uncovered amount is the advance first. Reserved per card: `max(uncovered, advance still owed)`. Never both.
+  - **Safe to Spend** = min over the days of (low − reserved) and of (cash at the end of the forecast − card debt still owed then) − reserve.
+  - **Treatment by case:**
+    - *starting balance:* owed today; reserved today unless later payments/refunds cover it;
+    - *fixed-amount payments:* cover up to their amount, on their date;
+    - *full-balance payments:* cover everything owed when paid;
+    - *multiple or partial payments:* their total covers the oldest debt; any remainder is reserved now (warning "Visa: $300.00 of $400.00 isn't covered by a scheduled payment");
+    - *purchases:* owed from their date; one after the last payment is reserved from that date;
+    - *cash advances:* as purchases, plus the borrowed-money rule;
+    - *refunds:* cover like a payment;
+    - *archived cards:* same;
+    - *payment after the forecast ends:* covers the debt, which is then set aside at the end of the forecast (unchanged boundary rule);
+    - *payments and same-day income:* payments come first (unchanged).
+  - **Worked examples** (Nov 13, horizon Dec 31; $500 checking, card owes $400):
+    - payment Nov 25 + paycheck Dec 4 → $100;
+    - no payment → $100 (Phase 4A.5: $500);
+    - payment Dec 10 after the paycheck → $500;
+    - $100 partial payment Nov 25 → $100 (Phase 4A.5: $400);
+    - two cards, Visa $300 paid Nov 20 and Amex $200 paid Dec 20, $400 checking → $100 (Phase 4A.5: $400); Amex unscheduled → −$100;
+    - payment Jan 15 → $500 with the paycheck, $100 without;
+    - $50 refund → $150;
+    - same-day paycheck and payment with $100 checking → −$300;
+    - forecast end moving to a Feb 1 paycheck: $100 on both days (Phase 4A.5: $100 → $500);
+    - sample data + a card owing $250 with no payment → $2,177.17.
+  - **"Why this number?"** names each card at the low point:
+    - "Visa: owed now" with the amount and "no payment is scheduled for it", or how much a planned payment covers;
+    - "Cash advance still owed";
+    - an info line "Visa: $400.00 owed — covered by the payment you planned for Dec 10 (a date you entered, not a statement due date)";
+    - or "Visa still owed on Dec 31" for a payment planned after the forecast.
+  - **Warnings:** "no payment scheduled … counts the $X as owed now"; "Visa: $X of $Y isn't covered by a scheduled payment"; "projected to owe … and no payment is scheduled for it".
+  - "Can I afford this?" uses the same calculation (a purchase on a card is owed now unless a scheduled payment covers it).
+  - **Cannot be calculated:** a card in another currency that owes money or has scheduled activity, or a card with something scheduled of unknown amount, is named, never converted, and "Can I afford this?" is qualified ("— not counting Euro card").
 - **Amounts in their own currency (Phase 4A.4.4).** Warning text and itemised amounts use the currency of the account they belong to (€, £, $ …); an item's `currency` is set only when it differs from the base currency. Upcoming items and Planning timeline amounts on accounts in another currency are shown in that currency (`UpcomingItem.currency`).
 - **Grouping (Phase 4A.4.4).** Repeated dates of one scheduled item that a non-spendable or archived account can't cover, transfers from one schedule that can't be funded, and cross-currency transfers from one schedule are one warning each, with every date and amount in `items`. Different items are never combined, even with the same amount. The archived-account warning counts distinct scheduled items.
 - **Pause and resume (existing rule, now stated in the archive review).** Pausing skips every occurrence due while paused; resuming starts again from the resume date, and occurrences that fell due during the pause are not brought back and are not overdue. Resuming on the same day restores everything exactly once.

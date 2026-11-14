@@ -33,9 +33,10 @@ describe('Card debt is set aside even when no payment is scheduled', () => {
     expect(sts(i)).toBe(0);
     const s = computeSafeToSpend(i);
     expect(s.cardsOwedAtHorizon).toEqual([{ accountId: 'card', cents: 100000 }]);
-    expect(s.lowPoint.date).toBe('2026-12-31');
-    expect(s.explanation.lines.find((l) => l.label === 'Visa still owed on Dec 31')?.cents).toBe(-100000);
-    expect(warns(i).find((w) => w.id === 'card-unscheduled:card')!.detail).toBe('No payment is scheduled. Safe to Spend sets aside what Visa is projected to still owe on Dec 31 ($1,000.00).');
+    // Phase 4A.5.2 (Policy B): no payment scheduled → owed now: the low is today (Phase 4A.5: Dec 31)
+    expect(s.lowPoint.date).toBe('2026-11-13');
+    expect(s.explanation.lines.find((l) => l.label === 'Visa: owed now')?.cents).toBe(-100000);
+    expect(warns(i).find((w) => w.id === 'card-unscheduled:card')!.detail).toBe('No payment is scheduled, so Safe to Spend counts the $1,000.00 as owed now.');
   });
 
   it('a full-balance payment on Nov 25 is counted once: $0, not −$1,000', () => {
@@ -73,10 +74,10 @@ describe('Card debt is set aside even when no payment is scheduled', () => {
     expect(ends(i).card).toBe(20000);
   });
 
-  it('the daily low still governs when it is lower: rent $800 Dec 1, pay $500 Dec 15, card owes $300 → $200', () => {
+  it('rent $800 Dec 1, pay $500 Dec 15, card owes $300 with no payment → −$100 (the paycheck can\'t cover debt owed now)', () => {
     const i = input({ today: TODAY, accounts: [chk(100000), card(30000)], recurring: [once('rent', 'bill', '2026-12-01', 80000), once('pay', 'income', '2026-12-15', 50000)] });
-    // Dec 1 low: 1,000 − 800 = 200. End: 200 + 500 − 300 owed = 400. Lower: 200.
-    expect(sts(i)).toBe(20000);
+    // Phase 4A.5.2 (Policy B): the $300 is owed now on every day. Dec 1: 1,000 − 800 − 300 = −100. (Phase 4A.5: $200.)
+    expect(sts(i)).toBe(-10000);
     expect(computeSafeToSpend(i).lowPoint.date).toBe('2026-12-01');
   });
 
@@ -124,7 +125,7 @@ describe('A card balance that cannot be calculated is named, and "Can I afford t
     const i = input({ today: TODAY, accounts: [chk(100000), card(0)] });
     const r = canIAfford(i, { amountCents: 20000, accountId: 'card', date: TODAY });
     expect([r.verdict, r.after.cents]).toEqual(['yes', 80000]); // 1,000 − 200 owed
-    expect(r.notes).toContain("Charged to your card. No full-balance payment is scheduled, so it's counted as card debt still owed on Dec 31.");
+    expect(r.notes).toContain("Charged to your card. Unless a payment you've scheduled covers it, it's counted as owed from the day of the purchase."); // Phase 4A.5.2 wording
   });
 });
 

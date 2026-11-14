@@ -352,6 +352,26 @@ The step-by-step checklist is in `docs/device-test-script.md`.
 - **Changed tests:** 5 existing tests and 1 e2e comment that encoded the previous card rule now carry hand-derived values.
 - **Not verified:** physical devices, Safari, real card statement due dates (not modelled).
 
+## 7l. Phase 4A.5.2: Policy B for card debt
+
+| Scenario ($500 checking, card owes $400; Nov 13, horizon Dec 31) | Phase 4A.5 | Policy B |
+|---|---|---|
+| Payment Nov 25, paycheck Dec 4 | $100 | $100 |
+| No payment, paycheck Dec 4 | $500 | **$100** |
+| Payment Dec 10 after the paycheck | $500 | $500 |
+| $100 partial payment Nov 25 | $400 | **$100** |
+| Visa $300 paid Nov 20, Amex $200 paid Dec 20 ($400 checking) | $400 | **$100** |
+| Same balances, forecast end Dec 31 → Feb 1 | $100 → $500 | **$100 → $100** |
+| Purchases before/on/after a $400 payment; $90 advance before/after | $100 | $100 |
+| Sample data + card owing $250, no payment | $2,427.17 | **$2,177.17** |
+
+- **Tests:**
+  - `packages/engine/test/card-policy-b.test.ts`: 21;
+  - `apps/web/e2e/phase4a52.spec.ts`: 1 (Why this number?, Can I afford this?);
+  - `apps/mobile/test/card-explain.test.tsx`: 1.
+- **Changed tests:** five unit tests, one e2e assertion and one mobile assertion that encoded the Phase 4A.5 timing now carry Policy B values.
+- **Not verified:** physical devices, Safari, real statement due dates (not modelled).
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

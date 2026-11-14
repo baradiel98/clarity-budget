@@ -302,3 +302,18 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Changed tests, by decision]** Five existing tests and one e2e comment encoded the old rule, "card debt only through a scheduled payment"; updated with hand-derived values.
   - Sample data is unchanged ($2,427.17): its card is paid in full on Dec 31.
 - **[New]** Unreliable cards (another currency, or unknown amounts) are warned about, and "Can I afford this?" is qualified "— not counting X".
+
+## Phase 4A.5.2 (2026-11-14): Policy B for card debt (owner decision after audit 4A.5.1)
+- **[Owner decision, implemented]** Card debt that no scheduled payment or refund covers is owed now; a scheduled payment sets when the debt it covers is counted.
+  - The rule runs per day, per base-currency card, at the low point: uncovered = owed − later credits (through the horizon + 62 days), oldest debt first.
+  - Reserve per card: max(uncovered, advance still owed).
+  - The end-of-horizon check is kept for payments planned after the horizon.
+  - `ForecastDay.cards`, `SafeToSpend.cardDebtToday` and `LowPoint.cardReserves` were added.
+- **[Verified]** It fixes the audit's overstatements:
+  - scenario 1: $500 → $100;
+  - partial payment: $400 → $100;
+  - two cards: $400 → $100;
+  - forecast end moving from Dec 31 to Feb 1: $100 / $500 → $100 / $100.
+- **[Presentation fixed]** "Why this number?" always names the card debt at the low point, and planned dates are marked as user-entered.
+- **[Changed tests, by decision]** Five unit tests, one e2e assertion and one mobile assertion that encoded the Phase 4A.5 timing were updated with hand-derived values. Sample data is still $2,427.17.
+- **[Limitation]** Statement due dates, interest, fees and card limits are not modelled. A user-entered payment date is trusted as the expected date.

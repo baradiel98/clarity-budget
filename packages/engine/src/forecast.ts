@@ -145,6 +145,12 @@ export interface ForecastDay {
   /** Planned cash-advance money still owed at the day's low point / at the end of the day (Phase 4A.4). */
   advanceOwedAtLowCents: Cents;
   advanceOwedEndCents: Cents;
+  /**
+   * Phase 4A.5.2: each base-currency card at the day's low point (after the day's money going out): what it owes,
+   * the planned cash-advance part of that, and payments/refunds credited to it after the low point that day and
+   * over the whole day. Used to decide which card debt a later payment covers (Policy B).
+   */
+  cards: Record<ID, { owedAtLowCents: Cents; advanceAtLowCents: Cents; creditsAfterLowCents: Cents; creditsCents: Cents }>;
   events: ForecastEvent[];
 }
 
@@ -319,6 +325,7 @@ export function buildForecast(input: ForecastInput): Forecast {
   const conflicts: CurrencyConflict[] = [];
   /** Per card: planned cash-advance money still owed (never more than the card's projected balance owed). */
   const advanceOwed = new Map<ID, Cents>();
+  const baseCards = new Set(accounts.filter((a) => a.type === 'credit_card' && a.currency === baseCurrency).map((a) => a.id));
   const total = diffDays(horizonEnd, today);
   for (let i = 0; i <= total; i++) {
     const date = addDays(today, i);
@@ -345,7 +352,17 @@ export function buildForecast(input: ForecastInput): Forecast {
     //  3. afternoon: income and card cash advances arrive.
     //  4. evening: transfers out of non-spendable accounts, capped at what the account holds by then.
     // The combined low point is unchanged: the day's money going out, before any money coming in.
-    const apply = (id: ID, d: Cents) => balances.set(id, (balances.get(id) ?? 0) + d);
+    // Credits (payments, refunds) to base-currency cards, split at the day's low point (Phase 4A.5.2).
+    let afterLow = false;
+    const creditsBefore = new Map<ID, Cents>();
+    const creditsAfter = new Map<ID, Cents>();
+    const apply = (id: ID, d: Cents) => {
+      balances.set(id, (balances.get(id) ?? 0) + d);
+      if (d > 0 && baseCards.has(id)) {
+        const m = afterLow ? creditsAfter : creditsBefore;
+        m.set(id, (m.get(id) ?? 0) + d);
+      }
+    };
     const typeOf = (id: ID) => accountById.get(id)?.type;
     const coverable = (id: ID) => {
       const a = accountById.get(id);
@@ -425,6 +442,11 @@ export function buildForecast(input: ForecastInput): Forecast {
     }
     syncAdvances();
     const owedAtLow = owedTotal();
+    const cardsAtLow: ForecastDay['cards'] = {};
+    for (const id of baseCards) {
+      cardsAtLow[id] = { owedAtLowCents: Math.max(0, -(balances.get(id) ?? 0)), advanceAtLowCents: advanceOwed.get(id) ?? 0, creditsAfterLowCents: 0, creditsCents: 0 };
+    }
+    afterLow = true;
     // 2. account check (spendable accounts; non-spendable ones never go below zero here)
     for (const [id, labels] of paidOut) {
       const bal = balances.get(id) ?? 0;
@@ -507,7 +529,12 @@ export function buildForecast(input: ForecastInput): Forecast {
     cash = low + inflow;
     // Order inside a day: outflows first, then inflows (what the low point assumes).
     events.sort((a, b) => a.cashDeltaCents - b.cashDeltaCents);
-    days.push({ date, startCashCents: start, lowCashCents: low, endCashCents: cash, advanceOwedAtLowCents: owedAtLow, advanceOwedEndCents: owedTotal(), events });
+    for (const id of baseCards) {
+      const c = cardsAtLow[id]!;
+      c.creditsAfterLowCents = creditsAfter.get(id) ?? 0;
+      c.creditsCents = (creditsBefore.get(id) ?? 0) + c.creditsAfterLowCents;
+    }
+    days.push({ date, startCashCents: start, lowCashCents: low, endCashCents: cash, advanceOwedAtLowCents: owedAtLow, advanceOwedEndCents: owedTotal(), cards: cardsAtLow, events });
   }
 
   return {
@@ -541,6 +568,10 @@ export interface LowPoint {
    * then (already subtracted from `cents`). Per card, in the base currency.
    */
   cardsOwed?: { accountId: ID; cents: Cents }[];
+  /** Phase 4A.5.2: card debt at a daily low point (owed now / covered by a scheduled payment). */
+  cardReserves?: {
+    accountId: ID; owedCents: Cents; uncoveredCents: Cents; advanceCents: Cents; advanceTotalCents: Cents; coveredCents: Cents; paymentDate: ISODate | null;
+  }[];
 }
 
 /**

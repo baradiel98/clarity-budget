@@ -101,7 +101,7 @@ describe('2. An archived credit card keeps its debt warning', () => {
     expect(warns(scheduled).some((w) => w.id.startsWith('card-unscheduled'))).toBe(false);
     expect(sts(scheduled)).toBe(100000); // 2,000 − 1,000 paid on Nov 25
     const active = warns(input({ today: TODAY, accounts: [chk(100000), card(false)] })).find((w) => w.id.startsWith('card-unscheduled'))!;
-    expect(active.detail).toBe('No payment is scheduled. Safe to Spend sets aside what Visa is projected to still owe on Dec 31 ($1,000.00).'); // Phase 4A.5 wording
+    expect(active.detail).toBe('No payment is scheduled, so Safe to Spend counts the $1,000.00 as owed now.'); // Phase 4A.5.2 wording
   });
 });
 

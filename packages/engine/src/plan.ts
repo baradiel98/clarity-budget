@@ -107,6 +107,8 @@ export interface SafeToSpend {
   cardsOwedAtHorizon: { accountId: ID; cents: Cents }[];
   /** Phase 4A.5: cards whose balance can't be included reliably (named in warnings and affordability answers). */
   unreliableCards: { accountId: ID; name: string; reason: string }[];
+  /** Phase 4A.5.2: each card's debt today, split into covered by a scheduled payment and owed now. */
+  cardDebtToday: CardReserve[];
 }
 
 const ASSUMPTIONS_BASE = [
@@ -199,6 +201,46 @@ function excludedLine(e: ForecastEvent): ExplainLine {
   return { kind: 'excluded', label: e.label, date: e.date, note, ...(e.occurrence?.amountCents ? { cents: e.occurrence.amountCents } : {}) };
 }
 
+/** One card's debt at a low point (Phase 4A.5.2, Policy B). */
+export interface CardReserve {
+  accountId: ID;
+  owedCents: Cents;
+  /** Not covered by any later scheduled payment or refund: counted as owed now. */
+  uncoveredCents: Cents;
+  /** Planned cash-advance money beyond the uncovered part, still borrowed until repaid. */
+  advanceCents: Cents;
+  /** All planned cash-advance money still owed on this card at the low point. */
+  advanceTotalCents: Cents;
+  /** Covered by a later scheduled payment (or refund); counted on that payment's date. */
+  coveredCents: Cents;
+  /** Date of the next payment/refund the user scheduled for this card, if any (planned, not a statement due date). */
+  paymentDate: ISODate | null;
+}
+
+/** "Why this number?" lines for card debt at the low point (Phase 4A.5.2): card, amount, owed now or covered, date. */
+function cardLines(low: LowPoint, input: EngineInput, horizonEnd: ISODate, nextAfterEnd: (id: ID) => ISODate | null): ExplainLine[] {
+  const cur = input.baseCurrency;
+  const name = (id: ID) => input.accounts.find((a) => a.id === id)?.name ?? 'Card';
+  const lines: ExplainLine[] = [];
+  for (const r of low.cardReserves ?? []) {
+    // Payments go to purchases first, so an uncovered amount is the planned cash advance first (Phase 4A.4 rule).
+    const advance = Math.min(r.advanceTotalCents, r.uncoveredCents) + r.advanceCents;
+    const ownDebt = r.uncoveredCents - Math.min(r.advanceTotalCents, r.uncoveredCents);
+    if (advance > 0) lines.push({ kind: 'out', label: 'Cash advance still owed', cents: -advance, note: `borrowed from ${name(r.accountId)}; not counted as your money until it's paid back` });
+    if (ownDebt > 0) {
+      lines.push({ kind: 'out', label: `${name(r.accountId)}: owed now`, cents: -ownDebt, note: r.coveredCents > 0 ? `not covered by a payment you've scheduled; the other ${formatCents(r.coveredCents, cur)} is covered by your planned payment on ${r.paymentDate ? formatShortDate(r.paymentDate) : '—'}` : 'no payment is scheduled for it, so it is counted as owed now' });
+    }
+    if (r.coveredCents > 0 && r.uncoveredCents === 0) {
+      lines.push({ kind: 'info', label: `${name(r.accountId)}: ${formatCents(r.coveredCents, cur)} owed`, note: `covered by the payment you planned for ${r.paymentDate ? formatShortDate(r.paymentDate) : '—'} (a date you entered, not a statement due date); counted on that day` });
+    }
+  }
+  for (const x of low.cardsOwed ?? []) {
+    const later = nextAfterEnd(x.accountId);
+    lines.push({ kind: 'out', label: `${name(x.accountId)} still owed on ${formatShortDate(horizonEnd)}`, cents: -x.cents, note: later ? `your planned payment on ${formatShortDate(later)} is after the forecast ends, so it is set aside here` : 'no payment is scheduled for it; set aside' });
+  }
+  return lines;
+}
+
 /** Base-currency cards projected to owe money at the end of forecast `f` (Phase 4A.5). */
 function projectedCardDebt(input: EngineInput, f: Forecast): { accountId: ID; cents: Cents }[] {
   return input.accounts
@@ -233,13 +275,61 @@ function unreliableCards(input: EngineInput, f: Forecast, horizonEnd: ISODate): 
 export function computeSafeToSpend(input: EngineInput, hypotheticals?: readonly Hypothetical[]): SafeToSpend {
   const h = horizonFor(input);
   const f = forecastTo(input, h.end, false, hypotheticals);
-  const dayLow = lowestBetween(f, input.today, h.end, { ownMoney: true });
-  if (!dayLow) throw new Error('Forecast produced no days');
+  if (!f.days.length) throw new Error('Forecast produced no days');
+  // Phase 4A.5.2 (Policy B): card debt that no later payment or refund covers is owed now. Payments pay the oldest
+  // debt first, so on each day the debt a card already owes is covered by the credits still to come (later that day
+  // after the low point, later in the forecast, or within the lookahead after it); the rest is reserved that day.
+  // A planned cash advance stays borrowed until repaid (Phase 4A.4): reserve max(uncovered, advance) per card.
+  const ext = forecastTo(input, addDays(h.end, INCOME_LOOKAHEAD_DAYS), false, hypotheticals);
+  const cardIds = input.accounts.filter((a) => a.type === 'credit_card' && a.currency === input.baseCurrency).map((a) => a.id);
+  const creditsFrom = new Map<ID, Cents[]>(); // credits on ext days index > i
+  for (const id of cardIds) {
+    const after: Cents[] = new Array(ext.days.length).fill(0);
+    let acc = 0;
+    for (let i = ext.days.length - 1; i >= 0; i--) {
+      after[i] = acc;
+      acc += ext.days[i]!.cards[id]?.creditsCents ?? 0;
+    }
+    creditsFrom.set(id, after);
+  }
+  const nextCreditDate = (id: ID, i: number): ISODate | null => {
+    if ((ext.days[i]?.cards[id]?.creditsAfterLowCents ?? 0) > 0) return ext.days[i]!.date;
+    for (let j = i + 1; j < ext.days.length; j++) if ((ext.days[j]!.cards[id]?.creditsCents ?? 0) > 0) return ext.days[j]!.date;
+    return null;
+  };
+  const reserveOn = (i: number): CardReserve[] =>
+    cardIds.flatMap((id) => {
+      const c = f.days[i]!.cards[id];
+      if (!c || (c.owedAtLowCents === 0 && c.advanceAtLowCents === 0)) return [];
+      const covering = c.creditsAfterLowCents + (creditsFrom.get(id)![i] ?? 0);
+      const uncovered = Math.max(0, c.owedAtLowCents - covering);
+      const advanceOnly = Math.max(0, c.advanceAtLowCents - uncovered);
+      return [{ accountId: id, owedCents: c.owedAtLowCents, uncoveredCents: uncovered, advanceCents: advanceOnly, advanceTotalCents: c.advanceAtLowCents, coveredCents: c.owedAtLowCents - uncovered, paymentDate: nextCreditDate(id, i) }];
+    });
+  let best = 0;
+  const own = (i: number) => f.days[i]!.lowCashCents - reserveOn(i).reduce((s, r) => s + r.uncoveredCents + r.advanceCents, 0);
+  for (let i = 1; i < f.days.length; i++) if (own(i) < own(best)) best = i;
+  const bestDate = f.days[best]!.date;
+  const before = f.days.filter((d) => d.date <= bestDate);
+  const reserves = reserveOn(best);
+  const dayLow: LowPoint = {
+    cents: own(best),
+    date: bestDate,
+    obligations: before.flatMap((d) => d.events.filter((e) => e.cashDeltaCents < 0)),
+    incomeBefore: before.filter((d) => d.date < bestDate).flatMap((d) => d.events.filter((e) => e.cashDeltaCents > 0)),
+    advanceOwedCents: reserves.reduce((s, r) => s + r.advanceCents, 0),
+    cardReserves: reserves,
+  };
   // Phase 4A.5 (owner decision): card debt is counted even without a scheduled payment. At the end of the forecast,
   // what every base-currency card is projected to still owe (purchases, cash advances, refunds and payments all on
   // their dates; archived cards included) is set aside from the spendable cash. Scheduled payments already reduced
   // both the cash and the card balance, so nothing is counted twice; a card in credit counts as owing nothing.
   const cardsOwed = projectedCardDebt(input, f);
+  const endIdx = f.days.length - 1;
+  const nextAfterEnd = (id: ID): ISODate | null => {
+    for (let j = endIdx + 1; j < ext.days.length; j++) if ((ext.days[j]!.cards[id]?.creditsCents ?? 0) > 0) return ext.days[j]!.date;
+    return null;
+  };
   const lastDay = f.days[f.days.length - 1]!;
   const endOwn = lastDay.endCashCents - cardsOwed.reduce((s, x) => s + x.cents, 0);
   const allEvents = f.days.flatMap((d) => d.events);
@@ -264,8 +354,7 @@ export function computeSafeToSpend(input: EngineInput, hypotheticals?: readonly 
     { kind: 'start', label: TERMS.recordedBalance, cents: f.startCashCents },
     ...low.incomeBefore.map((e) => eventLine(e, cur)),
     ...low.obligations.map((e) => eventLine(e, cur)),
-    ...(low.advanceOwedCents > 0 ? [{ kind: 'out' as const, label: 'Cash advance still owed', cents: -low.advanceOwedCents, note: "borrowed from a credit card; not counted as your money until it's paid back" }] : []),
-    ...(low.cardsOwed ?? []).map((x): ExplainLine => ({ kind: 'out', label: `${input.accounts.find((a) => a.id === x.accountId)?.name ?? 'Card'} still owed on ${formatShortDate(h.end)}`, cents: -x.cents, note: 'card balance after scheduled payments; set aside even though no payment covers it yet' })),
+    ...cardLines(low, input, h.end, nextAfterEnd),
     { kind: 'info', label: `Lowest point: ${formatShortDate(low.date)}`, cents: low.cents },
     ...afterEvents.map((e): ExplainLine => ({ ...eventLine(e, cur), note: [eventLine(e, cur).note, `after the lowest point, doesn't lower it`].filter(Boolean).join('; ') })),
     { kind: 'reserve', label: 'Minimum cash reserve', cents: -reserve },
@@ -311,7 +400,7 @@ export function computeSafeToSpend(input: EngineInput, hypotheticals?: readonly 
       assumptions: [
         ...ASSUMPTIONS_BASE,
         'Only income with a fixed amount is counted. Estimated or unknown income is listed but not counted.',
-        'Credit card balances are counted: what each card is projected to still owe at the end of the forecast, after scheduled payments, is set aside.',
+        "Credit card debt that no payment you've scheduled covers is counted as owed now. Debt a scheduled payment covers is counted on that payment's date (a date you entered, not a statement due date).",
         'Combines your spendable accounts. It assumes you can move money between them; a bill paid from an account that would run short is flagged.',
         'A transfer from savings counts only up to what that account is projected to hold. A bill paid from savings that savings can\'t cover is counted against your spendable accounts.',
         ...(f.cashAdvances.some((a) => a.date <= h.end)
@@ -329,6 +418,7 @@ export function computeSafeToSpend(input: EngineInput, hypotheticals?: readonly 
     cashAdvances: f.cashAdvances.filter((x) => x.date <= h.end),
     unknownAmounts: f.excludedEvents.filter((e) => e.excluded === 'unknown_amount' && e.date <= h.end),
     cardsOwedAtHorizon: cardsOwed,
+    cardDebtToday: reserveOn(0),
     unreliableCards: unreliableCards(input, f, h.end),
   };
 }
@@ -415,7 +505,7 @@ export function canIAfford(input: EngineInput, q: AffordQuery): AffordResult {
     notes.push(
       paysCard
         ? 'Charged to your card. It reduces cash when your scheduled full-balance card payment happens.'
-        : `Charged to your card. No full-balance payment is scheduled, so it's counted as card debt still owed on ${H}.`,
+        : "Charged to your card. Unless a payment you've scheduled covers it, it's counted as owed from the day of the purchase.",
     );
   }
 
@@ -647,6 +737,7 @@ export function buildDashboard(input: EngineInput): Dashboard {
   const sum = (xs: number[]) => xs.reduce((s, x) => s + x, 0);
 
   const cardWarned = new Set<ID>();
+  const acctName = (id: ID) => input.accounts.find((a) => a.id === id)?.name ?? 'Card';
   for (const line of balances.lines) {
     if (line.type !== 'credit_card' || line.balanceCents >= 0) continue;
     const scheduled = input.recurring.some((r) => !r.paused && r.toAccountId === line.accountId);
@@ -656,10 +747,23 @@ export function buildDashboard(input: EngineInput): Dashboard {
         id: `card-unscheduled:${line.accountId}`,
         severity: 'warning',
         title: `${formatCents(-line.balanceCents, cur)} on ${line.name} with no payment scheduled`,
-        detail: `No payment is scheduled. Safe to Spend sets aside what ${line.name} is projected to still owe on ${H} (${formatCents(sts.cardsOwedAtHorizon.find((x) => x.accountId === line.accountId)?.cents ?? 0, cur)}).${line.archived ? ` ${line.name} is archived; archiving doesn't clear what it owes.` : ''}`,
+        detail: `No payment is scheduled, so Safe to Spend counts the ${formatCents(-line.balanceCents, cur)} as owed now.${line.archived ? ` ${line.name} is archived; archiving doesn't clear what it owes.` : ''}`,
         accountId: line.accountId,
       });
     }
+  }
+  // Part of today's card debt not covered by the payments scheduled for it (Phase 4A.5.2): counted as owed now.
+  for (const r of sts.cardDebtToday) {
+    if (cardWarned.has(r.accountId) || r.uncoveredCents === 0 || r.coveredCents === 0) continue;
+    cardWarned.add(r.accountId);
+    const n = acctName(r.accountId);
+    warnings.push({
+      id: `card-uncovered:${r.accountId}`,
+      severity: 'warning',
+      title: `${n}: ${formatCents(r.uncoveredCents, cur)} of ${formatCents(r.owedCents, cur)} isn't covered by a scheduled payment`,
+      detail: `Safe to Spend counts the ${formatCents(r.uncoveredCents, cur)} as owed now. The payment you planned for ${r.paymentDate ? formatShortDate(r.paymentDate) : 'later'} covers the other ${formatCents(r.coveredCents, cur)} on that day.`,
+      accountId: r.accountId,
+    });
   }
   // A card projected to owe money at the end of the forecast that no later scheduled payment pays (Phase 4A.4.4).
   // Card purchases (and cash advances already repaid) are only counted when a payment is scheduled, so say so.
@@ -675,7 +779,7 @@ export function buildDashboard(input: EngineInput): Dashboard {
       id: `card-projected:${a.id}`,
       severity: 'warning',
       title: `${a.name} is projected to owe ${formatCents(owedEnd, cur)} on ${H}, and no payment is scheduled for it`,
-      detail: `Your scheduled payments to ${a.name} don't cover what it's projected to owe at the end of the forecast (${H}), and nothing after that pays it. Safe to Spend sets the ${formatCents(owedEnd, cur)} aside. Schedule a card payment so it's paid.`,
+      detail: `Your scheduled payments to ${a.name} don't cover all of it, and nothing after the forecast pays it. Safe to Spend counts each unpaid charge as owed from the day it's made (${formatCents(owedEnd, cur)} by ${H}). Schedule a card payment to change when it's counted.`,
       accountId: a.id,
       items: [{ date: sts.horizonEnd, label: `${a.name} owed`, cents: -owedEnd, currency: cur }],
     });
