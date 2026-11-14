@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { countedOutflows, engineInput, onboard, type OnboardingInput } from '@clarity/data';
 import { buildDashboard, scheduleDates } from '@clarity/engine';
-import { addDays, formatMonthYear, formatShortDate, formatWeekdayDate, monthNameLong, parseAmountInput, parseISO, type ISODate, type Schedule } from '@clarity/shared';
+import { addDays, formatMonthYear, formatShortDate, formatWeekdayDate, monthNameLong, parseAmountInput, parseISO, type ISODate, type Schedule, TERMS } from '@clarity/shared';
 import { Plus, X } from 'lucide-react';
 import { useData, useRun, useSession } from '../state/session';
 import { AmountInput } from '../ui/AmountInput';
@@ -122,7 +122,7 @@ export function Onboarding() {
               <div className="t-hero" data-testid="overview-month-end"><Money cents={dash.monthEnd.cents} currency={cur} /></div>
             </div>
             <div className="facts" style={{ marginTop: 0 }}>
-              <div><div className="k">Lowest projected balance</div><div className={`v ${low.cents < 0 ? 'neg' : ''}`}><Money cents={low.cents} currency={cur} /></div></div>
+              <div><div className="k">{TERMS.lowestBalance}</div><div className={`v ${low.cents < 0 ? 'neg' : ''}`}><Money cents={low.cents} currency={cur} /></div></div>
               <div><div className="k">Lowest point</div><div className="v">{formatShortDate(low.date)}</div></div>
               <div><div className="k">Safe to Spend</div><div className={`v ${dash.safeToSpend.cents < 0 ? 'neg' : ''}`}><Money cents={dash.safeToSpend.cents} currency={cur} /></div></div>
             </div>

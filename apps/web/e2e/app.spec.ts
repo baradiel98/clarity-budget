@@ -113,7 +113,7 @@ test.describe('transactions', () => {
   test('Can I afford this? — yes and no, nothing saved', async ({ page }) => {
     await page.getByRole('button', { name: 'Can I afford this?' }).click();
     await page.getByTestId('afford-amount').fill('1100');
-    await expect(page.getByTestId('afford-result')).toContainText('Yes, you can afford it');
+    await expect(page.getByTestId('afford-result')).toContainText('Yes, through Oct 31'); // Phase 4A.2: a yes is always qualified with the forecast end date
     await page.getByTestId('afford-amount').fill('1300');
     await expect(page.getByTestId('afford-result')).toContainText('Not without coming up short');
     await expect(page.getByTestId('afford-result')).toContainText("You'd be short $100.00");

@@ -79,9 +79,10 @@ export function HomeView({ data, today, backup, actions }: { data: WorkspaceData
               <Money cents={sts.cents} currency={cur} variant="display" numberOfLines={1} adjustsFontSizeToFit />
             )}
           </View>
-          <T variant="footnote" color="textSecondary">
-            {sts.cents < 0 ? 'What is scheduled is more than your cash and reserve cover' : 'What you can spend today and still cover everything scheduled'} through {formatShortDate(sts.horizonEnd)}. Your balance is lowest on {formatShortDate(sts.lowPoint.date)}.
+          <T variant="footnote" color={sts.cents >= 0 && !sts.dependableIncome ? 'warning' : 'textSecondary'} testID="sts-caption">
+            {`${sts.cents < 0 ? `What is scheduled is more than your cash and reserve cover through ${formatShortDate(sts.horizonEnd)}.` : sts.caption} Your balance is lowest on ${formatShortDate(sts.lowPoint.date)}.`}
           </T>
+          {sts.nextAfterNote && <T variant="footnote" color="textSecondary" testID="sts-next" style={{ marginTop: 6 }}>{sts.nextAfterNote}</T>}
           {sts.afterLow.note && <T variant="footnote" color="textTertiary" testID="sts-after" style={{ marginTop: 6 }}>{sts.afterLow.note}</T>}
           {sts.excludedIncome.length > 0 && (
             <T variant="footnote" color="textTertiary" style={{ marginTop: 6 }}>{sts.excludedIncome.length} income item{sts.excludedIncome.length > 1 ? 's are' : ' is'} not counted because the amount is estimated, unknown or not yet recorded.</T>

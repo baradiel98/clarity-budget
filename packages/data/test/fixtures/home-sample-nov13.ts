@@ -14,7 +14,9 @@ export const HOME_SAMPLE = {
   monthEndDelta: '$1,205.94 more than you have today, by Nov 30.',
   // Phase 4A: includes the Dec 1 rent (horizon = end of next month); was $2,579.83 when the horizon stopped at Nov 30.
   safeToSpend: '$2,427.17',
-  safeToSpendLine: 'What you can spend today and still cover everything scheduled through Dec 31. Your balance is lowest on Dec 1.',
+  // Phase 4A.2: the card states the end date and the paycheck assumption (engine caption), and the next payment after it.
+  safeToSpendLine: "Covers what's scheduled through Dec 31, if your paychecks arrive as scheduled. Your balance is lowest on Dec 1.",
+  safeToSpendNext: 'Next after Dec 31: Rent $1,450.00 on Jan 1 — not included.',
   safeToSpendAfterLow: "Electricity, Phone, Card payment and Savings ($421.89) come after Dec 1, once $5,580.00 has come in. Your balance stays at or above the Dec 1 low through Dec 31, so they don't lower Safe to Spend.",
   recordedBalance: '$2,871.23',
   lowest: '$2,779.83',

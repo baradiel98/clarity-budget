@@ -25,6 +25,7 @@ describe('mobile Home shows the same figures as web (sample data, Nov 13, 2026)'
     expect(ui.getByTestId('safe-to-spend')).toHaveTextContent(X.safeToSpend);
     expect(ui.getByText(X.safeToSpendLine)).toBeTruthy();
     expect(ui.getByTestId('sts-after')).toHaveTextContent(X.safeToSpendAfterLow);
+    expect(ui.getByTestId('sts-next')).toHaveTextContent(X.safeToSpendNext);
     const stat = (id: string) => ui.getByTestId(id);
     expect(stat('recorded-balance')).toHaveTextContent(`Current recorded balance${X.recordedBalance}`, { exact: false });
     expect(stat('lowest')).toHaveTextContent(`${X.lowest}${X.lowestSub}`, { exact: false });
@@ -32,7 +33,7 @@ describe('mobile Home shows the same figures as web (sample data, Nov 13, 2026)'
     expect(stat('end-of-day')).toHaveTextContent(`${X.endOfDay}${X.endOfDaySub}`, { exact: false });
     // every figure opens its own explanation from the engine
     const v = buildHomeView(data, SAMPLE_TODAY).dashboard;
-    await fireEvent.press(ui.getByLabelText('Why this number? Lowest projected balance'));
+    await fireEvent.press(ui.getByLabelText('Why this number? Lowest balance this month'));
     await fireEvent.press(ui.getByLabelText('Why this number? Projected end of today'));
     expect(a.explain).toHaveBeenNthCalledWith(1, v.lowestThroughMonthEnd.explanation);
     expect(a.explain).toHaveBeenNthCalledWith(2, v.endOfDay.explanation);

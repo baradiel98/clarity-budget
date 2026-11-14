@@ -44,13 +44,14 @@ export default function Afford() {
         <DateField label="When" value={date} minimum={today} onChange={setDate} />
         {r && (
           <Card>
-            <T variant="title2" color={tone}>{r.verdict === 'yes' ? 'Yes, you can afford it' : r.verdict === 'tight' ? 'Tight — it dips into your reserve' : 'Not without coming up short'}</T>
+            <T variant="title2" color={tone}>{r.headline}</T>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 }}>
               <View><T variant="caption" color="textTertiary">{TERMS.safeToSpend} now</T><Money cents={r.before.cents} currency={cur} variant="headline" /></View>
-              <View style={{ alignItems: 'flex-end' }}><T variant="caption" color="textTertiary">After</T><Money cents={r.after.cents} currency={cur} variant="headline" color={r.after.cents < 0 ? 'negative' : 'text'} /></View>
+              <View style={{ alignItems: 'flex-end' }}><T variant="caption" color="textTertiary">Safe to Spend after</T><Money cents={r.after.cents} currency={cur} variant="headline" color={r.after.cents < 0 ? 'negative' : 'text'} /></View>
             </View>
             <T variant="footnote" color="textSecondary" style={{ marginTop: 8 }}>New lowest point: {formatShortDate(r.after.lowPoint.date)}</T>
             {r.verdict === 'no' && <T color="negative">You'd be short {/* engine value */}<Money cents={r.shortfallCents} currency={cur} color="negative" />.</T>}
+            <T variant="footnote" color="textSecondary" testID="afford-scope">{r.scope}</T>
             {r.notes.map((n) => <T key={n} variant="footnote" color="textSecondary">{n}</T>)}
             <T variant="caption" color="textTertiary" style={{ marginTop: 6 }}>This is a what-if. Nothing has been saved.</T>
           </Card>

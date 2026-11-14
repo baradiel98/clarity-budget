@@ -57,6 +57,28 @@ export interface ForecastEvent {
   excluded?: ExclusionReason;
   /** Amount was estimated (variable bill, card balance, history average). */
   estimated: boolean;
+  /** Transfer only: part of the requested amount the sending account could not cover (never moved). */
+  unfundedCents?: Cents;
+}
+
+/** A transfer out of a non-spendable asset account (e.g. savings) that asks for more than the account holds. */
+export interface UnfundedTransfer {
+  eventId: string;
+  label: string;
+  date: ISODate;
+  fromAccountId: ID;
+  toAccountId: ID;
+  requestedCents: Cents;
+  fundedCents: Cents;
+}
+
+/** First day an account (not a credit card) is projected below zero after that day's money going out. */
+export interface AccountShortfall {
+  accountId: ID;
+  date: ISODate;
+  lowCents: Cents;
+  /** What was paid out of the account that day. */
+  labels: string[];
 }
 
 export interface ForecastDay {
@@ -80,6 +102,10 @@ export interface Forecast {
   occurrences: Occurrence[];
   /** End-of-horizon balance for every account (including cards). */
   endBalances: Record<ID, Cents>;
+  /** Transfers capped at what the sending account held (Phase 4A.2). */
+  unfundedTransfers: UnfundedTransfer[];
+  /** Accounts projected below zero (first day each), even when the combined spendable total is fine. */
+  accountShortfalls: AccountShortfall[];
 }
 
 function legsForOccurrence(o: Occurrence, amount: Cents): Leg[] {
@@ -129,12 +155,25 @@ export function buildForecast(input: ForecastInput): Forecast {
   };
   const excluded: ForecastEvent[] = [];
 
-  // 1) Future-dated (planned) transactions the user already recorded.
+  // 1) Future-dated (planned) transactions the user already recorded. Both legs of a planned transfer
+  //    become ONE event, so the sending account's funds can be checked against the whole move.
+  const plannedTransfer = new Map<string, ForecastEvent>();
   for (const t of transactions) {
     if (t.date <= today || t.date > horizonEnd) continue;
     const acct = accountById.get(t.accountId);
     if (!acct || t.date < acct.openingDate) continue;
-    push({
+    if (t.transferGroupId) {
+      const k = `${t.date}|${t.transferGroupId}`;
+      const pair = plannedTransfer.get(k);
+      if (pair) {
+        pair.legs.push({ accountId: t.accountId, deltaCents: t.amountCents });
+        // keep the sending leg first and its transaction as the event's txId
+        pair.legs.sort((a, b) => a.deltaCents - b.deltaCents);
+        if (t.amountCents < 0) { pair.txId = t.id; pair.id = `tx:${t.id}`; }
+        continue;
+      }
+    }
+    const ev: ForecastEvent = {
       id: `tx:${t.id}`,
       date: t.date,
       label: t.merchant || 'Planned transaction',
@@ -143,7 +182,9 @@ export function buildForecast(input: ForecastInput): Forecast {
       cashDeltaCents: 0,
       txId: t.id,
       estimated: false,
-    });
+    };
+    if (t.transferGroupId) plannedTransfer.set(`${t.date}|${t.transferGroupId}`, ev);
+    push(ev);
   }
 
   // 2) Recurring occurrences.
@@ -190,6 +231,8 @@ export function buildForecast(input: ForecastInput): Forecast {
   }
 
   const days: ForecastDay[] = [];
+  const unfunded: UnfundedTransfer[] = [];
+  const shortfalls: AccountShortfall[] = [];
   const total = diffDays(horizonEnd, today);
   for (let i = 0; i <= total; i++) {
     const date = addDays(today, i);
@@ -208,17 +251,45 @@ export function buildForecast(input: ForecastInput): Forecast {
       }
       e.legs = legsForOccurrence(o, amount);
     }
+    // Money going out first (bills and other outflows, then transfers out), then money coming in.
+    // A transfer out of a non-spendable asset account (savings) can move at most what that account
+    // holds at that moment, after its own outflows that day; the rest is unfunded and never arrives.
+    const isTransfer = (e: ForecastEvent) => e.legs.length === 2 && e.legs.some((l) => l.deltaCents < 0) && e.legs.some((l) => l.deltaCents > 0);
+    const apply = (l: Leg) => balances.set(l.accountId, (balances.get(l.accountId) ?? 0) + l.deltaCents);
+    const paidOut = new Map<ID, string[]>();
+    const noteOut = (l: Leg, e: ForecastEvent) => { if (l.deltaCents < 0) paidOut.set(l.accountId, [...(paidOut.get(l.accountId) ?? []), e.label]); };
+    for (const e of events) if (!isTransfer(e)) for (const l of e.legs) if (l.deltaCents < 0) { apply(l); noteOut(l, e); }
     for (const e of events) {
-      e.cashDeltaCents = e.legs.reduce((s, l) => s + (cashIds.has(l.accountId) ? l.deltaCents : 0), 0);
+      if (!isTransfer(e)) continue;
+      const src = e.legs.find((l) => l.deltaCents < 0)!;
+      const dst = e.legs.find((l) => l.deltaCents > 0)!;
+      const from = accountById.get(src.accountId);
+      const capped = !!from && !cashIds.has(from.id) && from.type !== 'credit_card';
+      const requested = -src.deltaCents;
+      if (capped) {
+        const funded = Math.min(requested, Math.max(0, balances.get(src.accountId) ?? 0));
+        if (funded < requested) {
+          e.legs = [{ accountId: src.accountId, deltaCents: -funded }, { accountId: dst.accountId, deltaCents: funded }];
+          e.unfundedCents = requested - funded;
+          unfunded.push({ eventId: e.id, label: e.label, date, fromAccountId: src.accountId, toAccountId: dst.accountId, requestedCents: requested, fundedCents: funded });
+        }
+      }
+      for (const l of e.legs) if (l.deltaCents < 0) { apply(l); noteOut(l, e); }
     }
+    for (const [id, labels] of paidOut) {
+      const a = accountById.get(id);
+      const bal = balances.get(id) ?? 0;
+      if (a && a.type !== 'credit_card' && bal < 0 && !shortfalls.some((x) => x.accountId === id)) shortfalls.push({ accountId: id, date, lowCents: bal, labels });
+    }
+    for (const e of events) for (const l of e.legs) if (l.deltaCents > 0) apply(l);
 
     const start = cash;
     let outflow = 0;
     let inflow = 0;
     for (const e of events) {
+      e.cashDeltaCents = e.legs.reduce((s, l) => s + (cashIds.has(l.accountId) ? l.deltaCents : 0), 0);
       if (e.cashDeltaCents < 0) outflow += e.cashDeltaCents;
       else inflow += e.cashDeltaCents;
-      for (const l of e.legs) balances.set(l.accountId, (balances.get(l.accountId) ?? 0) + l.deltaCents);
     }
     const low = start + outflow;
     cash = low + inflow;
@@ -236,6 +307,8 @@ export function buildForecast(input: ForecastInput): Forecast {
     excludedEvents: excluded,
     occurrences,
     endBalances: Object.fromEntries(balances),
+    unfundedTransfers: unfunded,
+    accountShortfalls: shortfalls,
   };
 }
 

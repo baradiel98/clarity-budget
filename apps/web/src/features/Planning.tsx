@@ -6,7 +6,7 @@ import {
   type RecurringInput,
 } from '@clarity/data';
 import {
-  annualEquivalentCents, applyWeekendRule, balanceOnDate, buildForecast, describeSchedule, monthlyEquivalentCents, nextScheduleDate, planningWindowEnd, type Occurrence,
+  annualEquivalentCents, applyWeekendRule, balanceOnDate, buildForecast, computeSafeToSpend, describeSchedule, monthlyEquivalentCents, nextScheduleDate, planningWindowEnd, type Occurrence,
 } from '@clarity/engine';
 import {
   addDays, centsToDecimalString, endOfMonth, formatCents, formatShortDate, formatWeekdayDate, parseAmountInput, parseISO, TERMS, type RecurringAmount,
@@ -66,6 +66,7 @@ export function Planning() {
   };
 
   const horizon = useMemo(() => planningWindowEnd(engineInput(data, today)), [data, today]);
+  const stsScope = useMemo(() => computeSafeToSpend(engineInput(data, today)), [data, today]);
   const forecast = useMemo(
     () => buildForecast({ today, horizonEnd: horizon, accounts: data.accounts, transactions: data.transactions, recurring: data.recurring, exceptions: data.exceptions, baseCurrency: cur, includeEstimatedIncome: true }),
     [data, today, horizon, cur],
@@ -126,6 +127,12 @@ export function Planning() {
       <div className="grid plan-grid">
         <section className="card" aria-labelledby="tl">
           <div className="card-head"><h2 className="card-title" id="tl">Through {formatShortDate(horizon)}</h2><span className="hint">Balance shown is projected available cash at the end of each day</span></div>
+          <p className="hint" data-testid="timeline-scope" style={{ marginTop: 0 }}>
+              {horizon === stsScope.horizonEnd
+                ? `Shows what's scheduled through ${formatShortDate(horizon)}, the end of the Safe to Spend forecast. Recurring items continue after that; see the lists.`
+                : `Safe to Spend counts items through ${formatShortDate(stsScope.horizonEnd)}; items after that are shown here but not counted.`}
+              {stsScope.nextAfterNote && horizon === stsScope.horizonEnd ? ` ${stsScope.nextAfterNote}` : ''}
+            </p>
           {timeline.length === 0 ? (
             <div className="empty"><div>Nothing scheduled yet.</div></div>
           ) : (

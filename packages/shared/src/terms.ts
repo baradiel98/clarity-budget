@@ -8,7 +8,8 @@ export const TERMS = {
   recordedBalance: 'Current recorded balance',
   availableCash: 'Available cash',
   safeToSpend: 'Safe to Spend',
-  lowestBalance: 'Lowest projected balance',
+  /** Only this calendar month (Dashboard.lowestThroughMonthEnd); Safe to Spend can look further. */
+  lowestBalance: 'Lowest balance this month',
   lowestBeforeIncome: 'Lowest before next income',
   endOfDay: 'Projected end of today',
   canIAfford: 'Can I afford this?',

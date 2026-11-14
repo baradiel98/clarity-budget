@@ -3,7 +3,7 @@ import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, Plus } from 'lucide-react-
 import { useMemo, useState } from 'react';
 import { ActionSheetIOS, Alert, Platform, Pressable, View } from 'react-native';
 import { clearOccurrenceException, deleteRecurring, engineInput, estimateNote, recurringAmountView, setOccurrenceException, setRecurringPaused } from '@clarity/data';
-import { annualEquivalentCents, applyWeekendRule, balanceOnDate, buildForecast, describeSchedule, monthlyEquivalentCents, nextScheduleDate, planningWindowEnd, type Occurrence } from '@clarity/engine';
+import { annualEquivalentCents, applyWeekendRule, balanceOnDate, buildForecast, computeSafeToSpend, describeSchedule, monthlyEquivalentCents, nextScheduleDate, planningWindowEnd, type Occurrence } from '@clarity/engine';
 import { addDays, endOfMonth, formatCents, formatShortDate, formatWeekdayDate, TERMS, type RecurringItem } from '@clarity/shared';
 import { setAddPrefill, setExplain } from '../../src/state/nav';
 import { useData, useRun, useSession, useStore } from '../../src/state/session';
@@ -41,6 +41,7 @@ export default function Planning() {
   const cur = data.settings.baseCurrency;
   const [target, setTarget] = useState(endOfMonth(today));
   const windowEnd = useMemo(() => planningWindowEnd(engineInput(data, today)), [data, today]);
+  const stsScope = useMemo(() => computeSafeToSpend(engineInput(data, today)), [data, today]);
   const forecast = useMemo(() => buildForecast({ today, horizonEnd: windowEnd, accounts: data.accounts, transactions: data.transactions, recurring: data.recurring, exceptions: data.exceptions, baseCurrency: cur, includeEstimatedIncome: true }), [data, today, cur, windowEnd]);
   const onDate = useMemo(() => balanceOnDate(engineInput(data, today), target), [data, today, target]);
 
@@ -109,6 +110,12 @@ export default function Planning() {
       </Card>
 
       <Card title={`Through ${formatShortDate(windowEnd)}`}>
+        <T variant="footnote" color="textTertiary" testID="timeline-scope" style={{ marginBottom: 6 }}>
+          {windowEnd === stsScope.horizonEnd
+            ? `Shows what's scheduled through ${formatShortDate(windowEnd)}, the end of the Safe to Spend forecast. Recurring items continue after that; see the lists.`
+            : `Safe to Spend counts items through ${formatShortDate(stsScope.horizonEnd)}; items after that are shown here but not counted.`}
+          {stsScope.nextAfterNote && windowEnd === stsScope.horizonEnd ? ` ${stsScope.nextAfterNote}` : ''}
+        </T>
         {forecast.days.filter((d) => d.events.length).length === 0 && <T color="textSecondary">Nothing scheduled yet.</T>}
         {forecast.days.filter((d) => d.events.length || forecast.excludedEvents.some((e) => e.date === d.date)).map((d) => (
           <View key={d.date} style={{ borderTopWidth: 1, borderTopColor: c.border, paddingVertical: 8 }}>

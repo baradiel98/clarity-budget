@@ -92,6 +92,27 @@ Events in the timeline:
   - The result **may be negative** and is shown as "Short by $X", never clamped to zero.
   - Identity, checked by tests: available cash + income before the low point − obligations on or before it = low point.
   - **Items after the low point** (through the horizon) are listed in the explanation (`afterLow`). By definition they never take the balance below the low point, so they don't lower Safe to Spend. For example: Nov 13 sample data, low on Nov 18, then Paycheck +$1,860.00 and Phone, Card payment and Savings −$562.66 through Nov 30.
+- **Transfers must be funded (Phase 4A.2).** Each day the forecast applies money going out first (bills and other outflows, then transfers out), then money coming in.
+  - A transfer out of a **non-spendable asset account** (savings, for example) moves at most what that account is projected to hold at that moment, after its own earlier activity and same-day outflows. The rest is **unfunded**: it never reaches the destination and is not counted.
+  - Unfunded transfers are listed (`Forecast.unfundedTransfers`) and warned about ("…won't have the money" / "only $X of $Y is available").
+  - Transfers out of a spendable account are counted in full (the conservative direction for Safe to Spend). If that account would go negative, the account-level check below flags it.
+  - Credit cards are not capped: a cash advance is borrowing, and card limits are not tracked (assumption).
+  - Planned transfers recorded ahead of time (two future-dated legs) are treated as one transfer.
+  - Transfers are never income or spending, and the total across all accounts is conserved.
+- **Account-level check (Phase 4A.2).** Safe to Spend combines all spendable accounts; it assumes the user moves money between them when needed.
+  - The forecast records the first day each account (other than a credit card) is projected below zero after that day's money going out (`Forecast.accountShortfalls`).
+  - When the combined spendable cash is still at or above zero that day, the dashboard warns: "Cash would go to −$300.00 on Nov 20 … Move $300.00 into Cash before Nov 20". When it isn't, the overall shortfall warning already covers it.
+  - The engine never creates or schedules a transfer itself.
+- **Possible duplicates (Phase 4A.2).** A planned transaction not linked to a bill, on the same account, for the same amount, within 3 days of a scheduled bill, is flagged ("Possible duplicate: Rent on Dec 1").
+  - Both stay counted, the conservative choice, until the user resolves it. Nothing is merged automatically.
+  - Add Transaction already links a matching entry to the bill, so this mainly catches data entered without that link.
+- **Disclosure (Phase 4A.2).**
+  - The Safe to Spend card shows the end date and the paycheck assumption ("Covers what's scheduled through Dec 31, if your paychecks arrive as scheduled.").
+  - With no fixed-amount income it says "No regular income is scheduled, so this only covers bills through Dec 31."
+  - It also names the next scheduled payment after the end date ("Next after Dec 31: Rent $1,400.00 on Jan 1 — not included.").
+  - "Can I afford this?" answers "Yes, through Dec 31" and states the same scope.
+  - "Lowest balance this month" is the this-month figure (Safe to Spend can look further).
+
 - **Can I afford this?** reruns Safe to Spend with one hypothetical purchase:
   - *yes*: the low point stays at or above the reserve;
   - *tight*: the low point dips into the reserve but stays ≥ 0;

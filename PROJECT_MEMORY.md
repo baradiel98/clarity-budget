@@ -216,3 +216,16 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Verified]** Sample Nov 13: Safe to Spend **$2,427.17** (low $2,627.17 on Dec 1, $200 reserve). The cross-platform fixture is updated; golden data was regenerated and each change reviewed.
 - **[Lesson]** The engine test builder defaults `trackFrom` to 2026-09-01. A recurring item must get `startDate`/`trackFrom` at its first real date, or earlier months show up as overdue and distort the result.
 - **[Limitation]** Anything after the horizon is not counted. "Why this number?" says so and Planning shows it.
+
+## Phase 4A.2 (2026-11-14): account-level integrity and Safe to Spend disclosure
+- **[Verified defect, fixed] D1:** the forecast applied every transfer leg without checking the sending account, so a scheduled transfer from an empty savings account created money in checking.
+  - Audited case (rent $1,200): old +$100 → now **short by $900**. With rent $1,400: old −$100 → now −$1,100.
+  - My Phase 4A.1 report stated rent as $1,400 while its test used $1,200; both versions are now tested.
+- **[Decision]** Transfers out of non-spendable asset accounts are capped at the account's projected balance at that moment, after its own outflows that day; the unfunded part is flagged and never counted.
+  - Transfers out of spendable accounts count in full.
+  - Credit cards are not capped (borrowing; limits not tracked).
+- **[Decision] R2:** Safe to Spend stays combined across spendable accounts, but `Forecast.accountShortfalls` + the warning "X would go to −$… on …; move $… into X" make the assumption explicit. No automatic transfers.
+- **[Decision]** Disclosure text comes from the engine (`SafeToSpend.caption`, `nextAfterNote`, `AffordResult.headline/scope`), so both apps say the same thing.
+  - "Lowest projected balance" is renamed "Lowest balance this month" (`TERMS.lowestBalance`).
+- **[Finding]** Add Transaction already links a matching planned entry to the bill ("This pays Rent due Dec 1…"), so the audit's duplicate only arises from unlinked data. The engine flags it ("Possible duplicate"), and both stay counted.
+- **[Lesson]** Safe to Spend is the minimum over every day *including today*; hand-derived expectations must include today's balance (one of my own test expectations missed it).

@@ -1,5 +1,6 @@
 import {
   addDays,
+  diffDays,
   endOfMonth,
   formatShortDate,
   formatCents,
@@ -78,6 +79,14 @@ export interface SafeToSpend {
   afterLow: { events: ForecastEvent[]; inCents: Cents; outCents: Cents; note: string | null };
   excludedIncome: ForecastEvent[];
   explanation: Explanation;
+  /** At least one fixed-amount paycheck is counted before the horizon (Phase 4A.2 disclosure). */
+  dependableIncome: boolean;
+  /** First scheduled payment after the horizon (looked up to 62 days ahead): not counted, shown so it isn't a surprise. */
+  nextAfterHorizon: { label: string; date: ISODate; cents: Cents; estimated: boolean } | null;
+  /** One line for the Safe to Spend card: the end date and the paycheck assumption (both apps show it verbatim). */
+  caption: string;
+  /** "Next after Dec 31: Rent $1,400.00 on Jan 1 — not included." or null. */
+  nextAfterNote: string | null;
 }
 
 const ASSUMPTIONS_BASE = [
@@ -147,8 +156,9 @@ function forecastTo(input: EngineInput, horizonEnd: ISODate, includeEstimatedInc
 }
 
 function eventLine(e: ForecastEvent, cur: CurrencyCode): ExplainLine {
-  const status = e.source === 'overdue' ? 'overdue, counted today' : e.estimated ? 'estimated' : e.source === 'hypothetical' ? 'hypothetical' : e.source === 'scheduled_tx' ? 'planned' : undefined;
-  void cur;
+  const base = e.source === 'overdue' ? 'overdue, counted today' : e.estimated ? 'estimated' : e.source === 'hypothetical' ? 'hypothetical' : e.source === 'scheduled_tx' ? 'planned' : undefined;
+  const short = e.unfundedCents ? `only ${formatCents(e.cashDeltaCents, cur)} is available to move; ${formatCents(e.unfundedCents, cur)} not counted` : undefined;
+  const status = [base, short].filter(Boolean).join('; ') || undefined;
   return {
     kind: e.cashDeltaCents < 0 ? 'out' : 'in',
     label: e.label,
@@ -198,6 +208,21 @@ export function computeSafeToSpend(input: EngineInput, hypotheticals?: readonly 
     { kind: 'result', label: cents >= 0 ? 'Safe to Spend' : 'Short by', cents },
     ...excludedIncome.map(excludedLine),
   ];
+  const dependableIncome = f.days.some((d) => d.events.some((e) => e.occurrence?.kind === 'income' && e.cashDeltaCents > 0 && !e.estimated));
+  const nextAfter = (() => {
+    const later = forecastTo(input, addDays(h.end, INCOME_LOOKAHEAD_DAYS), false);
+    for (const d of later.days) {
+      if (d.date <= h.end) continue;
+      const e = d.events.find((x) => x.cashDeltaCents < 0);
+      if (e) return { label: e.label, date: e.date, cents: e.cashDeltaCents, estimated: e.estimated };
+    }
+    return null;
+  })();
+  const H = formatShortDate(h.end);
+  const caption = dependableIncome
+    ? `Covers what's scheduled through ${H}, if your paychecks arrive as scheduled.`
+    : `No regular income is scheduled, so this only covers bills through ${H}.`;
+  const nextAfterNote = nextAfter ? `Next after ${H}: ${nextAfter.label} ${nextAfter.estimated ? '≈' : ''}${formatCents(-nextAfter.cents, cur)} on ${formatShortDate(nextAfter.date)} — not included.` : null;
   const horizonText = h.reason === 'next_income' ? `your first known paycheck after this month (${formatShortDate(h.end)})` : `the end of next month (${formatShortDate(h.end)})`;
   const summary =
     cents >= 0
@@ -223,9 +248,15 @@ export function computeSafeToSpend(input: EngineInput, hypotheticals?: readonly 
         ...ASSUMPTIONS_BASE,
         'Only income with a fixed amount is counted. Estimated or unknown income is listed but not counted.',
         'Credit card purchases only reduce cash when a card payment is scheduled.',
-        `Covers everything scheduled from today through ${formatShortDate(h.end)}. Anything scheduled after ${formatShortDate(h.end)} is not included yet; Planning shows what comes later.`,
+        'Combines your spendable accounts. It assumes you can move money between them; a bill paid from an account that would run short is flagged.',
+        'A transfer from savings counts only up to what that account is projected to hold.',
+        `Covers everything scheduled from today through ${H}. Anything scheduled after ${H} is not included.${nextAfterNote ? ` ${nextAfterNote}` : ''}`,
       ],
     },
+    dependableIncome,
+    nextAfterHorizon: nextAfter,
+    caption,
+    nextAfterNote,
   };
 }
 
@@ -238,6 +269,10 @@ export interface AffordQuery {
 
 export interface AffordResult {
   verdict: 'yes' | 'tight' | 'no';
+  /** Answer shown to the user; "Yes" is always qualified with the forecast end date. */
+  headline: string;
+  /** What the answer covers: end date, paycheck assumption, next payment after it. */
+  scope: string;
   before: SafeToSpend;
   after: SafeToSpend;
   /** Positive when the purchase would leave you short. */
@@ -273,7 +308,15 @@ export function canIAfford(input: EngineInput, q: AffordQuery): AffordResult {
   const newLow = after.lowPoint.cents;
   const verdict: AffordResult['verdict'] = newLow >= input.minReserveCents ? 'yes' : newLow >= 0 ? 'tight' : 'no';
   if (verdict === 'tight') notes.push('You would dip into your minimum cash reserve.');
-  return { verdict, before, after, shortfallCents: after.cents < 0 ? -after.cents : 0, notes };
+  const H = formatShortDate(before.horizonEnd);
+  const headline = verdict === 'yes' ? `Yes, through ${H}` : verdict === 'tight' ? `Tight — it dips into your reserve before ${H}` : 'Not without coming up short';
+  const scope = [
+    before.dependableIncome
+      ? `Checked against everything scheduled through ${H}, assuming your paychecks arrive as scheduled.`
+      : `Checked against everything scheduled through ${H}. No regular income is scheduled, so nothing after that is covered.`,
+    before.nextAfterNote,
+  ].filter(Boolean).join(' ');
+  return { verdict, headline, scope, before, after, shortfallCents: after.cents < 0 ? -after.cents : 0, notes };
 }
 
 export interface Projection {
@@ -459,6 +502,47 @@ export function buildDashboard(input: EngineInput): Dashboard {
       });
     }
   }
+  // Phase 4A.2: transfers the sending account can't cover, and accounts that would go below zero on their own.
+  const nameOf = (id: ID) => input.accounts.find((a) => a.id === id)?.name ?? 'an account';
+  for (const u of conservative.unfundedTransfers) {
+    if (u.date > sts.horizonEnd) continue;
+    const short = u.requestedCents - u.fundedCents;
+    warnings.push({
+      id: `unfunded:${u.eventId}`,
+      severity: 'warning',
+      title: u.fundedCents === 0 ? `${u.label}: ${nameOf(u.fromAccountId)} won't have the money` : `${u.label}: only ${formatCents(u.fundedCents, cur)} of ${formatCents(u.requestedCents, cur)} is available`,
+      detail: `Scheduled for ${formatShortDate(u.date)} from ${nameOf(u.fromAccountId)}, which is projected to have ${formatCents(u.fundedCents, cur)} then. Only that amount is counted; ${formatCents(short, cur)} is not.`,
+    });
+  }
+  for (const a of conservative.accountShortfalls) {
+    if (a.date > sts.horizonEnd) continue;
+    const day = conservative.days.find((x) => x.date === a.date);
+    // Only when the money exists in another spendable account; otherwise the overall shortfall warning covers it.
+    if (!day || day.lowCashCents < 0) continue;
+    const name = nameOf(a.accountId);
+    warnings.push({
+      id: `account-short:${a.accountId}`,
+      severity: 'warning',
+      title: `${name} would go to ${formatCents(a.lowCents, cur)} on ${formatShortDate(a.date)}`,
+      detail: `${a.labels.join(', ')} is paid from ${name}. Your other spendable accounts have enough, and Safe to Spend assumes you move money between them. Move ${formatCents(-a.lowCents, cur)} into ${name} before ${formatShortDate(a.date)}, or change the account it's paid from.`,
+    });
+  }
+  // Possible duplicates: a planned transaction (not linked to a bill) on the same account, for the same amount,
+  // within 3 days of a scheduled bill. Never merged: both stay counted until the user resolves it.
+  for (const t of input.transactions) {
+    if (t.date <= input.today || t.date > sts.horizonEnd || t.occurrenceRef || t.transferGroupId || t.amountCents >= 0) continue;
+    const match = conservative.occurrences.find((o) =>
+      (o.status === 'expected' || o.status === 'estimated') && o.kind !== 'income' && o.accountId === t.accountId &&
+      o.amountCents === -t.amountCents && Math.abs(diffDays(o.date, t.date)) <= 3);
+    if (match) {
+      warnings.push({
+        id: `duplicate:${t.id}`,
+        severity: 'warning',
+        title: `Possible duplicate: ${match.name} on ${formatShortDate(match.date)}`,
+        detail: `A planned transaction for ${formatCents(-t.amountCents, cur)} on ${formatShortDate(t.date)} looks like the scheduled ${match.name}. Both are counted until you delete the planned one or mark the bill paid with it.`,
+      });
+    }
+  }
   if (balances.excludedCurrencyAccountIds.length) {
     warnings.push({ id: 'currency', severity: 'info', title: 'Some accounts are not included', detail: `Accounts in a currency other than ${cur} are left out of totals.` });
   }
@@ -477,7 +561,7 @@ export function buildDashboard(input: EngineInput): Dashboard {
     monthEnd: { cents: monthEndExpl.resultCents ?? 0, date: eom, explanation: monthEndExpl },
     endOfDay: { cents: eodExpl.resultCents ?? 0, date: input.today, explanation: eodExpl },
     safeToSpend: sts,
-    lowestThroughMonthEnd: { ...lowMonth, explanation: lowExplanation(lowMonth, conservative, 'Lowest projected balance', cur, next) },
+    lowestThroughMonthEnd: { ...lowMonth, explanation: lowExplanation(lowMonth, conservative, TERMS.lowestBalance, cur, next) },
     lowestBeforeNextIncome:
       lowBefore && next ? { ...lowBefore, nextIncome: next, explanation: lowExplanation(lowBefore, conservative, 'Lowest before next income', cur, next) } : null,
     nextIncome: next,

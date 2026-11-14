@@ -49,7 +49,7 @@ test.describe('Phase 4A: Safe to Spend counts the rent due Dec 1, and the user c
     const why = page.getByRole('dialog');
     await expect(why).toContainText('through the end of next month (Dec 31)');
     await expect(why).toContainText('Rent');
-    await expect(why).toContainText('Anything scheduled after Dec 31 is not included yet');
+    await expect(why).toContainText('Anything scheduled after Dec 31 is not included.'); // Phase 4A.2 wording
     await page.keyboard.press('Escape');
     // Planning
     await later.getByRole('button', { name: 'See all in Planning' }).click();

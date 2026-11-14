@@ -101,8 +101,9 @@ export function Home() {
               {sts.cents < 0 ? <>{TERMS.shortBy} <Money cents={sts.shortfallCents} currency={cur} animate /></> : <Money cents={sts.cents} currency={cur} animate />}
             </div>
             <p className="t-callout muted">
-              {sts.cents < 0 ? 'What is scheduled is more than your cash and reserve cover' : 'What you can spend today and still cover everything scheduled'} through {formatShortDate(sts.horizonEnd)}. Your balance is lowest on {formatShortDate(sts.lowPoint.date)}.
+              {sts.cents < 0 ? `What is scheduled is more than your cash and reserve cover through ${formatShortDate(sts.horizonEnd)}.` : <span className={sts.dependableIncome ? undefined : 'warn'} data-testid="sts-caption">{sts.caption}</span>} Your balance is lowest on {formatShortDate(sts.lowPoint.date)}.
             </p>
+            {sts.nextAfterNote && <p className="sts-note" data-testid="sts-next">{sts.nextAfterNote}</p>}
             <div className="eq" data-testid="sts-breakdown">
               <div><span>{TERMS.recordedBalance}</span><span className="num"><Money cents={sts.availableCashCents} currency={cur} /></span></div>
               {incomeBefore !== 0 && <div><span>Income before the lowest point <span className="sub">({sts.lowPoint.incomeBefore.length})</span></span><span className="num pos"><Money cents={incomeBefore} currency={cur} sign="always" /></span></div>}

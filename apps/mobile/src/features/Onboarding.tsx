@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Share, View } from 'react-native';
 import { countedOutflows, engineInput, onboard, type OnboardingInput } from '@clarity/data';
 import { buildDashboard } from '@clarity/engine';
-import { addDays, formatShortDate, monthNameLong, parseAmountInput, parseISO, type Schedule } from '@clarity/shared';
+import { addDays, formatShortDate, monthNameLong, parseAmountInput, parseISO, TERMS, type Schedule } from '@clarity/shared';
 import { useData, useRun, useSession } from '../state/session';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -95,7 +95,7 @@ export function Onboarding() {
           <Money cents={dash.monthEnd.cents} currency={cur} variant="hero" />
         </Card>
         <View style={{ flexDirection: 'row', gap: 12 }}>
-          <Card title="Lowest point" style={{ flex: 1 }}><Money cents={low.cents} currency={cur} variant="title2" color={low.cents < 0 ? 'negative' : 'text'} /><T variant="footnote" color="textTertiary">{formatShortDate(low.date)}</T></Card>
+          <Card title={TERMS.lowestBalance} style={{ flex: 1 }}><Money cents={low.cents} currency={cur} variant="title2" color={low.cents < 0 ? 'negative' : 'text'} /><T variant="footnote" color="textTertiary">{formatShortDate(low.date)}</T></Card>
           <Card title="Safe to Spend" style={{ flex: 1 }}><Money cents={dash.safeToSpend.cents} currency={cur} variant="title2" color={dash.safeToSpend.cents < 0 ? 'negative' : 'text'} /></Card>
         </View>
         <T color="textSecondary">{low.explanation.summary}</T>

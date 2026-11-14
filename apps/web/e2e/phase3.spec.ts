@@ -173,6 +173,7 @@ test.describe('web Home shows the cross-platform sample figures (Nov 13, 2026)',
       await expect(page.getByTestId('safe-to-spend')).toHaveText(X.safeToSpend);
       await expect(page.locator('.card.sts')).toContainText(X.safeToSpendLine);
       await expect(page.getByTestId('sts-after')).toHaveText(X.safeToSpendAfterLow);
+      await expect(page.getByTestId('sts-next')).toHaveText(X.safeToSpendNext);
       const stats = page.getByRole('region', { name: 'Key balances' });
       await expect(page.getByTestId('available-cash')).toHaveText(X.recordedBalance);
       await expect(stats).toContainText(`${X.lowest}${X.lowestSub}`);

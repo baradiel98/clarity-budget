@@ -19,6 +19,8 @@ describe('shared Home view model', () => {
     expect(`${f(Math.abs(v.monthEndDeltaCents))} ${v.monthEndDeltaCents >= 0 ? 'more' : 'less'} than you have today, by ${s(d.monthEnd.date)}.`).toBe(X.monthEndDelta);
     expect(f(d.safeToSpend.cents)).toBe(X.safeToSpend);
     expect(d.safeToSpend.afterLow.note).toBe(X.safeToSpendAfterLow);
+    expect(`${d.safeToSpend.caption} Your balance is lowest on ${s(d.safeToSpend.lowPoint.date)}.`).toBe(X.safeToSpendLine);
+    expect(d.safeToSpend.nextAfterNote).toBe(X.safeToSpendNext);
     expect(f(d.balances.availableCashCents)).toBe(X.recordedBalance);
     expect([f(d.lowestThroughMonthEnd.cents), `${s(d.lowestThroughMonthEnd.date)} · through month-end`]).toEqual([X.lowest, X.lowestSub]);
     expect(v.sameLow).toBe(true);

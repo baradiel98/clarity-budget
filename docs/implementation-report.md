@@ -264,6 +264,20 @@ The step-by-step checklist is in `docs/device-test-script.md`.
 - **Tests:** `packages/engine/test/safe-to-spend-horizon.test.ts` (16 tests), cross-platform fixture updates, `apps/web/e2e/phase4a.spec.ts` (2 tests) and a mobile jest test.
 - **Not verified:** physical devices, Safari, and real users' schedules beyond the tested cases.
 
+## 7g. Phase 4A.2: account-level integrity and disclosure
+- **D1 (fixed):** transfers from a non-spendable account are capped at its projected balance; the unfunded part is flagged.
+
+  | Case | Old | New |
+  |---|---|---|
+  | Audited (checking $300, savings $0, $1,000 transfer Nov 25, rent $1,200 Dec 1) | +$100 | **−$900** |
+  | Same with rent $1,400 | −$100 | **−$1,100** |
+
+- **R2:** Safe to Spend remains the combined spendable amount ($200 in the audited case). The dashboard now warns "Cash would go to −$300.00 on Nov 20 … Move $300.00 into Cash before Nov 20", and "Why this number?" states the combining assumption. A user-scheduled top-up clears the warning; nothing is moved automatically.
+- **Disclosure:** the end date and paycheck assumption (or "No regular income is scheduled") appear on the Safe to Spend card, with the next payment after the end date. "Can I afford this?" says "Yes, through <date>", with its scope. The month figure is labelled "Lowest balance this month". Planning states what its timeline covers. Web and native mobile match.
+- **Duplicates:** engine warning for an unlinked planned transaction matching a scheduled bill; both stay counted. Add Transaction already links matching entries.
+- **Tests:** `packages/engine/test/account-integrity.test.ts` (22), `apps/web/e2e/phase4a2.spec.ts` (4), plus the cross-platform fixture and mobile test updates.
+- **Not verified:** physical devices, Safari, real-world credit limits, bank-side overdraft behaviour.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.
