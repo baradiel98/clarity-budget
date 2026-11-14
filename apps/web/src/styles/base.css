@@ -448,8 +448,15 @@ tr.fresh > td:first-child { animation-name: fresh; }
               0 16px 52px color-mix(in srgb, var(--c-accent) 22%, transparent); }
 .overview .card.outlook { background: linear-gradient(180deg, color-mix(in srgb, var(--c-accent) 6%, var(--c-surface)), var(--c-surface) 42%); }
 .overview .card.next-income { border-color: color-mix(in srgb, var(--c-accent) 12%, var(--c-border)); box-shadow: 0 6px 24px color-mix(in srgb, var(--c-accent) 9%, transparent); }
-@media (max-width: 1080px) { .overview { grid-template-columns: 1fr; } }
+@media (max-width: 1080px) { .overview { grid-template-columns: minmax(0, 1fr); } }
 .outlook .t-hero { margin: 6px 0 8px; }
+/* Long amounts: font size = the smaller of the design size and what fits the card (≈0.62em per character). */
+.card.outlook, .card.sts { container-type: inline-size; }
+/* (.card prefix: must beat .sts .metric / .t-hero media rules declared later) */
+.card .t-hero.fit, .card .metric.fit { white-space: nowrap; font-size: min(var(--fit-max), calc(100cqi / (var(--chars) * 0.62))); line-height: 1.1; }
+.t-hero.fit { --fit-max: 56px; }
+.sts .metric.fit { --fit-max: 40px; }
+@media (max-width: 900px) { .t-hero.fit { --fit-max: 42px; } }
 /* The chart takes the hero card's remaining height instead of leaving an empty block under it. */
 .overview .card.outlook { display: flex; flex-direction: column; }
 .overview .card.outlook .chart-box { flex: 1 1 auto; }
@@ -457,6 +464,19 @@ tr.fresh > td:first-child { animation-name: fresh; }
 .sts-after { margin: -6px 0 14px; max-width: 60ch; line-height: 18px; }
 .stat .v.repeat { color: var(--c-text-secondary); }
 .upcoming-note { margin: -6px 0 10px; }
+/* Upcoming rows: full names always (they wrap); amount and action never squeeze the name to an ellipsis. */
+.up-row { grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: 'icon main amount action'; align-items: center; }
+.up-icon { grid-area: icon; }
+.up-main { grid-area: main; min-width: 0; }
+.up-row .title { white-space: normal; overflow: visible; overflow-wrap: anywhere; line-height: 20px; }
+.up-amount { grid-area: amount; font-weight: 600; white-space: nowrap; text-align: right; }
+.up-action { grid-area: action; }
+@media (max-width: 560px) {
+  .up-row { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: 'icon main amount' 'icon main action'; row-gap: 6px; align-items: start; }
+  .up-icon { align-self: start; }
+  .up-amount { align-self: start; padding-top: 1px; }
+  .up-action { justify-self: end; }
+}
 .approx { margin-right: 3px; color: var(--c-warning); font-weight: 600; }
 .badge.est { background: transparent; box-shadow: inset 0 0 0 1px currentColor; border: 0; }
 .side { display: flex; flex-direction: column; gap: var(--space-lg); min-width: 0; }
@@ -514,6 +534,9 @@ tr.fresh > td:first-child { animation-name: fresh; }
 .fc-reserve { stroke: var(--c-warning); stroke-dasharray: 2 5; stroke-width: 1; }
 .fc-today { stroke: var(--c-border-strong); stroke-width: 1; }
 .fc-cursor { stroke: var(--c-text-tertiary); stroke-width: 1; }
+.fc-low-caption { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--c-text-secondary); margin: 2px 0 4px; font-variant-numeric: tabular-nums; }
+.fc-low-dot { width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--c-chart-line); flex: none; }
+.fc-low-caption.neg .fc-low-dot { border-color: var(--c-negative); }
 .fc-dot { fill: var(--c-surface); stroke: var(--c-chart-line); stroke-width: 2; }
 .fc-dot.neg { stroke: var(--c-negative); }
 .fc-dot.cursor { fill: var(--c-chart-line); stroke: var(--c-surface); }

@@ -151,5 +151,30 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Decision]** Safe to Spend explanations list the items after the low point (`afterLow`, engine text). The UI shows the engine's text verbatim.
 - **[Decision]** Transactions totals cover recorded transactions only (date ≤ today), like Reports. Planned items are shown separately.
 - **[Decision]** One content width: `--content-max: 1440px` on `.main-inner`.
-- **[Open]** On phones, long Upcoming names can truncate when an estimate marker and a button share the row.
+- **[Superseded by Phase 3]** On phones, long Upcoming names could truncate when an estimate marker and a button shared the row. Fixed in Phase 3.
+
+## Phase 3 (2026-11-14): mobile refinement, chart, cross-platform
+- **[Verified, Chromium]** Web Upcoming rows: names wrap in full. On ≤560px the amount and button move to a second line on the right. Tested at 320/360/390/430 with 60+ character names and −$1,234,567.89 (`apps/web/e2e/phase3.spec.ts`).
+- **[Verified, Chromium]** Large headline amounts were overflowing the hero card on phones (found by the Phase 3 test).
+  - Fix: `.overview` uses `minmax(0,1fr)` when single-column.
+  - Hero and Safe to Spend sizes are now `min(design size, 100cqi / (chars × 0.62))`, via the `fitChars()` style var.
+- **[Decision]** Chart y-labels sit in a gutter sized from the widest label, never inside the plot.
+  - The "Lowest …" label tries 12 positions around the dot and takes the first that misses the line.
+  - If none fits (narrow phones), it becomes a caption above the chart ("Lowest $X · date"), and the dot stays.
+  - The test uses `isPointInStroke` against the drawn lines.
+- **[Decision]** Home presentation facts come from one shared view model, `buildHomeView` / `recentRow` in `packages/data/src/homeView.ts`:
+  - same-low / quiet-today flags, recent transactions, Safe to Spend breakdown sums.
+  - Status help wording (`STATUS_HELP`, `UPCOMING_NOTE`) is in `packages/shared/src/terms.ts`.
+  - Both apps use it; the dashboard numbers are the engine's, unchanged.
+- **[Decision]** Native Home (`apps/mobile/src/features/Home.tsx`, a testable `HomeView`) now has the same information as web:
+  - month-end with delta;
+  - Safe to Spend with the after-low note;
+  - a "Key balances" 2×2 grid (recorded, lowest, lowest before income, end of today), where tapping a label opens "Why this number?";
+  - Upcoming with ≈, full names, card note, and a "What do these labels mean?" toggle;
+  - Recent transactions.
+
+  The previous "lowest window" toggle and duplicate figures under the chart were removed.
+- **[Verified]** Cross-platform contract: `packages/data/test/fixtures/home-sample-nov13.ts` is checked against the engine (vitest), the native Home (jest) and the web Home (Playwright).
+- **[Not verified]** Native rendering on a device or simulator: `adjustsFontSizeToFit`, wrapping and touch targets are unit-tested only.
+- **[Lesson]** Playwright `fullPage` screenshots resize the viewport mid-capture, and can show the hero figures or chart blank. Use a tall viewport with `clip` for visual checks.
 

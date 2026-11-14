@@ -196,6 +196,22 @@ The step-by-step checklist is in `docs/device-test-script.md`.
 - **Layout:** one content width (1,440px max). The chart fills the hero card; date labels are weekly and never collide. Repeated figures are described in words, and status badges are explained.
 - **Verification:** Chromium only, at 390, 834, 1280, 1440, 1920 and 2048px (`e2e/phase2.spec.ts`).
 
+## 7c. Phase 3 (2026-11-14): mobile refinement, chart polish, cross-platform consistency
+- **Upcoming on phones (web):** full names wrap instead of truncating; the amount and the "Mark paid"/"Record" button share a second line on the right. Checked at 320, 360, 390 and 430px with long names and seven-figure amounts. No horizontal scroll, the title is at least 14px, and buttons are at least 36px tall.
+- **Found and fixed:** a seven-figure month-end or shortfall overflowed the card on phones. Headline figures now scale down to fit the card.
+- **Chart:**
+  - y-axis labels sit in their own gutter, so the "$2,000 over the line" collision at 1280px is gone.
+  - The "Lowest" label is placed where it doesn't cross the line. On narrow charts with no clear spot, it moves to a caption above the chart.
+  - Tested with sample data on all three ranges at 320–2048px, and with a tiny ($12.34), a large ($1.2M) and a negative balance.
+- **Native mobile Home** now shows the same information as web:
+  - projected month-end, Safe to Spend (with the after-low note), current recorded balance, lowest projected balance, lowest before next income, and projected end of today;
+  - Upcoming (with ≈ and a status help toggle) and Recent transactions;
+  - "Why this number?" on each figure.
+
+  Both apps use the shared `buildHomeView`; no calculations are duplicated.
+- **Cross-platform tests:** one fixture (`packages/data/test/fixtures/home-sample-nov13.ts`) is asserted by the engine test, the mobile jest test and the web Playwright test. No financial result was changed.
+- **Not verified:** physical iPhone/Android, iOS simulator, Safari. The native UI is verified by jest render tests and a successful `expo export` bundle for iOS and Android, not by looking at it on a device.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

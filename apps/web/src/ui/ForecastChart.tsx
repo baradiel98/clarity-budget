@@ -58,13 +58,13 @@ export function ForecastChart({ history, forecast, currency, reserve, monthEnd }
 
   // The chart fills the space its container gives it (the area is sized by CSS, never by the chart).
   const H = Math.max(220, height || 248);
-  const pad = { t: 16, b: 44, l: 4, r: 4 };
   const n = points.length;
   const todayIdx = history.length;
   const fmt = (c: Cents) => formatCents(c, currency);
 
-  const geo = useMemo(() => {
-    if (n < 2 || width <= 0) return null;
+  // Y scale first: the axis labels get their own gutter on the left, sized from the widest label, so they
+  // can never sit on top of the balance lines, the low-point marker or the event markers.
+  const scale = useMemo(() => {
     const lows = points.map((p) => p.low);
     const highs = points.map((p) => p.end);
     const min = Math.min(0, ...lows);
@@ -72,6 +72,17 @@ export function ForecastChart({ history, forecast, currency, reserve, monthEnd }
     const step = niceStep(max - min);
     const top = Math.ceil(max / step) * step;
     const bottom = Math.floor(min / step) * step;
+    const ticks: number[] = [];
+    for (let v = bottom; v <= top; v += step) ticks.push(v);
+    const labels = ticks.map((v) => formatCents(v, currency, { compact: true }));
+    const gutter = Math.ceil(Math.max(...labels.map((l) => l.length), 2) * 7.2) + 10; // 12px tabular figures ≈ 7.2px each
+    return { top, bottom, ticks, labels, gutter };
+  }, [points, reserve, currency]);
+  const pad = { t: 16, b: 44, l: scale.gutter, r: 4 };
+
+  const geo = useMemo(() => {
+    if (n < 2 || width <= 0) return null;
+    const { top, bottom, ticks } = scale;
     const x = (i: number) => pad.l + (i / (n - 1)) * (width - pad.l - pad.r);
     const y = (v: number) => pad.t + (1 - (v - bottom) / (top - bottom || 1)) * (H - pad.t - pad.b);
     let rec = '';
@@ -83,15 +94,49 @@ export function ForecastChart({ history, forecast, currency, reserve, monthEnd }
       if (i < n - 1) proj += `H${x(i + 1)} `;
     }
     const area = `${proj}V${y(bottom)} H${x(todayIdx)} Z`;
-    const ticks: number[] = [];
-    for (let v = bottom; v <= top; v += step) ticks.push(v);
     let lowIdx = todayIdx;
     for (let i = todayIdx; i < n; i++) if (points[i]!.low < points[lowIdx]!.low) lowIdx = i;
     return { x, y, rec, proj, area, ticks, lowIdx, bottom };
-  }, [points, n, width, H, reserve, todayIdx, forecast.startCashCents]);
+  }, [points, n, width, H, scale, pad.l, todayIdx, forecast.startCashCents]);
 
   const last = points[n - 1];
   const lowP = geo ? points[geo.lowIdx]! : null;
+  /**
+   * Where the "Lowest …" label goes: the first of below-right, below-left, above-right, above-left of the dot
+   * whose box stays inside the plot and does not cross the line (step chart: within the box's x-span the line
+   * covers every value between the min and max of the points it passes).
+   */
+  const lowLabel = useMemo(() => {
+    if (!geo || !lowP) return null;
+    const text = `Lowest ${fmt(lowP.low)}`;
+    const w = text.length * 6.9; // 12px Inter, generous
+    const cx = geo.x(geo.lowIdx);
+    const cy = geo.y(lowP.low);
+    const plotBottom = H - pad.b - 4;
+    const step = (width - pad.l - pad.r) / Math.max(1, n - 1);
+    const crosses = (x0: number, x1: number, y0: number, y1: number) => {
+      const i0 = Math.max(0, Math.floor((x0 - pad.l) / step) - 1);
+      const i1 = Math.min(n - 1, Math.ceil((x1 - pad.l) / step) + 1);
+      let lo = Infinity, hi = -Infinity;
+      for (let i = i0; i <= i1; i++) for (const v of [points[i]!.end, points[i]!.low]) { const yy = geo.y(v); lo = Math.min(lo, yy); hi = Math.max(hi, yy); }
+      return y0 < hi + 2 && y1 > lo - 2;
+    };
+    const cands = [16, -9, 30, -23, 44, -37].flatMap((dy) => [
+      { dx: 8, dy, anchor: 'start' as const },
+      { dx: -8, dy, anchor: 'end' as const },
+    ]).map((c) => {
+      const x = cx + c.dx;
+      const y = Math.min(cy + c.dy, plotBottom);
+      const x0 = c.anchor === 'start' ? x : x - w;
+      const box = { x0, x1: x0 + w, y0: y - 12, y1: y + 3 };
+      const inside = box.x0 >= pad.l && box.x1 <= width - pad.r && box.y0 >= 0 && box.y1 <= H - pad.b;
+      return { x, y, anchor: c.anchor, ok: inside && !crosses(box.x0, box.x1, box.y0, box.y1), inside };
+    });
+    const pick = cands.find((c) => c.ok);
+    // No clear spot next to the dot (narrow phone charts): show it as a caption above the chart instead of over the line.
+    if (!pick) return { inPlot: false as const, text, date: lowP.date };
+    return { inPlot: true as const, x: pick.x, y: pick.y, anchor: pick.anchor, text, date: lowP.date };
+  }, [geo, lowP, H, width, n, points, pad.l, pad.r, pad.b, fmt]);
   const summary = last && lowP ? `Cash from ${formatShortDate(points[0]!.date)} to ${formatShortDate(last.date)}. Projected ${fmt(last.end)} on ${formatShortDate(last.date)}. Lowest ${fmt(lowP.low)} on ${formatShortDate(lowP.date)}.` : 'Not enough data for a chart yet.';
 
   const pick = (clientX: number) => {
@@ -126,6 +171,7 @@ export function ForecastChart({ history, forecast, currency, reserve, monthEnd }
 
   return (
     <div className="chart-box">
+      {lowLabel && !lowLabel.inPlot && <div className={`fc-low-caption ${lowP!.low < 0 ? "neg" : ""}`} aria-hidden="true"><span className="fc-low-dot" />{lowLabel.text} · {formatShortDate(lowLabel.date)}</div>}
       <div className="chart-area" ref={box}>
       {geo && (
         <svg
@@ -153,13 +199,13 @@ export function ForecastChart({ history, forecast, currency, reserve, monthEnd }
               <stop offset="100%" className="fc-stop-b" />
             </linearGradient>
           </defs>
-          {geo.ticks.map((v) => (
+          {geo.ticks.map((v, k) => (
             <g key={v}>
-              <line x1={0} x2={width} y1={geo.y(v)} y2={geo.y(v)} className={v === 0 && geo.bottom < 0 ? 'fc-zero' : 'fc-grid'} />
-              <text x={2} y={geo.y(v) - 5}>{formatCents(v, currency, { compact: true })}</text>
+              <line x1={pad.l} x2={width} y1={geo.y(v)} y2={geo.y(v)} className={v === 0 && geo.bottom < 0 ? 'fc-zero' : 'fc-grid'} />
+              <text className="fc-y" x={pad.l - 8} y={geo.y(v) + 4} textAnchor="end">{scale.labels[k]}</text>
             </g>
           ))}
-          {reserve > 0 && <line x1={0} x2={width} y1={geo.y(reserve)} y2={geo.y(reserve)} className="fc-reserve" />}
+          {reserve > 0 && <line x1={pad.l} x2={width} y1={geo.y(reserve)} y2={geo.y(reserve)} className="fc-reserve" />}
           {/* the lines, markers and lowest point draw in from left to right whenever the range changes */}
           <g className="fc-reveal" key={`${points[0]?.date}-${n}`}>
           <path d={geo.area} className="fc-area" />
@@ -182,13 +228,7 @@ export function ForecastChart({ history, forecast, currency, reserve, monthEnd }
           {lowP && (
             <g>
               <circle cx={geo.x(geo.lowIdx)} cy={geo.y(lowP.low)} r={4.5} className={`fc-dot ${lowP.low < 0 ? 'neg' : ''}`} />
-              <text
-                x={geo.x(geo.lowIdx) + (geo.x(geo.lowIdx) > width - 150 ? -8 : 8)}
-                y={Math.min(geo.y(lowP.low) + 16, H - pad.b - 4)}
-                textAnchor={geo.x(geo.lowIdx) > width - 150 ? 'end' : 'start'}
-              >
-                Lowest {fmt(lowP.low)}
-              </text>
+              {lowLabel?.inPlot && <text x={lowLabel.x} y={lowLabel.y} textAnchor={lowLabel.anchor} className="fc-low">{lowLabel.text}</text>}
             </g>
           )}
           </g>

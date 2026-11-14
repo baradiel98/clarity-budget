@@ -45,3 +45,17 @@ export const INCOME_STATUS_LABEL = {
 
 export const NO_SYNC_NOTICE =
   'Your data lives only on this device. Changes made here do not appear on your other devices until you move them with an encrypted backup.';
+
+/** What each Upcoming status means (web: tooltip + screen-reader text; mobile: status help). Same words on both apps. */
+export const STATUS_HELP: Record<keyof typeof OCCURRENCE_STATUS_LABEL, (income: boolean) => string> = {
+  expected: (i) => (i ? 'Fixed amount, not received yet. Counted in projections.' : 'Fixed amount, not paid yet. Counted in projections.'),
+  estimated: () => 'The amount is an estimate. Counted in projections; record the real amount when it happens.',
+  unknown: () => 'No amount yet, so it is not counted. Add the amount to include it.',
+  overdue: (i) => (i ? 'Not recorded yet, so it is not counted.' : 'The date has passed and no payment is recorded. Counted as due today.'),
+  scheduled_tx: () => 'A future-dated transaction you entered. It counts on its date.',
+  confirmed: (i) => (i ? 'Recorded as received.' : 'Recorded as paid.'),
+  skipped: () => 'Skipped. Not counted.',
+};
+
+/** Shown above the Upcoming list on both apps. */
+export const UPCOMING_NOTE = 'Nothing here is recorded until you record it or mark it paid. Estimated amounts (≈) may change.';

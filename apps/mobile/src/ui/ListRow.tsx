@@ -4,10 +4,12 @@ import { Pressable, View } from 'react-native';
 import { T } from './Text';
 import { useTheme } from './theme';
 
-export function ListRow({ icon, title, subtitle, right, onPress, onLongPress, chevron, accessibilityLabel, last }: { icon?: ReactNode; title: string; subtitle?: ReactNode; right?: ReactNode; onPress?: () => void; onLongPress?: () => void; chevron?: boolean; accessibilityLabel?: string; last?: boolean }) {
+/** `titleLines`: 1 (default) truncates long titles; 0 shows the full title, wrapping (used where the name matters, e.g. Upcoming). */
+export function ListRow({ icon, title, subtitle, right, onPress, onLongPress, chevron, accessibilityLabel, last, titleLines = 1, testID }: { icon?: ReactNode; title: string; subtitle?: ReactNode; right?: ReactNode; onPress?: () => void; onLongPress?: () => void; chevron?: boolean; accessibilityLabel?: string; last?: boolean; titleLines?: number; testID?: string }) {
   const { c } = useTheme();
   return (
     <Pressable
+      testID={testID}
       accessibilityRole={onPress ? 'button' : undefined}
       accessibilityLabel={accessibilityLabel}
       onPress={onPress}
@@ -17,7 +19,7 @@ export function ListRow({ icon, title, subtitle, right, onPress, onLongPress, ch
     >
       {icon}
       <View style={{ flex: 1, gap: 2 }}>
-        <T numberOfLines={1} style={{ fontFamily: 'Inter_500Medium' }}>{title}</T>
+        <T {...(titleLines > 0 ? { numberOfLines: titleLines } : {})} style={{ fontFamily: 'Inter_500Medium' }}>{title}</T>
         {typeof subtitle === 'string' ? <T variant="footnote" color="textTertiary" numberOfLines={2}>{subtitle}</T> : subtitle}
       </View>
       {right}
