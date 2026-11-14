@@ -54,7 +54,12 @@ export function reviewDraft(d: CaptureDraft, ctx: CaptureContext): Issue[] {
   // Accounts
   if (d.accountWords && (!d.accountId || d.accountSource !== 'words')) add('account_unknown', 'account', `You mentioned “${d.accountWords}”, but none of your accounts has that name. Choose the account.`, true, true);
   if (!acct(d.accountId)) add('account_missing', 'account', d.kind === 'transfer' ? 'Choose the account the money came from.' : 'Choose the account.', true);
-  else if (d.accountSource === 'default' && !d.accountWords) add('account_default', 'account', `No account was mentioned, so ${acct(d.accountId)!.name} is used.`, false);
+  else {
+    // Only worth saying when there is a real choice of account.
+    if (d.accountSource === 'default' && !d.accountWords && ctx.accounts.filter((a) => !a.archived).length > 1) add('account_default', 'account', `No account was mentioned, so ${acct(d.accountId)!.name} is used.`, false);
+    const a = acct(d.accountId)!;
+    if (d.date && d.date < a.openingDate) add('before_tracking', 'date', `This is before ${a.name} was added to Clarity (${formatShortDate(a.openingDate)}). It is kept as history and does not change that account's balance, which already includes it.`, false);
+  }
   if (d.kind === 'transfer') {
     if (!acct(d.toAccountId)) {
       const what = d.role === 'card_payment' ? 'the credit card you paid' : d.role === 'savings' ? 'the savings account' : 'the account the money went to';

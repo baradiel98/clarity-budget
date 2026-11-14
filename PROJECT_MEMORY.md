@@ -130,3 +130,10 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Verified]** `WorkspaceStore.copyMasterKey()` and `vaultId` were added; no change to encryption or the record format.
 - Tests: `e2e/remember.spec.ts` (11, production build) and `e2e/test-mode.spec.ts` (3, test build on port 4174; Playwright projects "production" and "test-mode").
 
+## Clarity Capture (Nov 2026)
+- **[Decision, user]** On-device interpretation only ("On-device first"). No external AI; the Privacy Center says so. A cloud model would need consent plus the server from the accounts plan. Design and rules: `docs/capture.md`.
+- **[Verified]** `packages/capture` (pure TypeScript, shared with mobile): the interpreter, `parseDrafts` (validates untrusted output), `reviewDraft` (deterministic issues), `toTxInput`. `addTransactions` in data is atomic. Provenance source `'capture'` keeps the user's words.
+- **[Decision]** Dates that weren't mentioned are filled with today but block approval until confirmed. Approximate amounts and possible duplicates must be confirmed. Card payments and savings are transfers. Categories are never invented.
+- **[Lesson]** Transactions dated before an account's opening date are history (no balance change). Capture now says so, because users backfilling recent purchases would otherwise be confused.
+- **[Open]** Mobile app UI for Capture; voice and receipt input; a cloud interpreter.
+

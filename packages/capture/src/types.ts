@@ -60,7 +60,7 @@ export type IssueCode =
   | 'date_missing' | 'date_assumed' | 'date_ambiguous' | 'date_future'
   | 'merchant_missing' | 'merchant_description'
   | 'category_missing' | 'category_unknown_words'
-  | 'account_missing' | 'account_unknown' | 'account_default'
+  | 'account_missing' | 'account_unknown' | 'account_default' | 'before_tracking'
   | 'to_account_missing' | 'same_account'
   | 'kind_unclear'
   | 'splits_mismatch' | 'split_category_missing'

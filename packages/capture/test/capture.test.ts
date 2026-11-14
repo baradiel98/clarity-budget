@@ -256,6 +256,14 @@ describe('Clarity Capture: approving', () => {
     expect(store.data.transactions.filter((t) => t.provenance.source === 'capture')).toHaveLength(2);
   });
 
+  it('says when a date is before the account was added (history: no balance change)', async () => {
+    const { store } = await workspace();
+    const [d] = run('Spent $10 at CVS on October 20', store.data).drafts;
+    expect(codes(d!, store.data)).toContain('before_tracking');
+    const one = await workspace({ card: false, savings: false });
+    expect(codes(run('$10 at CVS today', one.store.data).drafts[0]!, one.store.data)).not.toContain('account_default');
+  });
+
   it('uses the default account setting when nothing is said', async () => {
     const { store } = await workspace();
     await store.apply(updateSettings(store.ctx(NOW, TODAY), { defaultAccountId: acctId(store.data, 'Chase Visa') }));
