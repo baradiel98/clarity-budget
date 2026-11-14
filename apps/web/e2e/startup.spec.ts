@@ -40,3 +40,17 @@ test('loading screen shows the build version (to identify what a device is runni
   await page.goto('/');
   await expect(page.getByText(/^Version [0-9a-f]{7}$/)).toBeVisible();
 });
+
+test('every script blocked (as AdGuard did): the static screen still explains what to do', async ({ page }) => {
+  // Emulates AdGuard Tracking Protection's "/clarity-*.js" rule, which matches every .js URL on a
+  // "clarity-…" hostname. HTML and CSS still load; no script runs, not even boot.js.
+  await page.route(/\.js(\?|$)/, (r) => r.abort('blockedbyclient'));
+  await page.goto('/');
+  await expect(page.getByText('Loading Clarity…')).toBeVisible();
+  const hint = page.getByText(/a content blocker such as AdGuard may be blocking Clarity's scripts/);
+  // Hidden at first, then faded in by CSS alone after a few seconds (no script involved).
+  expect(await hint.evaluate((el) => getComputedStyle(el).opacity)).toBe('0');
+  await expect.poll(() => hint.evaluate((el) => getComputedStyle(el).opacity), { timeout: 10_000 }).toBe('1');
+  await expect(hint).toContainText('Allow this site in the blocker, then reload.');
+  expect(await page.evaluate(() => (window as unknown as { __clarityModuleLoaded?: boolean }).__clarityModuleLoaded ?? false)).toBe(false);
+});
