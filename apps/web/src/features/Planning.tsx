@@ -1,14 +1,15 @@
 import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, CalendarPlus, MoreHorizontal, Pause, Pencil, Play, Plus, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import {
-  clearOccurrenceException, createRecurring, deleteRecurring, engineInput, setOccurrenceException, setRecurringPaused, updateRecurring,
+  clearOccurrenceException, createRecurring, deleteRecurring, engineInput, estimateNote, recurringAmountView, setOccurrenceException, setRecurringPaused, updateRecurring,
+  type RecurringAmountView,
   type RecurringInput,
 } from '@clarity/data';
 import {
   annualEquivalentCents, applyWeekendRule, balanceOnDate, buildForecast, describeSchedule, monthlyEquivalentCents, nextScheduleDate, type Occurrence,
 } from '@clarity/engine';
 import {
-  addDays, centsToDecimalString, endOfMonth, formatShortDate, formatWeekdayDate, parseAmountInput, parseISO, TERMS, type RecurringAmount,
+  addDays, centsToDecimalString, endOfMonth, formatCents, formatShortDate, formatWeekdayDate, parseAmountInput, parseISO, TERMS, type RecurringAmount,
   type RecurringItem, type RecurringKind, type Schedule, type WeekendRule,
 } from '@clarity/shared';
 import { useData, useRun, useSession, useStore } from '../state/session';
@@ -104,17 +105,19 @@ export function Planning() {
           ) : (
             <div className="list" data-testid="timeline">
               {timeline.map((d) => (
-                <div key={d.date} style={{ borderTop: '1px solid var(--c-border)', padding: '10px 0' }}>
-                  <div className="row between"><strong className="t-footnote">{formatWeekdayDate(d.date)}</strong><span className={`t-footnote num ${d.end < 0 ? 'neg' : 'muted'}`}><Money cents={d.end} currency={cur} /></span></div>
+                <div key={d.date} className="tl-day">
+                  <div className="tl-head"><strong className="t-footnote">{formatWeekdayDate(d.date)}</strong><span className={`t-footnote num ${d.end < 0 ? 'neg' : 'muted'}`}><span className="sr-only">Projected balance at end of day: </span><Money cents={d.end} currency={cur} /></span></div>
                   {d.items.map((it) => (
-                    <div key={it.key} className="row" style={{ padding: '6px 0', position: 'relative' }}>
-                      <span className={`cat-icon ${it.isIncome ? 'inflow' : ''}`} style={{ width: 26, height: 26, borderRadius: 8 }}>{it.isIncome ? <ArrowDownLeft size={14} /> : <ArrowUpRight size={14} />}</span>
-                      <span style={{ flex: 1, textDecoration: it.status === 'skipped' ? 'line-through' : undefined }} className={it.status === 'skipped' ? 'faint' : ''}>{it.label}</span>
-                      {it.status === 'excluded' ? <span className="badge warn">Estimated, not in Safe to Spend</span> : it.status !== 'expected' && statusBadge({ status: it.status as Occurrence['status'], isIncome: it.isIncome })}
-                      <span className={`num ${it.cents > 0 ? 'pos' : ''}`} style={{ width: 110, textAlign: 'right', fontWeight: 600 }}>{it.status === 'unknown' || it.status === 'skipped' ? <span className="faint">—</span> : <Money cents={it.cents} currency={cur} sign="always" />}</span>
+                    <div key={it.key} className="tl-item">
+                      <span className={`cat-icon tl-icon ${it.isIncome ? 'inflow' : ''}`}>{it.isIncome ? <ArrowDownLeft size={14} /> : <ArrowUpRight size={14} />}</span>
+                      <span className="tl-label">
+                        <span style={{ textDecoration: it.status === 'skipped' ? 'line-through' : undefined }} className={it.status === 'skipped' ? 'faint' : ''}>{it.label}</span>
+                        {it.status === 'excluded' ? <span className="badge warn">Estimated, not in Safe to Spend</span> : it.status !== 'expected' && statusBadge({ status: it.status as Occurrence['status'], isIncome: it.isIncome })}
+                      </span>
+                      <span className={`tl-amt num ${it.cents > 0 ? 'pos' : ''}`}>{it.status === 'unknown' || it.status === 'skipped' ? <span className="faint">—</span> : <>{it.status === 'estimated' && <span className="approx" aria-label="about">≈</span>}<Money cents={it.cents} currency={cur} sign="always" /></>}</span>
                       {it.occ ? (
-                        <button className="icon-btn" aria-label={`Actions for ${it.label}`} onClick={() => setMenu(menu === it.key ? null : it.key)}><MoreHorizontal size={16} /></button>
-                      ) : <span style={{ width: 34 }} />}
+                        <button className="icon-btn tl-act" aria-label={`Actions for ${it.label}`} aria-expanded={menu === it.key} onClick={() => setMenu(menu === it.key ? null : it.key)}><MoreHorizontal size={16} /></button>
+                      ) : <span className="tl-act" aria-hidden />}
                       {menu === it.key && it.occ && (
                         <div className="suggest" style={{ left: 'auto', width: 220 }} role="menu">
                           {it.status === 'skipped' ? (
@@ -180,15 +183,17 @@ export function Planning() {
     const next = nextScheduleDate(r.schedule, today);
     const effective = next ? applyWeekendRule(next, r.weekendRule) : null;
     const isIncome = r.kind === 'income';
+    const view = recurringAmountView(r, data.transactions);
     return (
       <div className="item-row">
         <div className={`cat-icon ${isIncome ? 'inflow' : ''}`}>{isIncome ? <ArrowDownLeft size={16} /> : r.kind === 'transfer' || r.kind === 'savings' ? <ArrowLeftRight size={16} /> : <ArrowUpRight size={16} />}</div>
         <div>
           <div className="title" style={{ fontWeight: 500 }}>{r.name} {r.paused && <span className="badge">Paused</span>}</div>
-          <div className="hint">{describeSchedule(r.schedule)}{effective && !r.paused ? ` · next ${formatShortDate(effective)}` : ''}</div>
+          <div className="hint">{describeSchedule(r.schedule)}{effective && !r.paused ? <> · <span className="nowrap">next {formatShortDate(effective)}</span></> : ''}</div>
+          {view.kind === 'estimate' && <div className="hint" data-testid="estimate-note">{estimateNote(view, (c) => formatCents(c, cur))}</div>}
         </div>
         <div>
-          <div className="amt num">{amountLabel(r.amount)}</div>
+          <div className="amt num">{amountLabel(view)}</div>
           <div className="actions">
             <button className="icon-btn" style={{ width: 28, height: 28 }} aria-label={`Edit ${r.name}`} title="Edit" onClick={() => setEdit({ item: r, kind: r.kind })}><Pencil size={14} /></button>
             <button className="icon-btn" style={{ width: 28, height: 28 }} aria-label={r.paused ? `Resume ${r.name}` : `Pause ${r.name}`} title={r.paused ? 'Resume' : 'Pause'} onClick={() => void run((ctx) => setRecurringPaused(ctx, r.id, !r.paused))}>{r.paused ? <Play size={14} /> : <Pause size={14} />}</button>
@@ -210,10 +215,11 @@ export function Planning() {
     );
   }
 
-  function amountLabel(a: RecurringAmount) {
-    if (a.type === 'unknown') return <span className="faint">Amount unknown</span>;
-    if (a.type === 'card_full_balance') return <span className="muted">Full balance</span>;
-    return <>{a.type === 'variable' ? '~' : ''}<Money cents={a.cents} currency={cur} /></>;
+  /** Same estimate treatment as Upcoming: ≈ before the amount the forecast actually uses. */
+  function amountLabel(v: RecurringAmountView) {
+    if (v.kind === 'unknown') return <span className="faint">Amount unknown</span>;
+    if (v.kind === 'card_full_balance') return <span className="muted">Full balance</span>;
+    return <>{v.kind === 'estimate' && <span className="approx" aria-label="about">≈</span>}<Money cents={v.forecastCents} currency={cur} /></>;
   }
 }
 

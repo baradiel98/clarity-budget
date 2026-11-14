@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-import { buildPreview, csvParser, guessMapping, suggestSignConvention, type ImportSettings, type PreviewContext, type RawTable } from '@clarity/import';
+import { buildPreview, csvParser, guessMapping, nonBlankRowCount, suggestSignConvention, type ImportSettings, type PreviewContext, type RawTable } from '@clarity/import';
 import type { Account } from '@clarity/shared';
 
 /** Statement parsing runs here, off the main thread. Nothing is sent over the network. */
@@ -16,7 +16,7 @@ self.onmessage = (e: MessageEvent<Msg>) => {
     if (m.type === 'analyze') {
       table = csvParser.parse(m.text);
       const guess = guessMapping(table);
-      self.postMessage({ id: m.id, ok: true, result: { guess, sample: table.rows.slice(0, 12), rowCount: table.rows.length, delimiter: table.delimiter } });
+      self.postMessage({ id: m.id, ok: true, result: { guess, sample: table.rows.slice(0, 12), rowCount: table.rows.length, nonBlankRows: nonBlankRowCount(table.rows), delimiter: table.delimiter } });
     } else if (m.type === 'sign') {
       self.postMessage({ id: m.id, ok: true, result: suggestSignConvention(table!, m.settings, m.account) });
     } else {

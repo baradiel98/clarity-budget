@@ -2,7 +2,7 @@ import { AlertTriangle, CheckCircle2, CopyCheck, FileUp, Link2, ListChecks, Shie
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { commitImport, undoImportBatch as undoImport, type ImportDecision } from '@clarity/data';
 import {
-  checkImportFile, DATE_FORMATS, headerSignature, reconcilePreview, type ImportCandidate, type ImportPreview, type ImportSettings,
+  checkImportFile, dataRowCount, DATE_FORMATS, headerSignature, NO_DATA_ROWS_MESSAGE, reconcilePreview, type ImportCandidate, type ImportPreview, type ImportSettings,
 } from '@clarity/import';
 import { formatShortDate, TERMS, type ColumnMapping, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
 import { useRouter } from '../lib/router';
@@ -67,6 +67,8 @@ export function ImportPage() {
     try {
       const text = await f.text();
       const [hash, a] = await Promise.all([sha256Hex(text), client.current!.analyze(text)]);
+      // Column names but no rows: say so here instead of showing an empty preview.
+      if (a.guess.hasHeader && dataRowCount(a.nonBlankRows, true) === 0) return setError(NO_DATA_ROWS_MESSAGE);
       setFile({ name: f.name, hash });
       setAnalysis(a);
       const sig = headerSignature(a.guess.headers);
@@ -145,6 +147,7 @@ export function ImportPage() {
   };
 
   const setRow = (i: number, patch: Partial<Row>) => setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const dataRows = analysis ? dataRowCount(analysis.nonBlankRows, hasHeader) : 0;
   const colOptions = analysis ? (hasHeader ? analysis.guess.headers : analysis.guess.headers.map((_, i) => `Column ${i + 1}`)) : [];
   const ColSelect = ({ label, value, onChange, optional }: { label: string; value: number | undefined; onChange: (v: number | undefined) => void; optional?: boolean }) => (
     <Field label={label}>
@@ -267,8 +270,8 @@ export function ImportPage() {
             </div>
           </div>
           <div className="row" style={{ justifyContent: 'flex-end' }}>
-            <span className="hint">{analysis.rowCount} lines in file</span>
-            <button className="btn btn-primary" disabled={!columns || !dateFormat || busy} onClick={() => void toReview()} data-testid="to-review" aria-busy={busy}>{busy ? <><Spinner /> Reading…</> : 'Review transactions'}</button>
+            {dataRows === 0 ? <span className="hint neg" role="alert">{NO_DATA_ROWS_MESSAGE}</span> : <span className="hint">{dataRows} {dataRows === 1 ? 'row' : 'rows'} to read</span>}
+            <button className="btn btn-primary" disabled={!columns || !dateFormat || busy || dataRows === 0} onClick={() => void toReview()} data-testid="to-review" aria-busy={busy}>{busy ? <><Spinner /> Reading…</> : 'Review transactions'}</button>
           </div>
         </div>
       )}

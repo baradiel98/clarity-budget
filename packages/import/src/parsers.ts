@@ -64,3 +64,15 @@ export function checkImportFile(fileName: string, sizeBytes: number, head: strin
   if (!parser || parser.s === 0) return { ok: false, reason: 'Only CSV statements can be imported right now.' };
   return { ok: true, parser: parser.p };
 }
+
+/** Rows that contain anything at all (blank lines and rows of empty cells don't count). */
+export function nonBlankRowCount(rows: readonly (readonly string[])[]): number {
+  return rows.filter((r) => r.some((c) => c.trim() !== '')).length;
+}
+
+/** How many rows could be transactions, given whether the first row holds column names. */
+export function dataRowCount(nonBlankRows: number, hasHeader: boolean): number {
+  return Math.max(0, nonBlankRows - (hasHeader ? 1 : 0));
+}
+
+export const NO_DATA_ROWS_MESSAGE = 'This file has column names but no transactions in it. Check that the export from your bank covers the dates you want, then choose the file again.';

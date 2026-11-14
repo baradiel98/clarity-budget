@@ -1,6 +1,6 @@
 import { addDays, addMonths, clampDay, diffDays, endOfMonth, makeIdFactory, parseISO, type ISODate, type WorkspaceData } from '@clarity/shared';
 import { applyOps } from './ops';
-import { addTransaction, createAccount, createRecurring, defaultSettings, seedCategories, updateSettings, type Ctx } from './commands';
+import { addTransaction, createAccount, createRecurring, defaultSettings, seedCategories, updateCategory, updateSettings, type Ctx } from './commands';
 import { emptyWorkspace } from './ops';
 
 /**
@@ -24,6 +24,9 @@ export function buildDemoWorkspace(today: ISODate, now: number, seed = 1): Works
     data = applyOps(data, ops);
   };
   run(seedCategories(ctx()));
+  // A few monthly budgets so the Budget screen has something to show (fictional, like everything here).
+  const budgets: [string, number][] = [['cat_groceries', 45000], ['cat_dining', 15000], ['cat_coffee', 3000], ['cat_fuel', 12000], ['cat_transport', 6000], ['cat_entertainment', 5000], ['cat_shopping', 10000]];
+  for (const [id, cents] of budgets) run(updateCategory(ctx(), id, { budgetCents: cents }));
   const back = (d: number) => addDays(today, -d);
   const chk = createAccount({ ...ctx(), today: back(30) }, { name: 'Everyday Checking', type: 'checking', currentBalanceCents: 100000 });
   run(chk.ops);

@@ -2,9 +2,9 @@ import { router } from 'expo-router';
 import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, Plus } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
 import { ActionSheetIOS, Alert, Platform, Pressable, View } from 'react-native';
-import { clearOccurrenceException, deleteRecurring, engineInput, setOccurrenceException, setRecurringPaused } from '@clarity/data';
+import { clearOccurrenceException, deleteRecurring, engineInput, estimateNote, recurringAmountView, setOccurrenceException, setRecurringPaused } from '@clarity/data';
 import { annualEquivalentCents, applyWeekendRule, balanceOnDate, buildForecast, describeSchedule, monthlyEquivalentCents, nextScheduleDate, type Occurrence } from '@clarity/engine';
-import { addDays, endOfMonth, formatShortDate, formatWeekdayDate, TERMS, type RecurringItem } from '@clarity/shared';
+import { addDays, endOfMonth, formatCents, formatShortDate, formatWeekdayDate, TERMS, type RecurringItem } from '@clarity/shared';
 import { setAddPrefill, setExplain } from '../../src/state/nav';
 import { useData, useRun, useSession, useStore } from '../../src/state/session';
 import { LinkButton } from '../../src/ui/Button';
@@ -68,7 +68,9 @@ export default function Planning() {
       <Card title={title} right={<Pressable accessibilityRole="button" accessibilityLabel={`Add to ${title}`} hitSlop={10} onPress={() => { setRecurringEdit({ kind: addKind }); router.push('/recurring'); }}><Plus size={20} color={c.accent} /></Pressable>}>
         {items.length === 0 ? <T color="textSecondary">{addKind === 'income' ? 'No income added. Your forecast assumes no money coming in.' : 'Nothing yet.'}</T> : items.map((r, i) => {
           const next = nextScheduleDate(r.schedule, today);
-          const amt = r.amount.type === 'unknown' ? 'Unknown' : r.amount.type === 'card_full_balance' ? 'Full balance' : null;
+          const v = recurringAmountView(r, data.transactions);
+          const amt = v.kind === 'unknown' ? 'Unknown' : v.kind === 'card_full_balance' ? 'Full balance' : null;
+          const sched = `${describeSchedule(r.schedule)}${next && !r.paused ? ` · next ${formatShortDate(applyWeekendRule(next, r.weekendRule))}` : ''}${r.paused ? ' · Paused' : ''}`;
           return (
             <ListRow
               key={r.id}
@@ -76,8 +78,18 @@ export default function Planning() {
               onPress={() => itemActions(r)}
               icon={<IconBubble tone={r.kind === 'income' ? 'inflow' : 'neutral'}>{r.kind === 'income' ? <ArrowDownLeft size={16} color={c.positive} /> : r.kind === 'transfer' || r.kind === 'savings' ? <ArrowLeftRight size={16} color={c.textSecondary} /> : <ArrowUpRight size={16} color={c.textSecondary} />}</IconBubble>}
               title={r.name}
-              subtitle={`${describeSchedule(r.schedule)}${next && !r.paused ? ` · next ${formatShortDate(applyWeekendRule(next, r.weekendRule))}` : ''}${r.paused ? ' · Paused' : ''}`}
-              right={amt ? <T color="textTertiary">{amt}</T> : <Money cents={(r.amount as { cents: number }).cents} currency={cur} style={{ fontFamily: 'Inter_600SemiBold' }} />}
+              subtitle={v.kind === 'estimate' ? (
+                <View style={{ gap: 2 }}>
+                  <T variant="footnote" color="textTertiary">{sched}</T>
+                  <T variant="footnote" color="textTertiary" testID={`estimate-note-${r.name}`}>{estimateNote(v, (x) => formatCents(x, cur))}</T>
+                </View>
+              ) : sched}
+              right={amt ? <T color="textTertiary">{amt}</T> : (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }} testID={`plan-amount-${r.name}`}>
+                  {v.kind === 'estimate' && <T color="warning" accessibilityLabel="about" style={{ fontFamily: 'Inter_600SemiBold' }}>≈</T>}
+                  <Money cents={v.kind === 'fixed' || v.kind === 'estimate' ? v.forecastCents : 0} currency={cur} style={{ fontFamily: 'Inter_600SemiBold' }} />
+                </View>
+              )}
             />
           );
         })}

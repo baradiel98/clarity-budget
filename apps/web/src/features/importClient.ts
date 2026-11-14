@@ -5,6 +5,8 @@ export interface Analysis {
   guess: MappingGuess;
   sample: string[][];
   rowCount: number;
+  /** Rows with any content (blank lines excluded). */
+  nonBlankRows: number;
   delimiter: string;
 }
 

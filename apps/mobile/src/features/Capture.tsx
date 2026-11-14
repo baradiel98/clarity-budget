@@ -119,7 +119,7 @@ export function CaptureView({ data, today, approve, onAddManually, disabled }: C
           <ShieldCheck size={14} color={c.positive} />
           <T variant="caption" color="textTertiary" style={{ flex: 1 }}>Read on this device. Nothing is sent anywhere.</T>
         </View>
-        <Button testID="capture-read" title={reading ? 'Reading…' : 'Prepare'} busy={reading} onPress={() => void read()} />
+        <Button testID="capture-read" title={reading ? 'Reading…' : 'Prepare'} busy={reading} disabled={!st.text.trim()} onPress={() => void read()} />
       </View>
 
       {st.error && (

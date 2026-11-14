@@ -7,3 +7,4 @@ export * from './selectors';
 export * from './csvExport';
 export * from './demo';
 export * from './homeView';
+export * from './recurringView';

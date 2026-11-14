@@ -125,7 +125,7 @@ test.describe('phone-width layout', () => {
     const noOverflow = async () => expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
     await noOverflow();
     await bar.getByRole('link', { name: 'Transactions' }).click();
-    await expect(page.locator('table.data')).toContainText('Bakery');
+    await expect(page.getByTestId('tx-list')).toContainText('Bakery'); // phones get stacked rows, not the table (Phase 3A)
     await noOverflow();
     await bar.getByRole('link', { name: 'Planning' }).click();
     await noOverflow();

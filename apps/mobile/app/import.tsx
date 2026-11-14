@@ -4,7 +4,7 @@ import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native';
 import * as ExpoCrypto from 'expo-crypto';
 import { commitImport, undoImportBatch, type ImportDecision } from '@clarity/data';
 import {
-  buildPreview, checkImportFile, csvParser, guessMapping, headerSignature, reconcilePreview, suggestSignConvention, type ImportCandidate, type ImportPreview,
+  buildPreview, checkImportFile, csvParser, dataRowCount, guessMapping, headerSignature, NO_DATA_ROWS_MESSAGE, nonBlankRowCount, reconcilePreview, suggestSignConvention, type ImportCandidate, type ImportPreview,
   type MappingGuess, type RawTable,
 } from '@clarity/import';
 import { formatCents, formatShortDate, TERMS, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
@@ -63,6 +63,7 @@ export default function ImportScreen() {
       try {
         const table = csvParser.parse(f.text);
         const guess = guessMapping(table);
+        if (guess.hasHeader && dataRowCount(nonBlankRowCount(table.rows), true) === 0) throw new Error(NO_DATA_ROWS_MESSAGE);
         if (!guess.columns) throw new Error(guess.problems.join(' ') || 'Could not read the columns in this file.');
         const hash = await ExpoCrypto.digestStringAsync(ExpoCrypto.CryptoDigestAlgorithm.SHA256, f.text);
         const profile = guess.hasHeader ? data.mappingProfiles.find((p) => p.headerSignature === headerSignature(guess.headers)) : undefined;

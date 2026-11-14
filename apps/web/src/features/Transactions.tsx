@@ -4,6 +4,7 @@ import { deleteTransaction, type Op } from '@clarity/data';
 import { periodTotals } from '@clarity/engine';
 import { addDays, endOfMonth, formatMonthYear, formatShortDate, startOfMonth, TERMS, type Transaction } from '@clarity/shared';
 import { isFresh } from '../state/fresh';
+import { NARROW, useMedia } from '../lib/media';
 import { useRouter } from '../lib/router';
 import { useData, useRun, useSession, useStore } from '../state/session';
 import { useUi } from '../state/ui';
@@ -38,6 +39,7 @@ export function Transactions() {
   const [accountId, setAccountId] = useState('');
   const [categoryId, setCategoryId] = useState(params.get('category') ?? '');
   const [type, setType] = useState<'all' | 'expense' | 'income' | 'transfer'>('all');
+  const narrow = useMedia(NARROW);
   const [sort, setSort] = useState<Sort>({ key: 'date', dir: -1 });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [cursor, setCursor] = useState<string | null>(null);
@@ -215,10 +217,10 @@ export function Transactions() {
       </div>
 
       {selected.size > 0 && (
-        <div className="banner" role="region" aria-label="Bulk actions">
+        <div className="banner bulk" role="region" aria-label="Bulk actions">
           <strong>{selected.size} selected</strong>
           <span className="grow" />
-          <div style={{ width: 220 }}><CategorySelect value={null} onChange={(v) => void recategorize(v)} kind="expense" /></div>
+          <div className="bulk-cat"><CategorySelect value={null} onChange={(v) => void recategorize(v)} kind="expense" /></div>
           <button className="btn btn-secondary btn-sm" onClick={() => void remove([...selected])}><Trash2 size={14} /> Delete</button>
           <button className="btn btn-ghost btn-sm" onClick={() => setSelected(new Set())}>Clear</button>
         </div>
@@ -246,11 +248,32 @@ export function Transactions() {
             </div>
           </div>
         ) : (
-          <div className="table-wrap">
+          <div className={narrow ? 'tx-list-wrap' : 'table-wrap'}>
+            {narrow ? (
+              <>
+                <label className="tx-all">
+                  <input type="checkbox" checked={allChecked} onChange={() => setSelected(allChecked ? new Set() : new Set(visible.map((r) => r.id)))} />
+                  Select all shown
+                </label>
+                <ul className="tx-list" data-testid="tx-list">
+                  {visible.flatMap((t) => {
+                    const out = [];
+                    const m = t.date.slice(0, 7);
+                    if (sort.key === 'date' && m !== lastMonth) {
+                      lastMonth = m;
+                      const mt = periodTotals(rows.filter((r) => r.date.startsWith(m)), '0000-01-01', '9999-12-31');
+                      out.push(<li key={`g${m}`} className="tx-group"><span>{formatMonthYear(`${m}-01`)}</span><span className="num">{mt.count ? <Money cents={mt.netCents} currency={cur} sign="always" /> : ''}</span></li>);
+                    }
+                    out.push(item(t));
+                    return out;
+                  })}
+                </ul>
+              </>
+            ) : (
             <table className="data" ref={tableRef}>
               <thead>
                 <tr>
-                  <th className="w-check"><input type="checkbox" aria-label="Select all" checked={allChecked} onChange={() => setSelected(allChecked ? new Set() : new Set(visible.map((r) => r.id)))} /></th>
+                  <th className="w-check"><label className="check-hit"><input type="checkbox" aria-label="Select all" checked={allChecked} onChange={() => setSelected(allChecked ? new Set() : new Set(visible.map((r) => r.id)))} /></label></th>
                   {header('date', 'Date')}
                   {header('merchant', 'Merchant')}
                   <th className="col-cat">Category</th>
@@ -274,11 +297,12 @@ export function Transactions() {
                       </tr>,
                     );
                   }
-                  out.push(<Row key={t.id} t={t} />);
+                  out.push(row(t));
                   return out;
                 })}
               </tbody>
             </table>
+            )}
             {rows.length > limit && (
               <div className="row" style={{ justifyContent: 'center', padding: 14 }}>
                 <button className="btn btn-secondary btn-sm" onClick={() => setLimit(limit + PAGE)}>Show {Math.min(PAGE, rows.length - limit)} more</button>
@@ -290,15 +314,67 @@ export function Transactions() {
     </div>
   );
 
-  function Row({ t }: { t: Transaction }) {
+  function describe(t: Transaction) {
     const cat = t.categoryId ? categories.get(t.categoryId) : undefined;
     const acct = accounts.get(t.accountId);
     const other = t.transferGroupId ? data.transactions.find((x) => x.transferGroupId === t.transferGroupId && x.id !== t.id) : undefined;
     const icon = t.kind === 'transfer' ? 'transfer' : t.kind === 'adjustment' ? 'adjustment' : cat?.icon;
     const name = t.kind === 'transfer' ? `${t.amountCents < 0 ? 'To' : 'From'} ${other ? accounts.get(other.accountId)?.name ?? '' : ''}` : t.merchant || (t.kind === 'income' ? 'Income' : '—');
     const catName = t.splits?.length ? t.splits.map((x) => categories.get(x.categoryId)?.name).join(', ') : t.kind === 'transfer' ? 'Transfer' : t.kind === 'adjustment' ? 'Adjustment' : cat?.name ?? 'Uncategorized';
+    const inflow = t.amountCents > 0 && t.kind !== 'transfer';
+    return { cat, acct, icon, name, catName, inflow };
+  }
+
+  // (a function declaration: this code sits after the component's return, so only hoisted declarations exist)
+  function toggle(id: string) {
+    setSelected((prev) => { const s = new Set(prev); if (s.has(id)) s.delete(id); else s.add(id); return s; });
+  }
+
+  function badges(t: Transaction) {
+    return (
+      <>
+        {t.status === 'pending' && <span className="badge warn">Pending</span>}
+        {t.kind === 'refund' && <span className="badge pos">Refund</span>}
+        {t.kind === 'adjustment' && <span className="badge" title={t.adjustmentReason}>Adjustment</span>}
+        {t.splits?.length ? <span className="badge">Split</span> : null}
+        {t.provenance.source === 'import' && <span className="badge hide-mobile" title={t.provenance.rawDescription}>Imported</span>}
+        {t.date > today && <span className="badge accent">Planned</span>}
+      </>
+    );
+  }
+
+  /**
+   * Phone row: line 1 = name (wraps, never cut) + amount; line 2 = date · category (+ badges).
+   * The account is in the row's accessible description and in the edit sheet it opens.
+   */
+  function item(t: Transaction) {
+    const { acct, name, catName, inflow } = describe(t);
+    const amount = <Money cents={t.amountCents} currency={cur} sign="always" />;
+    return (
+      <li key={t.id} data-row={t.id} className={['tx-item', isFresh(t.id) ? 'fresh' : '', t.date > today ? 'planned' : '', selected.has(t.id) ? 'selected' : ''].join(' ').trim()}>
+        <label className="tx-check">
+          <input type="checkbox" aria-label={`Select ${name}`} checked={selected.has(t.id)} onChange={() => toggle(t.id)} />
+        </label>
+        <button className="tx-main" onClick={() => ui.openAdd({ editId: t.id })} aria-describedby={`acct-${t.id}`}>
+          <span className="tx-l1">
+            <span className="tx-n">{name}</span>
+            <span className={`tx-amt num ${inflow ? 'pos' : ''}`}>{amount}</span>
+          </span>
+          <span className="tx-l2">
+            <span>{formatShortDate(t.date)} · {catName}</span>
+            {badges(t)}
+          </span>
+          <span className="sr-only" id={`acct-${t.id}`}>Account: {acct?.name ?? 'unknown'}. Opens details to view or edit.</span>
+        </button>
+      </li>
+    );
+  }
+
+  function row(t: Transaction) {
+    const { cat, acct, icon, name, catName } = describe(t);
     return (
       <tr
+        key={t.id}
         data-row={t.id}
         className={[isFresh(t.id) ? 'fresh' : '', t.date > today ? 'planned' : ''].join(' ').trim() || undefined}
         aria-selected={cursor === t.id || selected.has(t.id)}
@@ -306,7 +382,7 @@ export function Transactions() {
         onDoubleClick={() => ui.openAdd({ editId: t.id })}
       >
         <td className="w-check" onClick={(e) => e.stopPropagation()}>
-          <input type="checkbox" aria-label={`Select ${t.merchant}`} checked={selected.has(t.id)} onChange={() => { const s = new Set(selected); if (s.has(t.id)) s.delete(t.id); else s.add(t.id); setSelected(s); }} />
+          <label className="check-hit"><input type="checkbox" aria-label={`Select ${name}`} checked={selected.has(t.id)} onChange={() => toggle(t.id)} /></label>
         </td>
         <td className="num muted" style={{ whiteSpace: 'nowrap' }}>{formatShortDate(t.date)}</td>
         <td>
@@ -315,14 +391,8 @@ export function Transactions() {
             <div style={{ minWidth: 0 }}>
               <div className="row" style={{ gap: 6 }}>
                 <button className="btn-link" onClick={() => ui.openAdd({ editId: t.id })}>{name}</button>
-                {t.status === 'pending' && <span className="badge warn">Pending</span>}
-                {t.kind === 'refund' && <span className="badge pos">Refund</span>}
-                {t.kind === 'adjustment' && <span className="badge" title={t.adjustmentReason}>Adjustment</span>}
-                {t.splits?.length ? <span className="badge">Split</span> : null}
-                {t.provenance.source === 'import' && <span className="badge hide-mobile" title={t.provenance.rawDescription}>Imported</span>}
-                {t.date > today && <span className="badge accent">Planned</span>}
+                {badges(t)}
               </div>
-              <div className="tx-sub">{catName} · {acct?.name}</div>
             </div>
           </div>
         </td>

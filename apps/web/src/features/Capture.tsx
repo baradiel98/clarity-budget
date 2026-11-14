@@ -117,7 +117,7 @@ export function CapturePage() {
         <div className="capture-foot">
           <span className="capture-privacy"><ShieldCheck size={14} aria-hidden /> Read on this device. Nothing is sent anywhere.</span>
           <span className="spacer" />
-          <button type="button" className="btn btn-primary" onClick={() => void read()} disabled={reading} aria-busy={reading} data-testid="capture-read">
+          <button type="button" className="btn btn-primary" onClick={() => void read()} disabled={reading || !st.text.trim()} aria-busy={reading} data-testid="capture-read">
             {reading ? <><Spinner /> Reading…</> : <><Sparkles size={15} aria-hidden /> Prepare</>}
           </button>
         </div>

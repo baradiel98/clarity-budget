@@ -67,6 +67,15 @@ describe('Clarity Capture (mobile)', () => {
     expect(captured(store).map((t) => [t.merchant, t.amountCents, t.categoryId])).toEqual([['Walmart', -3150, 'cat_groceries']]);
   });
 
+  it('Prepare is disabled while the text is empty or only spaces (Phase 3A)', async () => {
+    const { ui } = await setUp();
+    expect(ui.getByTestId('capture-read')).toBeDisabled();
+    await fireEvent.changeText(ui.getByTestId('capture-text'), '   ');
+    expect(ui.getByTestId('capture-read')).toBeDisabled();
+    await fireEvent.changeText(ui.getByTestId('capture-text'), 'coffee $4');
+    expect(ui.getByTestId('capture-read')).toBeEnabled();
+  });
+
   it('unclear items block approval until fixed or confirmed', async () => {
     const { ui, approve, prepare } = await setUp();
     await prepare('I paid 200.');
