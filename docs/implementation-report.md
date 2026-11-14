@@ -189,6 +189,13 @@ The step-by-step checklist is in `docs/device-test-script.md`.
 - **Change made (code only):** the static loading hint, shown by CSS when no script can run, now says a content blocker such as AdGuard may be blocking the scripts and tells the user what to do. There is an end-to-end test for it.
 - **Recommended, not done (hosting change, owner decision):** serve the app from a hostname without `clarity-`, for example a renamed Render service or a custom domain. Re-check with the filter lists before switching.
 
+## 7b. Phase 2 (2026-11-14): dashboard verification and desktop UX
+- **Projection check:** the Nov 13 sample month-end of $4,077.17 is correct. It includes a $250 transfer to Savings on Nov 30, which the dashboard did not list because "Upcoming" stopped at 14 days. Upcoming now runs through month-end.
+- **Safe to Spend** ($2,579.83, low point Nov 18, horizon Nov 30) is correct. The items after the low point are now explained.
+- **Transactions:** totals now cover recorded transactions only. Planned (future-dated) items are summed separately and say so, and a scope line states the period and whether filters are active.
+- **Layout:** one content width (1,440px max). The chart fills the hero card; date labels are weekly and never collide. Repeated figures are described in words, and status badges are explained.
+- **Verification:** Chromium only, at 390, 834, 1280, 1440, 1920 and 2048px (`e2e/phase2.spec.ts`).
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

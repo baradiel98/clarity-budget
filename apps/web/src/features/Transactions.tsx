@@ -82,7 +82,14 @@ export function Transactions() {
     return list;
   }, [data.transactions, range, accountId, categoryId, type, q, sort, categories]);
 
-  const totals = useMemo(() => periodTotals(rows, '0000-01-01', '9999-12-31'), [rows]);
+  // Totals cover recorded activity only (dated today or earlier), like Reports. Future-dated (planned)
+  // rows are listed but summed separately, so the totals never include money that hasn't moved yet.
+  const recordedRows = useMemo(() => rows.filter((t) => t.date <= today), [rows, today]);
+  const plannedRows = useMemo(() => rows.filter((t) => t.date > today), [rows, today]);
+  const totals = useMemo(() => periodTotals(recordedRows, '0000-01-01', '9999-12-31'), [recordedRows]);
+  const plannedTotals = useMemo(() => periodTotals(plannedRows, '0000-01-01', '9999-12-31'), [plannedRows]);
+  const filtered = !!q.trim() || !!accountId || !!categoryId || type !== 'all';
+  const periodLabel = period === 'this' ? formatMonthYear(today) : period === 'last' ? formatMonthYear(startOfMonth(addDays(startOfMonth(today), -1))) : period === '90' ? 'last 90 days' : period === 'year' ? today.slice(0, 4) : period === 'all' ? 'all time' : `${range[0] === '0000-01-01' ? 'start' : formatShortDate(range[0])} – ${range[1] === '9999-12-31' ? 'end' : formatShortDate(range[1])}`;
   const visible = rows.slice(0, limit);
 
   const remove = async (ids: string[]) => {
@@ -219,9 +226,14 @@ export function Transactions() {
 
       <div className="card flush">
         <div className="totals" data-testid="tx-totals">
+          <div className="scope" data-testid="tx-scope">
+            Totals for {recordedRows.length} recorded transaction{recordedRows.length === 1 ? '' : 's'} · {periodLabel}{filtered ? ' · filtered' : ''}
+            {plannedRows.length > 0 ? ` · ${plannedRows.length} planned not included` : ''}
+          </div>
           <div><div className="k">Income</div><div className="v pos num"><Money cents={totals.incomeCents} currency={cur} /></div></div>
           <div><div className="k">Spending</div><div className="v num"><Money cents={totals.spendingCents} currency={cur} /></div></div>
           <div><div className="k">Net</div><div className={`v num ${totals.netCents < 0 ? 'neg' : ''}`}><Money cents={totals.netCents} currency={cur} sign="always" /></div></div>
+          {plannedRows.length > 0 && <div className="planned" data-testid="tx-planned"><div className="k">Planned, not yet happened</div><div className="v num"><Money cents={plannedTotals.netCents} currency={cur} sign="always" /></div></div>}
         </div>
         {rows.length === 0 ? (
           <div className="empty">
@@ -288,7 +300,7 @@ export function Transactions() {
     return (
       <tr
         data-row={t.id}
-        className={isFresh(t.id) ? 'fresh' : undefined}
+        className={[isFresh(t.id) ? 'fresh' : '', t.date > today ? 'planned' : ''].join(' ').trim() || undefined}
         aria-selected={cursor === t.id || selected.has(t.id)}
         onClick={() => setCursor(t.id)}
         onDoubleClick={() => ui.openAdd({ editId: t.id })}

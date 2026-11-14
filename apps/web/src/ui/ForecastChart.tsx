@@ -35,14 +35,16 @@ function niceStep(span: number): number {
 export function ForecastChart({ history, forecast, currency, reserve, monthEnd }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
+  const [height, setHeight] = useState(0);
   const [cursor, setCursor] = useState<number | null>(null);
 
   useEffect(() => {
     const el = box.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setWidth(el.clientWidth));
+    const measure = () => { setWidth(el.clientWidth); setHeight(el.clientHeight); };
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
-    setWidth(el.clientWidth);
+    measure();
     return () => ro.disconnect();
   }, []);
 
@@ -54,8 +56,9 @@ export function ForecastChart({ history, forecast, currency, reserve, monthEnd }
     [history, forecast],
   );
 
-  const H = 248;
-  const pad = { t: 14, b: 40, l: 4, r: 4 };
+  // The chart fills the space its container gives it (the area is sized by CSS, never by the chart).
+  const H = Math.max(220, height || 248);
+  const pad = { t: 16, b: 44, l: 4, r: 4 };
   const n = points.length;
   const todayIdx = history.length;
   const fmt = (c: Cents) => formatCents(c, currency);
@@ -85,7 +88,7 @@ export function ForecastChart({ history, forecast, currency, reserve, monthEnd }
     let lowIdx = todayIdx;
     for (let i = todayIdx; i < n; i++) if (points[i]!.low < points[lowIdx]!.low) lowIdx = i;
     return { x, y, rec, proj, area, ticks, lowIdx, bottom };
-  }, [points, n, width, reserve, todayIdx, forecast.startCashCents]);
+  }, [points, n, width, H, reserve, todayIdx, forecast.startCashCents]);
 
   const last = points[n - 1];
   const lowP = geo ? points[geo.lowIdx]! : null;
@@ -101,8 +104,29 @@ export function ForecastChart({ history, forecast, currency, reserve, monthEnd }
   const cur = cursor !== null ? points[cursor] : null;
   const meIdx = points.findIndex((p) => p.date === monthEnd);
 
+  /** Date labels: today, the last day and month-end first, then weekly dates wherever they fit without colliding. */
+  const xLabels = (x: (i: number) => number) => {
+    const out: { i: number; x: number; text: string; anchor: 'start' | 'middle' | 'end'; strong?: boolean }[] = [];
+    const MIN_GAP = 64;
+    const place = (i: number, text: string, strong = false) => {
+      if (i < 0 || i >= n) return;
+      const px = x(i);
+      if (out.some((o) => Math.abs(o.x - px) < MIN_GAP)) return;
+      const anchor = px < 28 ? 'start' : px > width - 28 ? 'end' : 'middle';
+      out.push({ i, x: anchor === 'start' ? pad.l : anchor === 'end' ? width - pad.r : px, text, anchor, strong });
+    };
+    place(todayIdx, 'Today', true);
+    place(n - 1, formatShortDate(points[n - 1]!.date));
+    if (meIdx > todayIdx && meIdx < n - 1) place(meIdx, formatShortDate(monthEnd));
+    if (todayIdx > 3) place(0, formatShortDate(points[0]!.date));
+    for (let i = todayIdx + 7; i < n - 1; i += 7) place(i, formatShortDate(points[i]!.date));
+    for (let i = todayIdx - 7; i > 0; i -= 7) place(i, formatShortDate(points[i]!.date));
+    return out;
+  };
+
   return (
-    <div className="chart-box" ref={box}>
+    <div className="chart-box">
+      <div className="chart-area" ref={box}>
       {geo && (
         <svg
           height={H}
@@ -150,8 +174,8 @@ export function ForecastChart({ history, forecast, currency, reserve, monthEnd }
             const hasOut = p.events.some((e) => e.cashDeltaCents < 0);
             return (
               <g key={p.date}>
-                {hasIn && <rect x={geo.x(i) - 3} y={H - pad.b + 5} width={6} height={6} rx={1.5} className="fc-tick-in" />}
-                {hasOut && <rect x={geo.x(i) - 3} y={H - pad.b + (hasIn ? 13 : 5)} width={6} height={6} rx={1.5} className="fc-tick-out" />}
+                {hasIn && <circle cx={geo.x(i)} cy={H - pad.b + 8} r={3.5} className="fc-tick-in" />}
+                {hasOut && <circle cx={geo.x(i)} cy={H - pad.b + (hasIn ? 17 : 8)} r={3.5} className="fc-tick-out" />}
               </g>
             );
           })}
@@ -174,10 +198,9 @@ export function ForecastChart({ history, forecast, currency, reserve, monthEnd }
               <circle cx={geo.x(cursor)} cy={geo.y(cur.end)} r={4.5} className="fc-dot cursor" />
             </g>
           )}
-          {todayIdx > 3 && geo.x(todayIdx) > 90 && <text x={pad.l} y={H - 4}>{formatShortDate(points[0]!.date)}</text>}
-          <text x={geo.x(todayIdx)} y={H - 4} textAnchor={geo.x(todayIdx) < 30 ? 'start' : 'middle'}>Today</text>
-          {meIdx > todayIdx && meIdx < n - 1 && geo.x(n - 1) - geo.x(meIdx) > 70 && geo.x(meIdx) - geo.x(todayIdx) > 60 && <text x={geo.x(meIdx)} y={H - 4} textAnchor="middle">{formatShortDate(monthEnd)}</text>}
-          <text x={width - pad.r} y={H - 4} textAnchor="end">{formatShortDate(last!.date)}</text>
+          {xLabels(geo.x).map((l) => (
+            <text key={l.i} x={l.x} y={H - 6} textAnchor={l.anchor} className={l.strong ? 'fc-x strong' : 'fc-x'}>{l.text}</text>
+          ))}
         </svg>
       )}
       {geo && cur && cursor !== null && (
@@ -195,6 +218,7 @@ export function ForecastChart({ history, forecast, currency, reserve, monthEnd }
           {cur.events.length > 5 && <div className="e"><span>{cur.events.length - 5} more</span></div>}
         </div>
       )}
+      </div>
       <div className="sr-only" aria-live="polite">{cur ? `${formatWeekdayDate(cur.date)}: ${fmt(cur.end)}${cur.events.length ? `, ${cur.events.map((e) => `${e.label} ${formatCents(e.cashDeltaCents, currency, { sign: 'always' })}`).join(', ')}` : ''}` : ''}</div>
       <div className="legend" aria-hidden>
         {history.length > 0 && <span><i className="rec" /> Recorded</span>}

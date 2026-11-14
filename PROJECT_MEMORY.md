@@ -146,3 +146,10 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Verified]** Capture audit fixed 11 silently-wrong readings (regressions in `packages/capture/test/audit.test.ts`). Engine audit: 14 new edge-case tests passed unchanged.
 - **[Open]** A card paid beyond what is owed shows a negative owed amount; the UI has no "credit" wording.
 
+## Phase 2 (2026-11-14)
+- **[Verified]** The "$250 discrepancy" was not an engine error: a $250 savings transfer on Nov 30 was counted in the month-end but hidden by Upcoming's 14-day window. Rule: Upcoming covers at least through month-end (`upcomingUntil`); identity test in `packages/data/test/dashboard-reconcile.test.ts`.
+- **[Decision]** Safe to Spend explanations list the items after the low point (`afterLow`, engine text). The UI shows the engine's text verbatim.
+- **[Decision]** Transactions totals cover recorded transactions only (date ≤ today), like Reports. Planned items are shown separately.
+- **[Decision]** One content width: `--content-max: 1440px` on `.main-inner`.
+- **[Open]** On phones, long Upcoming names can truncate when an estimate marker and a button share the row.
+

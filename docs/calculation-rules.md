@@ -67,6 +67,7 @@ Events in the timeline:
 
 ## Headline numbers
 - **Projected end of today** = today's recorded cash + today's remaining scheduled items.
+- **Upcoming (dashboard)** lists overdue items and everything from today through **at least month-end** (or 14 days, whichever is later). The cash items listed therefore add up to the projected month-end; a test checks this identity on 90 consecutive days of sample data.
 - **Projected month-end balance** = timeline value at the end of the last day of the month. It **includes estimated income**, and the explanation says how much of it is estimated.
 - **Lowest projected balance (through month-end)** = minimum daily low from today to month-end. It shows the date and the obligations that cause it, and whether payday comes before or after.
 - **Lowest before next income** = minimum daily low from today to the next paycheck with a fixed amount. If no such paycheck is scheduled, it isn't shown.
@@ -77,6 +78,7 @@ Events in the timeline:
   - Card purchases with no payment scheduled are **not** deducted; a warning says so.
   - The result **may be negative** and is shown as "Short by $X", never clamped to zero.
   - Identity, checked by tests: available cash + income before the low point − obligations on or before it = low point.
+  - **Items after the low point** (through the horizon) are listed in the explanation (`afterLow`). By definition they never take the balance below the low point, so they don't lower Safe to Spend. For example: Nov 13 sample data, low on Nov 18, then Paycheck +$1,860.00 and Phone, Card payment and Savings −$562.66 through Nov 30.
 - **Can I afford this?** reruns Safe to Spend with one hypothetical purchase:
   - *yes*: the low point stays at or above the reserve;
   - *tight*: the low point dips into the reserve but stays ≥ 0;

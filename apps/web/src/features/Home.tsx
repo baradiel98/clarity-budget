@@ -13,10 +13,22 @@ import { CategoryIcon } from '../ui/icons';
 import { Money } from '../ui/Money';
 import { Segmented } from '../ui/Segmented';
 
+/** What each status means (shown on hover and to screen readers). Nothing here is a recorded transaction. */
+const STATUS_HELP: Record<UpcomingItem['status'], (income: boolean) => string> = {
+  expected: (i) => (i ? 'Fixed amount, not received yet. Counted in projections.' : 'Fixed amount, not paid yet. Counted in projections.'),
+  estimated: () => 'The amount is an estimate. Counted in projections; record the real amount when it happens.',
+  unknown: () => 'No amount yet, so it is not counted. Add the amount to include it.',
+  overdue: (i) => (i ? 'Not recorded yet, so it is not counted.' : 'The date has passed and no payment is recorded. Counted as due today.'),
+  scheduled_tx: () => 'A future-dated transaction you entered. It counts on its date.',
+  confirmed: (i) => (i ? 'Recorded as received.' : 'Recorded as paid.'),
+  skipped: () => 'Skipped. Not counted.',
+};
+
 export function statusBadge(u: Pick<UpcomingItem, 'status' | 'isIncome'>) {
   const label = (u.isIncome ? INCOME_STATUS_LABEL : OCCURRENCE_STATUS_LABEL)[u.status];
-  const tone = u.status === 'overdue' ? (u.isIncome ? 'warn' : 'neg') : u.status === 'estimated' || u.status === 'unknown' ? 'warn' : u.status === 'confirmed' ? 'pos' : '';
-  return <span className={`badge ${tone}`}>{label}</span>;
+  const tone = u.status === 'overdue' ? (u.isIncome ? 'warn' : 'neg') : u.status === 'estimated' ? 'warn est' : u.status === 'unknown' ? 'warn' : u.status === 'confirmed' ? 'pos' : u.status === 'scheduled_tx' ? 'accent' : '';
+  const help = STATUS_HELP[u.status]?.(u.isIncome) ?? '';
+  return <span className={`badge ${tone}`} title={help}>{label}<span className="sr-only">: {help}</span></span>;
 }
 
 type Range = 'month' | '30' | '90';
@@ -56,6 +68,9 @@ export function Home() {
       <CircleHelp size={15} />
     </button>
   );
+
+  const sameLow = !!d.lowestBeforeNextIncome && d.lowestBeforeNextIncome.date === d.lowestThroughMonthEnd.date && d.lowestBeforeNextIncome.cents === d.lowestThroughMonthEnd.cents;
+  const quietToday = (d.forecast.days.find((x) => x.date === today)?.events.length ?? 0) === 0 && !d.upcoming.some((u) => u.status === 'overdue' && !u.isIncome);
 
   return (
     <div>
@@ -105,7 +120,7 @@ export function Home() {
               {sts.cents < 0 ? <>{TERMS.shortBy} <Money cents={sts.shortfallCents} currency={cur} animate /></> : <Money cents={sts.cents} currency={cur} animate />}
             </div>
             <p className="t-callout muted">
-              {sts.cents < 0 ? 'What is scheduled is more than your cash and reserve cover' : 'What you can spend today and still cover everything scheduled'} through {formatShortDate(sts.horizonEnd)}.
+              {sts.cents < 0 ? 'What is scheduled is more than your cash and reserve cover' : 'What you can spend today and still cover everything scheduled'} through {formatShortDate(sts.horizonEnd)}. Your balance is lowest on {formatShortDate(sts.lowPoint.date)}.
             </p>
             <div className="eq" data-testid="sts-breakdown">
               <div><span>{TERMS.availableCash} now</span><span className="num"><Money cents={sts.availableCashCents} currency={cur} /></span></div>
@@ -115,6 +130,7 @@ export function Home() {
               <div><span>{TERMS.minReserve}</span><span className="num"><Money cents={-sts.reserveCents} currency={cur} sign={sts.reserveCents ? 'always' : 'auto'} /></span></div>
               <div className="total"><span>{sts.cents < 0 ? TERMS.shortBy : TERMS.safeToSpend}</span><span className={`num ${sts.cents < 0 ? 'neg' : ''}`}><Money cents={sts.cents < 0 ? sts.shortfallCents : sts.cents} currency={cur} /></span></div>
             </div>
+            {sts.afterLow.note && <p className="hint sts-after" data-testid="sts-after">{sts.afterLow.note}</p>}
             {sts.excludedIncome.length > 0 && <p className="hint" style={{ marginBottom: 14 }}>{sts.excludedIncome.length} income item{sts.excludedIncome.length > 1 ? 's are' : ' is'} not counted because the amount is estimated, unknown or not yet recorded.</p>}
             <div className="sts-actions">
               <button className="btn btn-secondary" onClick={() => ui.openAfford()}>{TERMS.canIAfford}</button>
@@ -141,7 +157,7 @@ export function Home() {
           </div>
         </div>
 
-        {/* 3. Supporting figures */}
+        {/* 3. Supporting figures. When two figures are the same thing, say so instead of repeating a number. */}
         <section className="stats" aria-label="Key balances">
           <div className="stat">
             <div className="k">{TERMS.recordedBalance} <Why ex={d.recordedBalanceExplanation} label={TERMS.recordedBalance} /></div>
@@ -157,8 +173,8 @@ export function Home() {
             <div className="k">{TERMS.lowestBeforeIncome} {d.lowestBeforeNextIncome && <Why ex={d.lowestBeforeNextIncome.explanation} label={TERMS.lowestBeforeIncome} />}</div>
             {d.lowestBeforeNextIncome ? (
               <>
-                <div className={`v money ${d.lowestBeforeNextIncome.cents < 0 ? 'neg' : ''}`}><Money cents={d.lowestBeforeNextIncome.cents} currency={cur} animate /></div>
-                <div className="s">{formatShortDate(d.lowestBeforeNextIncome.date)} · next income {formatShortDate(d.lowestBeforeNextIncome.nextIncome.date)}</div>
+                <div className={`v money ${d.lowestBeforeNextIncome.cents < 0 ? 'neg' : ''} ${sameLow ? 'repeat' : ''}`}><Money cents={d.lowestBeforeNextIncome.cents} currency={cur} animate /></div>
+                <div className="s">{sameLow ? `Same low point (${formatShortDate(d.lowestBeforeNextIncome.date)}), before your ${formatShortDate(d.lowestBeforeNextIncome.nextIncome.date)} income` : `${formatShortDate(d.lowestBeforeNextIncome.date)} · next income ${formatShortDate(d.lowestBeforeNextIncome.nextIncome.date)}`}</div>
               </>
             ) : (
               <>
@@ -169,8 +185,8 @@ export function Home() {
           </div>
           <div className="stat">
             <div className="k">{TERMS.endOfDay} <Why ex={d.endOfDay.explanation} label={TERMS.endOfDay} /></div>
-            <div className={`v money ${d.endOfDay.cents < 0 ? 'neg' : ''}`}><Money cents={d.endOfDay.cents} currency={cur} animate /></div>
-            <div className="s">After anything scheduled today</div>
+            <div className={`v money ${d.endOfDay.cents < 0 ? 'neg' : ''} ${quietToday ? 'repeat' : ''}`}><Money cents={d.endOfDay.cents} currency={cur} animate /></div>
+            <div className="s">{quietToday ? 'Nothing else is scheduled today' : 'After what is scheduled today'}</div>
           </div>
         </section>
 
@@ -178,17 +194,19 @@ export function Home() {
           {/* 4. What is coming */}
           <section className="card" aria-labelledby="h-up">
             <div className="card-head">
-              <h2 className="card-title" id="h-up">{TERMS.upcoming} <span className="faint" style={{ fontWeight: 500 }}>· next 14 days</span></h2>
+              <h2 className="card-title" id="h-up">{TERMS.upcoming} <span className="faint" style={{ fontWeight: 500 }}>· through {formatShortDate(d.upcomingUntil)}</span></h2>
               <button className="btn-link" onClick={() => navigate('/planning')}>Open Planning</button>
             </div>
             {d.upcoming.length === 0 ? (
               <div className="empty">
                 <div className="ico"><CalendarClock size={24} /></div>
                 <div className="t-headline">Nothing scheduled</div>
-                <div className="t-callout">No bills, paychecks or planned expenses in the next two weeks.</div>
+                <div className="t-callout">No bills, paychecks or planned expenses through {formatShortDate(d.upcomingUntil)}.</div>
                 <button className="btn btn-secondary btn-sm" style={{ marginTop: 8 }} onClick={() => navigate('/planning')}>Add a bill or income</button>
               </div>
             ) : (
+              <>
+              <p className="hint upcoming-note">Nothing here is recorded until you record it or mark it paid. Estimated amounts (≈) may change.</p>
               <div className="list" data-testid="upcoming">
                 {d.upcoming.map((u) => (
                   <div key={u.id} className="list-row">
@@ -199,7 +217,7 @@ export function Home() {
                     </div>
                     <div className="row">
                       <span className={`num ${u.cents > 0 ? 'pos' : ''}`} style={{ fontWeight: 600 }}>
-                        {u.status === 'unknown' ? <span className="faint">—</span> : <Money cents={u.cents} currency={cur} sign="always" />}
+                        {u.status === 'unknown' ? <span className="faint">—</span> : <>{u.status === 'estimated' && <span className="approx" aria-label="about">≈</span>}<Money cents={u.cents} currency={cur} sign="always" /></>}
                       </span>
                       {u.occurrence && u.status !== 'skipped' && (
                         <button
@@ -213,6 +231,7 @@ export function Home() {
                   </div>
                 ))}
               </div>
+              </>
             )}
           </section>
 

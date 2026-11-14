@@ -120,7 +120,7 @@ export default function Home() {
         </Card>
       )}
 
-      <Card title={`${TERMS.upcoming} · next 14 days`}>
+      <Card title={`${TERMS.upcoming} · through ${formatShortDate(d.upcomingUntil)}`}>
         {d.upcoming.length === 0 ? (
           <T color="textSecondary">No bills, paychecks or planned expenses in the next two weeks.</T>
         ) : (
