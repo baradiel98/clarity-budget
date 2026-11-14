@@ -19,7 +19,7 @@ test.describe('dashboard', () => {
 
   test('Safe to Spend breakdown shows the engine arithmetic and adds up', async ({ page }) => {
     const eq = page.getByTestId('sts-breakdown');
-    await expect(eq).toContainText('Available cash now$1,200.00');
+    await expect(eq).toContainText('Current recorded balance$1,200.00');
     await expect(eq).toContainText('Lowest point · Sep 3$1,200.00');
     await expect(eq).toContainText('Safe to Spend$1,200.00');
     // set a reserve: the breakdown and the headline change together

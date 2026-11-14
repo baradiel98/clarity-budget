@@ -135,7 +135,7 @@ function Shell() {
 
   const item = (n: (typeof NAV)[number]) => (
     <Link key={n.to} to={n.to} className="nav-item">
-      <n.icon size={17} strokeWidth={1.9} /> {n.label} <kbd>{n.key}</kbd>
+      <n.icon size={17} strokeWidth={1.9} /> {n.label} <kbd aria-hidden="true">{n.key}</kbd>
     </Link>
   );
   const tab = (n: (typeof NAV)[number]) => (
@@ -166,7 +166,7 @@ function Shell() {
           <div className="nav-group">{NAV.slice(0, 5).map(item)}</div>
           <button className="btn btn-primary btn-block sidebar-add" onClick={() => setAdd({})}><Plus size={16} /> {TERMS.addTransaction}</button>
           <div className="nav-group">
-            <Link to="/capture" className="nav-item"><Sparkles size={17} strokeWidth={1.9} /> Clarity Capture <kbd>C</kbd></Link>
+            <Link to="/capture" className="nav-item"><Sparkles size={17} strokeWidth={1.9} /> Clarity Capture <kbd aria-hidden="true">C</kbd></Link>
           </div>
           <div className="nav-group">
             <Link to="/import" className="nav-item"><Upload size={17} strokeWidth={1.9} /> {TERMS.importStatement}</Link>

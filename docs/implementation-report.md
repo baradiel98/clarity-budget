@@ -212,6 +212,38 @@ The step-by-step checklist is in `docs/device-test-script.md`.
 - **Cross-platform tests:** one fixture (`packages/data/test/fixtures/home-sample-nov13.ts`) is asserted by the engine test, the mobile jest test and the web Playwright test. No financial result was changed.
 - **Not verified:** physical iPhone/Android, iOS simulator, Safari. The native UI is verified by jest render tests and a successful `expo export` bundle for iOS and Android, not by looking at it on a device.
 
+## 7d. Phase 3A (commit 828adbf): mobile usability and estimate consistency
+- **Planning (phones):** rows fit the card at 320–430px. Before: 63px of page overflow at 320px, 23px at 360px, with cut amounts.
+- **Transactions (phones, below 760px):** stacked rows (name + amount, then date · category). The account is in the accessible description and the details sheet. Selection and bulk actions work.
+- **Touch targets:** 40px hit areas for Why icons and links, and for Budget category names, on phones.
+- **Estimates:** Planning shows the forecast figure with ≈ and the user's usual amount. Source: engine `historyEstimate`; no calculation changed.
+- **Other changes:**
+  - Settings sections wrap so all are visible.
+  - Prepare is disabled for blank text.
+  - A headers-only CSV is rejected with a clear message.
+  - Sample budgets added.
+- **Verification:** Chromium e2e `e2e/phase3a.spec.ts` (21 tests), unit tests and a mobile jest test.
+- **Known at the time:** `storage.test.ts` failed for a date-dependent reason (fixed in Phase 3C).
+
+## 7e. Phase 3C: accessibility, interaction polish, test reliability
+- **Contrast:** dark-mode destructive button now ≥4.5:1 (was 2.28:1).
+- **Focus and keyboard:**
+  - Add Transaction (and every dialog) returns focus to the button that opened it.
+  - The Planning actions menu works from the keyboard (arrows, Home/End, Escape, Tab, click outside).
+  - Form errors and hints are linked to their fields (`aria-describedby`, `aria-invalid`).
+- **Phone sheets:** footer actions stay on screen at 320×844, 360×640, 390×844 and 430×932, with no content showing below them.
+- **Layout and wording:**
+  - The empty Transactions state wraps its buttons at 320px.
+  - The dashboard uses "Current recorded balance" for the $2,871.23 figure everywhere, including explanations.
+  - "Safe to Spend after this purchase" replaces "After this purchase".
+  - The phone tab bar is opaque.
+  - The Capture box has the standard focus ring.
+  - Settings preference fields align.
+  - Keyboard hints are decorative (`aria-hidden`).
+- **Test reliability:** `apps/mobile/test/storage.test.ts` is deterministic (fixed clock, seeded test-only random bytes, structured ciphertext checks). It passes with the real clock forced to 1794650666199, 1650650650650 and 4102444800000; the old version fails at 1650650650650.
+- **Verification:** Chromium `e2e/phase3c.spec.ts` (17 tests) plus the full suites; see the commit message for results.
+- **Not verified:** physical devices, Safari, VoiceOver/TalkBack.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

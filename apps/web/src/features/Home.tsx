@@ -60,7 +60,7 @@ export function Home() {
           <div className="sub muted t-callout">{formatWeekdayDate(today)}</div>
         </div>
         <div className="page-actions hide-mobile">
-          <button className="btn btn-primary" onClick={() => ui.openAdd()}><Plus size={16} /> {TERMS.addTransaction} <kbd>N</kbd></button>
+          <button className="btn btn-primary" onClick={() => ui.openAdd()}><Plus size={16} /> {TERMS.addTransaction} <kbd aria-hidden="true">N</kbd></button>
         </div>
       </div>
 
@@ -103,7 +103,7 @@ export function Home() {
               {sts.cents < 0 ? 'What is scheduled is more than your cash and reserve cover' : 'What you can spend today and still cover everything scheduled'} through {formatShortDate(sts.horizonEnd)}. Your balance is lowest on {formatShortDate(sts.lowPoint.date)}.
             </p>
             <div className="eq" data-testid="sts-breakdown">
-              <div><span>{TERMS.availableCash} now</span><span className="num"><Money cents={sts.availableCashCents} currency={cur} /></span></div>
+              <div><span>{TERMS.recordedBalance}</span><span className="num"><Money cents={sts.availableCashCents} currency={cur} /></span></div>
               {incomeBefore !== 0 && <div><span>Income before the lowest point <span className="sub">({sts.lowPoint.incomeBefore.length})</span></span><span className="num pos"><Money cents={incomeBefore} currency={cur} sign="always" /></span></div>}
               {billsBefore !== 0 && <div><span>Bills and transfers through {formatShortDate(sts.lowPoint.date)} <span className="sub">({sts.lowPoint.obligations.length})</span></span><span className="num"><Money cents={billsBefore} currency={cur} sign="always" /></span></div>}
               <div><span>Lowest point <span className="sub">· {formatShortDate(sts.lowPoint.date)}</span></span><span className={`num ${sts.lowPoint.cents < 0 ? 'neg' : ''}`}><Money cents={sts.lowPoint.cents} currency={cur} /></span></div>

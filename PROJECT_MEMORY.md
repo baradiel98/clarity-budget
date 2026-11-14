@@ -178,3 +178,24 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Not verified]** Native rendering on a device or simulator: `adjustsFontSizeToFit`, wrapping and touch targets are unit-tested only.
 - **[Lesson]** Playwright `fullPage` screenshots resize the viewport mid-capture, and can show the hero figures or chart blank. Use a tall viewport with `clip` for visual checks.
 
+
+## Phase 3A (2026-11-14, commit 828adbf, tags phase3a-checkpoint-before / phase3a-complete)
+- **[Verified, Chromium]** Planning timeline rows fit their card on phones; amounts and balances are never cut. Phone layout: amount top-right, ··· under it.
+- **[Verified, Chromium]** Transactions renders a stacked list below 760px instead of the table (`useMedia(NARROW)`). Selection and bulk actions work on phones.
+- **[Lesson]** In `Transactions.tsx` the helpers sit after the component's `return`. Only function *declarations* exist there; a `const` arrow is never initialised, and calling it throws in the event handler. This silently broke row selection.
+- **[Lesson]** Never define components inside a component's render (`function Row()` used as `<Row/>`). It remounts every row on each render and loses focus. Call them as plain render functions.
+- **[Decision]** Variable bills show the forecast amount (engine `historyEstimate`) with ≈, plus "your usual: $X", via `recurringAmountView` in `packages/data`. $88.00 is the user's usual amount; $91.40 is the average of the last 3 payments.
+- **[Decision]** Settings section nav is a wrapped grid on narrow screens, not a hidden horizontal scroll.
+- **[Decision]** A CSV with headers but no rows is rejected (`NO_DATA_ROWS_MESSAGE`). Prepare in Capture is disabled for blank text.
+- **[Decision]** Sample data includes 7 fictional budgets ($960/month).
+
+## Phase 3C (2026-11-14): accessibility, interaction polish, test reliability
+- **[Decision]** One name for the spendable-accounts total on the dashboard: **"Current recorded balance"** (`TERMS.recordedBalance`). This covers the Safe to Spend breakdown, Key balances and the engine's "Why this number?" lines. Wording only; no figure changed.
+- **[Decision]** Dialogs restore focus to the opener captured at first render; an `autoFocus` field had already taken focus by the time effects ran.
+- **[Decision]** `Field` links its error (or hint) to the control with `aria-describedby` and sets `aria-invalid`. Errors keep `role="alert"`.
+- **[Decision]** The Planning actions menu follows the menu-button pattern: focus moves in, arrows/Home/End, Escape returns to ···, Tab or an outside click closes. Choosing an item refocuses ··· first, so a dialog it opens can restore focus there.
+- **[Decision]** Phone sheets: the footer is sticky at the bottom (negative offset equal to the sheet padding, so nothing shows below it).
+- **[Decision]** The phone tab bar is opaque. Dark-mode `.btn-danger` uses dark text (#FF8A80 with white text was 2.3:1). `kbd` shortcut hints are `aria-hidden`.
+- **[Lesson]** Sticky-footer checks must wait for the sheet's opening slide to finish; measuring right after the click reads a 40px-shifted position.
+- **[Lesson, test]** `storage.test.ts` scanned ciphertext JSON for "650". It matched real-clock timestamps (`1794650…`, an ~11-day window) and could match random base64. The test now uses a fixed clock, seeded test-only random bytes, and checks decoded ciphertext for ≥8-byte plaintext fragments, with a positive control.
+- **[Not verified]** VoiceOver/TalkBack. Screen-reader behaviour is checked through the accessibility tree in Chromium only.

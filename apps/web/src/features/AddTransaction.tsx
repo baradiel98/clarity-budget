@@ -215,7 +215,7 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
           )}
           <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
           <button type="submit" form="tx-form" className="btn btn-primary" disabled={busy} aria-busy={busy} data-testid="save-tx">
-            {busy && <Spinner />}{duplicates.length && dupConfirmed ? 'Save anyway' : 'Save'} <kbd style={{ background: 'transparent', color: 'inherit', borderColor: 'currentColor', opacity: 0.6 }}>↵</kbd>
+            {busy && <Spinner />}{duplicates.length && dupConfirmed ? 'Save anyway' : 'Save'} <kbd aria-hidden="true" style={{ background: 'transparent', color: 'inherit', borderColor: 'currentColor', opacity: 0.9 }}>↵</kbd>
           </button>
         </>
       }

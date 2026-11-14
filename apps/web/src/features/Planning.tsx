@@ -1,5 +1,5 @@
 import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, CalendarPlus, MoreHorizontal, Pause, Pencil, Play, Plus, Trash2 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
   clearOccurrenceException, createRecurring, deleteRecurring, engineInput, estimateNote, recurringAmountView, setOccurrenceException, setRecurringPaused, updateRecurring,
   type RecurringAmountView,
@@ -38,6 +38,32 @@ export function Planning() {
   const [edit, setEdit] = useState<{ item?: RecurringItem; kind: RecurringKind; once?: boolean } | null>(null);
   const [occAction, setOccAction] = useState<{ occ: Occurrence; action: 'move' | 'override' } | null>(null);
   const [menu, setMenu] = useState<string | null>(null);
+  // Actions menu (menu button pattern): focus moves into it, arrows move between items, Escape closes
+  // and returns focus to the ··· button, Tab or a click outside closes it.
+  const menuTrigger = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const closeMenu = (refocus = true) => { setMenu(null); if (refocus) menuTrigger.current?.focus(); };
+  useEffect(() => {
+    if (!menu) return;
+    menuRef.current?.querySelector<HTMLElement>('[role=menuitem]')?.focus();
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (!menuRef.current?.contains(t) && !menuTrigger.current?.contains(t)) setMenu(null);
+    };
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  }, [menu]);
+  const onMenuKey = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const items = [...e.currentTarget.querySelectorAll<HTMLElement>('[role=menuitem]')];
+    const i = items.indexOf(document.activeElement as HTMLElement);
+    const go = (k: number) => { e.preventDefault(); items[(k + items.length) % items.length]?.focus(); };
+    if (e.key === 'ArrowDown') go(i + 1);
+    else if (e.key === 'ArrowUp') go(i - 1);
+    else if (e.key === 'Home') go(0);
+    else if (e.key === 'End') go(items.length - 1);
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeMenu(); }
+    else if (e.key === 'Tab') closeMenu(false);
+  };
 
   const horizon = addDays(today, 45);
   const forecast = useMemo(
@@ -116,18 +142,18 @@ export function Planning() {
                       </span>
                       <span className={`tl-amt num ${it.cents > 0 ? 'pos' : ''}`}>{it.status === 'unknown' || it.status === 'skipped' ? <span className="faint">—</span> : <>{it.status === 'estimated' && <span className="approx" aria-label="about">≈</span>}<Money cents={it.cents} currency={cur} sign="always" /></>}</span>
                       {it.occ ? (
-                        <button className="icon-btn tl-act" aria-label={`Actions for ${it.label}`} aria-expanded={menu === it.key} onClick={() => setMenu(menu === it.key ? null : it.key)}><MoreHorizontal size={16} /></button>
+                        <button className="icon-btn tl-act" id={`act-${it.key}`} aria-label={`Actions for ${it.label}`} aria-haspopup="menu" aria-expanded={menu === it.key} onClick={(e) => { menuTrigger.current = e.currentTarget; setMenu(menu === it.key ? null : it.key); }}><MoreHorizontal size={16} /></button>
                       ) : <span className="tl-act" aria-hidden />}
                       {menu === it.key && it.occ && (
-                        <div className="suggest" style={{ left: 'auto', width: 220 }} role="menu">
+                        <div className="suggest" style={{ left: 'auto', width: 220 }} role="menu" aria-labelledby={`act-${it.key}`} ref={menuRef} onKeyDown={onMenuKey}>
                           {it.status === 'skipped' ? (
-                            <button role="menuitem" onClick={() => void occAct(it.occ!, 'unskip')}>Restore</button>
+                            <button role="menuitem" tabIndex={-1} onClick={() => { closeMenu(); void occAct(it.occ!, 'unskip'); }}>Restore</button>
                           ) : (
                             <>
-                              <button role="menuitem" onClick={() => { setMenu(null); ui.openAdd({ occurrenceRef: { recurringId: it.occ!.recurringId, originalDate: it.occ!.originalDate }, occurrenceName: it.label, amountCents: it.occ!.amountCents || undefined }); }}>{it.isIncome ? 'Record as received' : 'Mark paid'}</button>
-                              <button role="menuitem" onClick={() => void occAct(it.occ!, 'skip')}>Skip this one</button>
-                              <button role="menuitem" onClick={() => { setMenu(null); setOccAction({ occ: it.occ!, action: 'move' }); }}>Move date</button>
-                              <button role="menuitem" onClick={() => { setMenu(null); setOccAction({ occ: it.occ!, action: 'override' }); }}>Change amount</button>
+                              <button role="menuitem" tabIndex={-1} onClick={() => { closeMenu(); ui.openAdd({ occurrenceRef: { recurringId: it.occ!.recurringId, originalDate: it.occ!.originalDate }, occurrenceName: it.label, amountCents: it.occ!.amountCents || undefined }); }}>{it.isIncome ? 'Record as received' : 'Mark paid'}</button>
+                              <button role="menuitem" tabIndex={-1} onClick={() => { closeMenu(); void occAct(it.occ!, 'skip'); }}>Skip this one</button>
+                              <button role="menuitem" tabIndex={-1} onClick={() => { closeMenu(); setOccAction({ occ: it.occ!, action: 'move' }); }}>Move date</button>
+                              <button role="menuitem" tabIndex={-1} onClick={() => { closeMenu(); setOccAction({ occ: it.occ!, action: 'override' }); }}>Change amount</button>
                             </>
                           )}
                         </div>

@@ -124,7 +124,7 @@ test.describe('transactions', () => {
   test('why this number shows the engine breakdown', async ({ page }) => {
     await page.getByTestId('why-sts').click();
     const dlg = page.getByRole('dialog');
-    await expect(dlg).toContainText('Available cash now');
+    await expect(dlg).toContainText('Current recorded balance');
     await expect(dlg).toContainText('Safe to Spend');
     await expect(dlg).toContainText('Assumptions');
   });

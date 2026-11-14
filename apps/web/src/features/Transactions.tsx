@@ -176,7 +176,7 @@ export function Transactions() {
           {linked && <button className="btn btn-ghost" onClick={() => navigate('/transactions')}>Clear filters</button>}
           <button className="btn btn-secondary" onClick={() => navigate('/capture')} data-testid="tx-capture"><Sparkles size={15} /> Capture</button>
           <button className="btn btn-secondary" onClick={() => navigate('/import')}><Upload size={15} /> {TERMS.importStatement}</button>
-          <button className="btn btn-primary hide-mobile" onClick={() => ui.openAdd()}>{TERMS.addTransaction} <kbd>N</kbd></button>
+          <button className="btn btn-primary hide-mobile" onClick={() => ui.openAdd()}>{TERMS.addTransaction} <kbd aria-hidden="true">N</kbd></button>
         </div>
       </div>
 

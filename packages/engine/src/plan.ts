@@ -3,6 +3,7 @@ import {
   endOfMonth,
   formatShortDate,
   formatCents,
+  TERMS,
   type Account,
   type Cents,
   type CurrencyCode,
@@ -164,7 +165,7 @@ export function computeSafeToSpend(input: EngineInput, hypotheticals?: readonly 
       : null;
 
   const lines: ExplainLine[] = [
-    { kind: 'start', label: 'Available cash now', cents: f.startCashCents },
+    { kind: 'start', label: TERMS.recordedBalance, cents: f.startCashCents },
     ...low.incomeBefore.map((e) => eventLine(e, cur)),
     ...low.obligations.map((e) => eventLine(e, cur)),
     { kind: 'info', label: `Lowest point: ${formatShortDate(low.date)}`, cents: low.cents },
@@ -290,7 +291,7 @@ export interface UpcomingItem {
 }
 
 function projectionExplanation(f: Forecast, upTo: ISODate, title: string, cur: CurrencyCode): Explanation {
-  const lines: ExplainLine[] = [{ kind: 'start', label: 'Available cash now', cents: f.startCashCents }];
+  const lines: ExplainLine[] = [{ kind: 'start', label: TERMS.recordedBalance, cents: f.startCashCents }];
   let estimatedIncome = 0;
   for (const d of f.days) {
     if (d.date > upTo) break;
@@ -317,7 +318,7 @@ function projectionExplanation(f: Forecast, upTo: ISODate, title: string, cur: C
 
 function lowExplanation(low: LowPoint, f: Forecast, title: string, cur: CurrencyCode, next: IncomeRef | null): Explanation {
   const lines: ExplainLine[] = [
-    { kind: 'start', label: 'Available cash now', cents: f.startCashCents },
+    { kind: 'start', label: TERMS.recordedBalance, cents: f.startCashCents },
     ...low.incomeBefore.map((e) => eventLine(e, cur)),
     ...low.obligations.map((e) => eventLine(e, cur)),
     { kind: 'result', label: `Lowest on ${formatShortDate(low.date)}`, cents: low.cents },
@@ -431,7 +432,7 @@ export function buildDashboard(input: EngineInput): Dashboard {
     cents: l.balanceCents,
     note: l.countsAsCash ? (l.pendingCents ? `includes ${formatCents(l.pendingCents, cur)} pending` : 'counts as available cash') : l.type === 'credit_card' ? 'owed on card, not cash' : 'not marked as spendable',
   }));
-  recordedLines.push({ kind: 'result', label: 'Available cash', cents: balances.availableCashCents });
+  recordedLines.push({ kind: 'result', label: TERMS.recordedBalance, cents: balances.availableCashCents });
 
   return {
     today: input.today,

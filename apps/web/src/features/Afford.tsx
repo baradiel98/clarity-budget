@@ -53,7 +53,7 @@ export function AffordDialog({ onClose }: { onClose: () => void }) {
             <div className={`row ${tone}`} style={{ fontWeight: 600, fontSize: 16 }}><Icon size={20} /> {headline}</div>
             <div className="facts" style={{ borderTop: 0, paddingTop: 0 }}>
               <div><div className="k">{TERMS.safeToSpend} now</div><div className="v"><Money cents={result.before.cents} currency={cur} /></div></div>
-              <div><div className="k">After this purchase</div><div className={`v ${result.after.cents < 0 ? 'neg' : ''}`}><Money cents={result.after.cents} currency={cur} /></div></div>
+              <div><div className="k">Safe to Spend after this purchase</div><div className={`v ${result.after.cents < 0 ? 'neg' : ''}`}><Money cents={result.after.cents} currency={cur} /></div></div>
               <div><div className="k">New lowest point</div><div className={`v ${result.after.lowPoint.cents < 0 ? 'neg' : ''}`}><Money cents={result.after.lowPoint.cents} currency={cur} /> <span className="faint t-footnote">{formatShortDate(result.after.lowPoint.date)}</span></div></div>
             </div>
             {result.verdict === 'no' && <p className="t-callout neg" style={{ marginBottom: 0 }}>You'd be short <Money cents={result.shortfallCents} currency={cur} /> before {formatShortDate(result.after.lowPoint.date)}.</p>}

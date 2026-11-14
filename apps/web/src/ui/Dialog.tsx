@@ -25,6 +25,9 @@ export function Dialog({ title, onClose, children, footer, wide, variant = 'dial
   closeRef.current = onClose;
   const [closing, setClosing] = useState(false);
   const closingRef = useRef(false);
+  // The element that opened the dialog, read during the first render: by the time effects run, a field
+  // inside the dialog may already have taken focus (autoFocus), so the effect can no longer see the opener.
+  const [opener] = useState(() => (typeof document !== 'undefined' ? (document.activeElement as HTMLElement | null) : null));
   const requestClose = useCallback(() => {
     if (closingRef.current) return;
     closingRef.current = true;
@@ -32,8 +35,8 @@ export function Dialog({ title, onClose, children, footer, wide, variant = 'dial
     setTimeout(() => closeRef.current(), exitMs());
   }, []);
   useEffect(() => {
-    const prev = document.activeElement as HTMLElement | null;
     const el = ref.current;
+    const prev = opener && opener !== document.body && !el?.contains(opener) ? opener : null;
     // Respect a field that already took focus (autoFocus); otherwise prefer the first form field.
     if (el && !el.contains(document.activeElement)) {
       const first = el.querySelector<HTMLElement>('input:not([type=hidden]):not([disabled]), select, textarea') ?? el.querySelector<HTMLElement>('button:not(.dlg-close)');
@@ -61,9 +64,10 @@ export function Dialog({ title, onClose, children, footer, wide, variant = 'dial
     document.addEventListener('keydown', onKey, true);
     return () => {
       document.removeEventListener('keydown', onKey, true);
-      prev?.focus?.();
+      // Back to the opener if it is still on the page (it may have been removed, e.g. a deleted row).
+      if (prev?.isConnected) prev.focus();
     };
-  }, [requestClose]);
+  }, [requestClose, opener]);
   return (
     <div className={`overlay ${variant === 'drawer' ? 'drawer-overlay' : ''} ${closing ? 'closing' : ''}`} onMouseDown={(e) => e.target === e.currentTarget && requestClose()}>
       <div ref={ref} className={variant === 'drawer' ? 'drawer' : `dialog ${wide ? 'wide' : ''}`} role="dialog" aria-modal="true" aria-labelledby={labelId} tabIndex={-1}>
