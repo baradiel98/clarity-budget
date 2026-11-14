@@ -92,18 +92,32 @@ Events in the timeline:
   - The result **may be negative** and is shown as "Short by $X", never clamped to zero.
   - Identity, checked by tests: available cash + income before the low point − obligations on or before it = low point.
   - **Items after the low point** (through the horizon) are listed in the explanation (`afterLow`). By definition they never take the balance below the low point, so they don't lower Safe to Spend. For example: Nov 13 sample data, low on Nov 18, then Paycheck +$1,860.00 and Phone, Card payment and Savings −$562.66 through Nov 30.
-- **Transfers must be funded (Phase 4A.2).** Each day the forecast applies money going out first (bills and other outflows, then transfers out), then money coming in.
-  - A transfer out of a **non-spendable asset account** (savings, for example) moves at most what that account is projected to hold at that moment, after its own earlier activity and same-day outflows. The rest is **unfunded**: it never reaches the destination and is not counted.
-  - Unfunded transfers are listed (`Forecast.unfundedTransfers`) and warned about ("…won't have the money" / "only $X of $Y is available").
-  - Transfers out of a spendable account are counted in full (the conservative direction for Safe to Spend). If that account would go negative, the account-level check below flags it.
-  - Credit cards are not capped: a cash advance is borrowing, and card limits are not tracked (assumption).
-  - Planned transfers recorded ahead of time (two future-dated legs) are treated as one transfer.
-  - Transfers are never income or spending, and the total across all accounts is conserved.
-- **Account-level check (Phase 4A.2).** Safe to Spend combines all spendable accounts; it assumes the user moves money between them when needed.
-  - The forecast records the first day each account (other than a credit card) is projected below zero after that day's money going out (`Forecast.accountShortfalls`).
-  - When the combined spendable cash is still at or above zero that day, the dashboard warns: "Cash would go to −$300.00 on Nov 20 … Move $300.00 into Cash before Nov 20". When it isn't, the overall shortfall warning already covers it.
+- **Same-day order (Phase 4A.4).** Every day of the forecast is settled in this fixed order. It is deterministic, identical on web and mobile (one engine), and no step can create money: every amount moved out of an account is capped at what that account actually holds at that step.
+  1. **Morning: money you move out of spendable accounts** (to another spendable account, to savings, or a card payment). Both legs settle now. The combined total already assumes money moves freely between spendable accounts, so a same-day move into Cash funds a bill paid from Cash that day.
+  2. **Morning: bills and other payments** (subscriptions, planned purchases, "Can I afford this?" purchases, overdue bills).
+     - From a spendable account: paid in full; the account may go below zero (see the account check).
+     - From a **non-spendable account** (savings): paid from what that account holds. The rest has to come from the spendable accounts, so it is **counted against them** (`Forecast.coveredPayments`; the event's `coverCents`). Nothing is moved or scheduled for the user; the dashboard says how much to move and by when.
+  3. **Account check:** every spendable account that paid something that day and is below zero is recorded, **every day it happens** (`Forecast.accountShortfalls`).
+  4. **Afternoon: income, refunds and card cash advances** arrive.
+  5. **Evening: transfers out of non-spendable accounts.** Each moves at most what the sending account holds by now, including that day's income and incoming moves (so a paycheck into savings funds a same-day sweep to checking). Repeated until nothing changes, so a same-day chain (Savings A → Savings B → Checking) passes money along; a cycle between empty accounts moves nothing.
+     - When the account can't cover all of that day's transfers: **card payments first** (an obligation; any unpaid part is counted against the spendable accounts like a bill), then **moves that stay outside the spendable accounts**, then **moves into spendable accounts**, shared in proportion within each group. Any shortage therefore falls on money Safe to Spend would count (the conservative choice). Names never decide priority; leftover cents go by event id.
+     - The unfunded part never arrives and is not counted (`Forecast.unfundedTransfers`, with the sending account's actual projected balance, which may be negative).
+  - **The combined low point is unchanged:** start of day + all of the day's money going out (including covered payments), before anything comes in. Money arriving from savings, income and cash advances is counted after the day's bills. This is the timing the app cannot know, so it stays conservative: a sweep from savings does not pay a checking bill due the same day.
+  - **Why this order:** moves you make between your own spendable accounts are under your control and already assumed by the combined total (so treating them as settled first removes false warnings without changing Safe to Spend). Everything whose arrival time is uncertain (paychecks, transfers from other accounts, borrowed money) stays after the day's bills, as before. Before Phase 4A.4 all transfers out ran after bills and all money in ran last, which left false warnings for same-day top-ups (F5) and made a same-day paycheck-and-sweep look short (F6), and same-day transfers competing for one account were funded in alphabetical order of their names.
+- **Transfers must be funded (Phase 4A.2).** A transfer out of a non-spendable asset account moves at most what that account is projected to hold (step 5 above). Transfers out of a spendable account count in full (the conservative direction for Safe to Spend); if that account would go negative, the account check flags it. Planned transfers recorded ahead of time (two future-dated legs) are treated as one transfer. Transfers are never income or spending.
+- **Reconciliation (tested for every Phase 4A.4 scenario):** total across all accounts at the end = today's total + every non-transfer amount + money counted as moved in for covered payments; and the forecast's combined cash at the end = the spendable accounts' own end balances − that covered money.
+- **Credit-card cash advances (Phase 4A.4).** A planned transfer out of a credit card into another account is borrowed money.
+  - The receiving account and the card's balance owed both change by the full amount (the card is not capped: its limit is not known).
+  - **Safe to Spend never counts borrowed money:** its low point subtracts the planned cash-advance money still owed on that day (`ForecastDay.advanceOwedAtLowCents`). A card payment reduces what is still owed, but never below what the card owes after the payment, so a payment goes to existing purchases first (conservative).
+  - So an advance can't raise Safe to Spend, and its repayment is not counted twice. Audit example (Checking $300, $1,000 advance Nov 20, rent $1,200 Dec 1): **−$900** with no payment, a full payment Dec 15, a payment after the horizon, or a $50 payment.
+  - Balances, "Lowest balance this month" and the month-end projection still show the real account balances (the borrowed money is really in checking).
+  - Dashboard warning: "Cash advance: $1,000.00 borrowed from Visa …", including how much is not paid back by the end date, and that interest, fees and the card limit are not known.
+- **Account-level check (Phase 4A.2, every shortfall since 4A.4).** Safe to Spend combines all spendable accounts; it assumes the user moves money between them when needed.
+  - Every day a spendable account is projected below zero after that day's money going out is recorded.
+  - The dashboard shows one warning per account when, on at least one of those days, the combined total is still at or above zero (otherwise the overall shortfall warning covers it). It lists every later date and amount, and the amount to move is the deepest one, before the first date ("Move $600.00 into Cash before Nov 20 to cover all of these").
   - The engine never creates or schedules a transfer itself.
 - **Possible duplicates (Phase 4A.2).** A planned transaction not linked to a bill, on the same account, for the same amount, within 3 days of a scheduled bill, is flagged ("Possible duplicate: Rent on Dec 1").
+  - Since Phase 4A.4, when more than one bill matches, the bill is named only if the transaction's description clearly matches that bill's name best. Otherwise the warning lists the candidates and says it isn't clear which one it pays.
   - Both stay counted, the conservative choice, until the user resolves it. Nothing is merged automatically.
   - Add Transaction already links a matching entry to the bill, so this mainly catches data entered without that link.
 - **Disclosure (Phase 4A.2).**
@@ -116,7 +130,11 @@ Events in the timeline:
 - **Can I afford this?** reruns Safe to Spend with one hypothetical purchase:
   - *yes*: the low point stays at or above the reserve;
   - *tight*: the low point dips into the reserve but stays ≥ 0;
-  - *no*: the low point goes below zero (shortfall shown).
+  - *no*: the low point goes below zero (shortfall shown);
+  - *move_first* (Phase 4A.4): the total covers it, but the account it's paid from doesn't. Either the account would go below zero (a spendable account), or it is a non-spendable account and part of the purchase has to come from the spendable accounts (that part is counted). The answer is "Only if you move $X into <account> by <date>", where $X covers every day the account would be below zero. It is never shown as "Yes";
+  - *unverified* (Phase 4A.4): the purchase date is after the Safe to Spend horizon, so nothing after that date is known: "Can't check <date> yet: the forecast ends <horizon>". Never "Yes".
+
+  Bills with no amount entered are named in the answer ("Not counted because no amount is entered: …") rather than guessed.
 
   A purchase on a card affects cash only through a scheduled full-balance card payment.
 

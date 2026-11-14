@@ -15,7 +15,8 @@ import {
   type Transaction,
 } from '@clarity/shared';
 import { balanceSummary, type BalanceSummary } from './balances';
-import { buildForecast, dayOf, lowestBetween, type Forecast, type ForecastEvent, type Hypothetical, type LowPoint } from './forecast';
+import { buildForecast, dayOf, lowestBetween, type AccountShortfall, type CashAdvance, type CoveredPayment, type Forecast, type ForecastEvent, type Hypothetical, type LowPoint } from './forecast';
+import { similarity } from './text';
 import { expandOccurrences, type Occurrence } from './occurrences';
 
 /** Everything the engine needs. Apps build this from WorkspaceData + "today". */
@@ -87,6 +88,12 @@ export interface SafeToSpend {
   caption: string;
   /** "Next after Dec 31: Rent $1,400.00 on Jan 1 — not included." or null. */
   nextAfterNote: string | null;
+  /** Through the horizon (Phase 4A.4): spendable accounts below zero, payments savings can't cover, cash advances. */
+  accountShortfalls: AccountShortfall[];
+  coveredPayments: CoveredPayment[];
+  cashAdvances: CashAdvance[];
+  /** Scheduled items with no amount through the horizon: not counted (the forecast can't know them). */
+  unknownAmounts: ForecastEvent[];
 }
 
 const ASSUMPTIONS_BASE = [
@@ -158,7 +165,8 @@ function forecastTo(input: EngineInput, horizonEnd: ISODate, includeEstimatedInc
 function eventLine(e: ForecastEvent, cur: CurrencyCode): ExplainLine {
   const base = e.source === 'overdue' ? 'overdue, counted today' : e.estimated ? 'estimated' : e.source === 'hypothetical' ? 'hypothetical' : e.source === 'scheduled_tx' ? 'planned' : undefined;
   const short = e.unfundedCents ? `only ${formatCents(e.cashDeltaCents, cur)} is available to move; ${formatCents(e.unfundedCents, cur)} not counted` : undefined;
-  const status = [base, short].filter(Boolean).join('; ') || undefined;
+  const cover = e.coverCents ? `the account it's paid from is short; ${formatCents(e.coverCents, cur)} has to come from your spendable accounts` : undefined;
+  const status = [base, short, cover].filter(Boolean).join('; ') || undefined;
   return {
     kind: e.cashDeltaCents < 0 ? 'out' : 'in',
     label: e.label,
@@ -182,7 +190,7 @@ function excludedLine(e: ForecastEvent): ExplainLine {
 export function computeSafeToSpend(input: EngineInput, hypotheticals?: readonly Hypothetical[]): SafeToSpend {
   const h = horizonFor(input);
   const f = forecastTo(input, h.end, false, hypotheticals);
-  const low = lowestBetween(f, input.today, h.end);
+  const low = lowestBetween(f, input.today, h.end, { ownMoney: true });
   if (!low) throw new Error('Forecast produced no days');
   const reserve = input.minReserveCents;
   const cents = low.cents - reserve;
@@ -202,6 +210,7 @@ export function computeSafeToSpend(input: EngineInput, hypotheticals?: readonly 
     { kind: 'start', label: TERMS.recordedBalance, cents: f.startCashCents },
     ...low.incomeBefore.map((e) => eventLine(e, cur)),
     ...low.obligations.map((e) => eventLine(e, cur)),
+    ...(low.advanceOwedCents > 0 ? [{ kind: 'out' as const, label: 'Cash advance still owed', cents: -low.advanceOwedCents, note: "borrowed from a credit card; not counted as your money until it's paid back" }] : []),
     { kind: 'info', label: `Lowest point: ${formatShortDate(low.date)}`, cents: low.cents },
     ...afterEvents.map((e): ExplainLine => ({ ...eventLine(e, cur), note: [eventLine(e, cur).note, `after the lowest point, doesn't lower it`].filter(Boolean).join('; ') })),
     { kind: 'reserve', label: 'Minimum cash reserve', cents: -reserve },
@@ -249,7 +258,10 @@ export function computeSafeToSpend(input: EngineInput, hypotheticals?: readonly 
         'Only income with a fixed amount is counted. Estimated or unknown income is listed but not counted.',
         'Credit card purchases only reduce cash when a card payment is scheduled.',
         'Combines your spendable accounts. It assumes you can move money between them; a bill paid from an account that would run short is flagged.',
-        'A transfer from savings counts only up to what that account is projected to hold.',
+        'A transfer from savings counts only up to what that account is projected to hold. A bill paid from savings that savings can\'t cover is counted against your spendable accounts.',
+        ...(f.cashAdvances.some((a) => a.date <= h.end)
+          ? ["Money borrowed from a credit card (a cash advance) isn't counted as yours until a scheduled card payment pays it back. Interest, fees and your card limit are not known, so the advance may cost more or may not be available."]
+          : []),
         `Covers everything scheduled from today through ${H}. Anything scheduled after ${H} is not included.${nextAfterNote ? ` ${nextAfterNote}` : ''}`,
       ],
     },
@@ -257,6 +269,10 @@ export function computeSafeToSpend(input: EngineInput, hypotheticals?: readonly 
     nextAfterHorizon: nextAfter,
     caption,
     nextAfterNote,
+    accountShortfalls: f.accountShortfalls.filter((x) => x.date <= h.end),
+    coveredPayments: f.coveredPayments.filter((x) => x.date <= h.end),
+    cashAdvances: f.cashAdvances.filter((x) => x.date <= h.end),
+    unknownAmounts: f.excludedEvents.filter((e) => e.excluded === 'unknown_amount' && e.date <= h.end),
   };
 }
 
@@ -268,8 +284,13 @@ export interface AffordQuery {
 }
 
 export interface AffordResult {
-  verdict: 'yes' | 'tight' | 'no';
-  /** Answer shown to the user; "Yes" is always qualified with the forecast end date. */
+  /**
+   * yes / tight / no: the combined forecast with this purchase.
+   * move_first: the total covers it, but the account it's paid from doesn't; money has to be moved in first.
+   * unverified: the purchase date is after the forecast ends, so it was not checked at all.
+   */
+  verdict: 'yes' | 'tight' | 'no' | 'move_first' | 'unverified';
+  /** Answer shown to the user; "Yes" is always qualified with the forecast end date. Never "Yes" for move_first/unverified. */
   headline: string;
   /** What the answer covers: end date, paycheck assumption, next payment after it. */
   scope: string;
@@ -277,23 +298,46 @@ export interface AffordResult {
   after: SafeToSpend;
   /** Positive when the purchase would leave you short. */
   shortfallCents: Cents;
+  /** move_first: how much to move into which account, by when (covers every day it would be below zero). */
+  requiredMove: { accountId: ID; cents: Cents; by: ISODate } | null;
   notes: string[];
 }
 
 /** "Can I afford this?" — runs the same Safe to Spend calculation with one hypothetical purchase. Never saves anything. */
 export function canIAfford(input: EngineInput, q: AffordQuery): AffordResult {
   if (!Number.isSafeInteger(q.amountCents) || q.amountCents <= 0) throw new Error('Amount must be a positive number of cents');
+  const cur = input.baseCurrency;
   const before = computeSafeToSpend(input);
-  const hyp: Hypothetical = {
-    id: 'afford',
-    accountId: q.accountId,
-    date: q.date < input.today ? input.today : q.date,
-    amountCents: -q.amountCents,
-    label: q.label?.trim() || 'This purchase',
-  };
-  const after = computeSafeToSpend(input, [hyp]);
-  const notes: string[] = [];
+  const H = formatShortDate(before.horizonEnd);
+  const date = q.date < input.today ? input.today : q.date;
+  const hyp: Hypothetical = { id: 'afford', accountId: q.accountId, date, amountCents: -q.amountCents, label: q.label?.trim() || 'This purchase' };
   const acct = input.accounts.find((a) => a.id === q.accountId);
+  const name = acct?.name ?? 'that account';
+  const scope = [
+    before.dependableIncome
+      ? `Checked against everything scheduled through ${H}, assuming your paychecks arrive as scheduled.`
+      : `Checked against everything scheduled through ${H}. No regular income is scheduled, so nothing after that is covered.`,
+    before.nextAfterNote,
+  ].filter(Boolean).join(' ');
+  const notes: string[] = [];
+  const notCounted = before.unknownAmounts.map((e) => e.label);
+  if (notCounted.length) notes.push(`Not counted because no amount is entered: ${[...new Set(notCounted)].join(', ')}. Add the amount for a complete answer.`);
+
+  // The forecast ends at the horizon: a later purchase can't be checked, so never answer "Yes".
+  if (date > before.horizonEnd) {
+    return {
+      verdict: 'unverified',
+      headline: `Can't check ${formatShortDate(date)} yet: the forecast ends ${H}`,
+      scope: `Your forecast only covers what's scheduled through ${H}, so a purchase on ${formatShortDate(date)} can't be checked yet. Bills and income after ${H} aren't counted.${before.nextAfterNote ? ` ${before.nextAfterNote}` : ''}`,
+      before,
+      after: before,
+      shortfallCents: 0,
+      requiredMove: null,
+      notes,
+    };
+  }
+
+  const after = computeSafeToSpend(input, [hyp]);
   if (acct?.type === 'credit_card') {
     const paysCard = input.recurring.some(
       (r) => !r.paused && (r.kind === 'transfer' || r.kind === 'bill') && r.toAccountId === acct.id && r.amount.type === 'card_full_balance',
@@ -304,19 +348,36 @@ export function canIAfford(input: EngineInput, q: AffordQuery): AffordResult {
         : 'Charged to your card. It will not reduce cash until you pay the card, and no full-balance payment is scheduled.',
     );
   }
-  if (hyp.date > before.horizonEnd) notes.push('This date is after the forecast window, so it does not change today’s Safe to Spend.');
+
+  // The account it's paid from, not just the combined total (Phase 4A.4).
+  let requiredMove: AffordResult['requiredMove'] = null;
+  const cover = after.coveredPayments.find((c) => c.eventId === 'hyp:afford');
+  if (cover) {
+    notes.push(`${name} is projected to have ${formatCents(cover.accountBalanceCents, cur)} on ${formatShortDate(date)}, so ${formatCents(cover.coveredCents, cur)} of this would have to come from your spendable accounts. That is counted above.`);
+    requiredMove = { accountId: q.accountId, cents: cover.coveredCents, by: date };
+  } else if (acct && acct.type !== 'credit_card') {
+    const beforeLow = new Map(before.accountShortfalls.filter((x) => x.accountId === acct.id).map((x) => [x.date, x.lowCents]));
+    const mine = after.accountShortfalls.filter((x) => x.accountId === acct.id && x.date >= date);
+    const caused = mine.filter((x) => x.lowCents < (beforeLow.get(x.date) ?? 0));
+    if (caused.length) {
+      const deepest = Math.min(...mine.map((x) => x.lowCents));
+      requiredMove = { accountId: acct.id, cents: -deepest, by: caused[0]!.date };
+      notes.push(`${name} would go to ${formatCents(caused[0]!.lowCents, cur)} on ${formatShortDate(caused[0]!.date)}. You'd need to move ${formatCents(-deepest, cur)} into ${name} by ${formatShortDate(caused[0]!.date)} from your other spendable accounts.`);
+    } else if (mine.length) {
+      notes.push(`${name} is already projected to go to ${formatCents(mine[0]!.lowCents, cur)} on ${formatShortDate(mine[0]!.date)} without this purchase; see the warning on your dashboard.`);
+    }
+  }
+
   const newLow = after.lowPoint.cents;
-  const verdict: AffordResult['verdict'] = newLow >= input.minReserveCents ? 'yes' : newLow >= 0 ? 'tight' : 'no';
-  if (verdict === 'tight') notes.push('You would dip into your minimum cash reserve.');
-  const H = formatShortDate(before.horizonEnd);
-  const headline = verdict === 'yes' ? `Yes, through ${H}` : verdict === 'tight' ? `Tight — it dips into your reserve before ${H}` : 'Not without coming up short';
-  const scope = [
-    before.dependableIncome
-      ? `Checked against everything scheduled through ${H}, assuming your paychecks arrive as scheduled.`
-      : `Checked against everything scheduled through ${H}. No regular income is scheduled, so nothing after that is covered.`,
-    before.nextAfterNote,
-  ].filter(Boolean).join(' ');
-  return { verdict, headline, scope, before, after, shortfallCents: after.cents < 0 ? -after.cents : 0, notes };
+  const combined: 'yes' | 'tight' | 'no' = newLow >= input.minReserveCents ? 'yes' : newLow >= 0 ? 'tight' : 'no';
+  if (combined === 'tight') notes.push('You would dip into your minimum cash reserve.');
+  const verdict: AffordResult['verdict'] = combined === 'no' ? 'no' : requiredMove ? 'move_first' : combined;
+  const headline =
+    verdict === 'yes' ? `Yes, through ${H}`
+      : verdict === 'tight' ? `Tight — it dips into your reserve before ${H}`
+        : verdict === 'move_first' ? `Only if you move ${formatCents(requiredMove!.cents, cur)} into ${name} by ${formatShortDate(requiredMove!.by)}`
+          : 'Not without coming up short';
+  return { verdict, headline, scope, before, after, shortfallCents: after.cents < 0 ? -after.cents : 0, requiredMove, notes };
 }
 
 export interface Projection {
@@ -502,8 +563,10 @@ export function buildDashboard(input: EngineInput): Dashboard {
       });
     }
   }
-  // Phase 4A.2: transfers the sending account can't cover, and accounts that would go below zero on their own.
+  // Phase 4A.2/4A.4: transfers the sending account can't cover, payments savings can't cover, borrowed money,
+  // and spendable accounts that would go below zero on their own.
   const nameOf = (id: ID) => input.accounts.find((a) => a.id === id)?.name ?? 'an account';
+  const H = formatShortDate(sts.horizonEnd);
   for (const u of conservative.unfundedTransfers) {
     if (u.date > sts.horizonEnd) continue;
     const short = u.requestedCents - u.fundedCents;
@@ -511,37 +574,85 @@ export function buildDashboard(input: EngineInput): Dashboard {
       id: `unfunded:${u.eventId}`,
       severity: 'warning',
       title: u.fundedCents === 0 ? `${u.label}: ${nameOf(u.fromAccountId)} won't have the money` : `${u.label}: only ${formatCents(u.fundedCents, cur)} of ${formatCents(u.requestedCents, cur)} is available`,
-      detail: `Scheduled for ${formatShortDate(u.date)} from ${nameOf(u.fromAccountId)}, which is projected to have ${formatCents(u.fundedCents, cur)} then. Only that amount is counted; ${formatCents(short, cur)} is not.`,
+      detail: `Scheduled for ${formatShortDate(u.date)} from ${nameOf(u.fromAccountId)}, which is projected to have ${formatCents(u.sourceBalanceCents, cur)} then${u.sourceBalanceCents > u.fundedCents ? `; other transfers from it that day are paid first, leaving ${formatCents(u.fundedCents, cur)} for this one` : ''}. Only that amount is counted; ${formatCents(short, cur)} is not.`,
     });
   }
+  for (const c of conservative.coveredPayments) {
+    if (c.date > sts.horizonEnd) continue;
+    const name = nameOf(c.accountId);
+    warnings.push({
+      id: `covered:${c.eventId}`,
+      severity: 'warning',
+      title: c.fundedCents === 0 ? `${c.label}: ${name} can't cover it` : `${c.label}: ${name} can cover only ${formatCents(c.fundedCents, cur)} of ${formatCents(c.requestedCents, cur)}`,
+      detail: `Due ${formatShortDate(c.date)} from ${name}, which is projected to have ${formatCents(c.accountBalanceCents, cur)} then. Safe to Spend counts the other ${formatCents(c.coveredCents, cur)} against your spendable accounts. Move ${formatCents(c.coveredCents, cur)} into ${name} before ${formatShortDate(c.date)}, or change the account it's paid from.`,
+    });
+  }
+  const lastDay = conservative.days.filter((d) => d.date <= sts.horizonEnd).at(-1);
+  for (const adv of conservative.cashAdvances) {
+    if (adv.date > sts.horizonEnd) continue;
+    const owedAtEnd = lastDay?.advanceOwedEndCents ?? 0;
+    warnings.push({
+      id: `advance:${adv.eventId}`,
+      severity: 'warning',
+      title: `${adv.label}: ${formatCents(adv.cents, cur)} borrowed from ${nameOf(adv.cardId)}`,
+      detail: `A cash advance on ${formatShortDate(adv.date)} is borrowed money, so Safe to Spend doesn't count it as yours until a scheduled card payment pays it back.${owedAtEnd > 0 ? ` Through ${H}, ${formatCents(owedAtEnd, cur)} of planned cash advances is not paid back.` : ''} Interest, fees and your card limit are not known, so it may cost more or may not be available.`,
+    });
+  }
+  const shortByAccount = new Map<ID, AccountShortfall[]>();
   for (const a of conservative.accountShortfalls) {
     if (a.date > sts.horizonEnd) continue;
-    const day = conservative.days.find((x) => x.date === a.date);
-    // Only when the money exists in another spendable account; otherwise the overall shortfall warning covers it.
-    if (!day || day.lowCashCents < 0) continue;
-    const name = nameOf(a.accountId);
+    shortByAccount.set(a.accountId, [...(shortByAccount.get(a.accountId) ?? []), a]);
+  }
+  const ownLow = (date: ISODate) => {
+    const d = conservative.days.find((x) => x.date === date);
+    return d ? d.lowCashCents - d.advanceOwedAtLowCents : 0;
+  };
+  for (const [id, list] of shortByAccount) {
+    // Only when the money exists in another spendable account on at least one of these days;
+    // a single account (or a combined shortfall every time) is already the overall shortfall warning.
+    const coveredDays = list.filter((x) => ownLow(x.date) >= 0);
+    if (!coveredDays.length) continue;
+    const name = nameOf(id);
+    const first = list[0]!;
+    const deepest = Math.min(...list.map((x) => x.lowCents));
+    const laterAll = list.slice(1).map((x) => `${formatCents(x.lowCents, cur)} on ${formatShortDate(x.date)} (${x.labels.join(', ')})`);
+    const later = laterAll.length > 4 ? [...laterAll.slice(0, 4), `${laterAll.length - 4} more`] : laterAll;
     warnings.push({
-      id: `account-short:${a.accountId}`,
+      id: `account-short:${id}`,
       severity: 'warning',
-      title: `${name} would go to ${formatCents(a.lowCents, cur)} on ${formatShortDate(a.date)}`,
-      detail: `${a.labels.join(', ')} is paid from ${name}. Your other spendable accounts have enough, and Safe to Spend assumes you move money between them. Move ${formatCents(-a.lowCents, cur)} into ${name} before ${formatShortDate(a.date)}, or change the account it's paid from.`,
+      title: `${name} would go to ${formatCents(first.lowCents, cur)} on ${formatShortDate(first.date)}`,
+      detail: list.length === 1
+        ? `${first.labels.join(', ')} is paid from ${name}. Your other spendable accounts have enough, and Safe to Spend assumes you move money between them. Move ${formatCents(-first.lowCents, cur)} into ${name} before ${formatShortDate(first.date)}, or change the account it's paid from.`
+        : `${first.labels.join(', ')} is paid from ${name}. Later: ${later.join('; ')}. Safe to Spend assumes you move money between your spendable accounts. Move ${formatCents(-deepest, cur)} into ${name} before ${formatShortDate(first.date)} to cover all of these, or change the accounts they're paid from.`,
     });
   }
   // Possible duplicates: a planned transaction (not linked to a bill) on the same account, for the same amount,
   // within 3 days of a scheduled bill. Never merged: both stay counted until the user resolves it.
+  // The bill is named only when it is the only candidate or clearly the best name match (Phase 4A.4).
   for (const t of input.transactions) {
     if (t.date <= input.today || t.date > sts.horizonEnd || t.occurrenceRef || t.transferGroupId || t.amountCents >= 0) continue;
-    const match = conservative.occurrences.find((o) =>
+    const candidates = conservative.occurrences.filter((o) =>
       (o.status === 'expected' || o.status === 'estimated') && o.kind !== 'income' && o.accountId === t.accountId &&
       o.amountCents === -t.amountCents && Math.abs(diffDays(o.date, t.date)) <= 3);
-    if (match) {
-      warnings.push({
-        id: `duplicate:${t.id}`,
-        severity: 'warning',
-        title: `Possible duplicate: ${match.name} on ${formatShortDate(match.date)}`,
-        detail: `A planned transaction for ${formatCents(-t.amountCents, cur)} on ${formatShortDate(t.date)} looks like the scheduled ${match.name}. Both are counted until you delete the planned one or mark the bill paid with it.`,
-      });
-    }
+    if (!candidates.length) continue;
+    const scored = candidates.map((o) => ({ o, sim: similarity(t.merchant, o.name) })).sort((x, y) => y.sim - x.sim);
+    const best = scored.length === 1 || (scored[0]!.sim >= 0.3 && scored[0]!.sim > scored[1]!.sim) ? scored[0]!.o : null;
+    const amount = formatCents(-t.amountCents, cur);
+    warnings.push(
+      best
+        ? {
+            id: `duplicate:${t.id}`,
+            severity: 'warning',
+            title: `Possible duplicate: ${best.name} on ${formatShortDate(best.date)}`,
+            detail: `A planned transaction for ${amount} on ${formatShortDate(t.date)} looks like the scheduled ${best.name}. Both are counted until you delete the planned one or mark the bill paid with it.`,
+          }
+        : {
+            id: `duplicate:${t.id}`,
+            severity: 'warning',
+            title: `Possible duplicate: ${t.merchant || 'planned transaction'} on ${formatShortDate(t.date)}`,
+            detail: `A planned transaction for ${amount} on ${formatShortDate(t.date)} matches more than one scheduled bill by amount and date (${candidates.map((o) => `${o.name} on ${formatShortDate(o.date)}`).join(', ')}), so it isn't clear which one it pays. Everything is counted until you delete it or mark the right bill paid with it.`,
+          },
+    );
   }
   if (balances.excludedCurrencyAccountIds.length) {
     warnings.push({ id: 'currency', severity: 'info', title: 'Some accounts are not included', detail: `Accounts in a currency other than ${cur} are left out of totals.` });

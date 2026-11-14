@@ -59,6 +59,11 @@ export interface ForecastEvent {
   estimated: boolean;
   /** Transfer only: part of the requested amount the sending account could not cover (never moved). */
   unfundedCents?: Cents;
+  /**
+   * Payment from a non-spendable account (savings), or a card payment from one, that the account can't fully
+   * cover: this part has to be moved in from the spendable accounts, so it is counted against them (Phase 4A.4).
+   */
+  coverCents?: Cents;
 }
 
 /** A transfer out of a non-spendable asset account (e.g. savings) that asks for more than the account holds. */
@@ -70,9 +75,36 @@ export interface UnfundedTransfer {
   toAccountId: ID;
   requestedCents: Cents;
   fundedCents: Cents;
+  /** The sending account's projected balance when the transfer was due (may be negative). */
+  sourceBalanceCents: Cents;
 }
 
-/** First day an account (not a credit card) is projected below zero after that day's money going out. */
+/** A payment due from a non-spendable account (savings) that holds less than the payment (Phase 4A.4). */
+export interface CoveredPayment {
+  eventId: string;
+  label: string;
+  date: ISODate;
+  accountId: ID;
+  requestedCents: Cents;
+  /** Paid from the account's own money. */
+  fundedCents: Cents;
+  /** Has to come from the spendable accounts; counted in Safe to Spend. */
+  coveredCents: Cents;
+  /** The account's projected balance before the payment (may be negative). */
+  accountBalanceCents: Cents;
+}
+
+/** A planned transfer out of a credit card into another account: borrowed money (Phase 4A.4). */
+export interface CashAdvance {
+  eventId: string;
+  label: string;
+  date: ISODate;
+  cardId: ID;
+  toAccountId: ID;
+  cents: Cents;
+}
+
+/** A day on which a spendable account is projected below zero after that day's money going out (every such day). */
 export interface AccountShortfall {
   accountId: ID;
   date: ISODate;
@@ -87,6 +119,9 @@ export interface ForecastDay {
   /** After that day's outflows, before its inflows (conservative intraday low). */
   lowCashCents: Cents;
   endCashCents: Cents;
+  /** Planned cash-advance money still owed at the day's low point / at the end of the day (Phase 4A.4). */
+  advanceOwedAtLowCents: Cents;
+  advanceOwedEndCents: Cents;
   events: ForecastEvent[];
 }
 
@@ -104,8 +139,12 @@ export interface Forecast {
   endBalances: Record<ID, Cents>;
   /** Transfers capped at what the sending account held (Phase 4A.2). */
   unfundedTransfers: UnfundedTransfer[];
-  /** Accounts projected below zero (first day each), even when the combined spendable total is fine. */
+  /** Spendable accounts projected below zero, every day it happens, even when the combined total is fine. */
   accountShortfalls: AccountShortfall[];
+  /** Payments from non-spendable accounts that need money from the spendable accounts (Phase 4A.4). */
+  coveredPayments: CoveredPayment[];
+  /** Planned cash advances (borrowed money; not counted in Safe to Spend until repaid). */
+  cashAdvances: CashAdvance[];
 }
 
 function legsForOccurrence(o: Occurrence, amount: Cents): Leg[] {
@@ -124,6 +163,14 @@ function legsForOccurrence(o: Occurrence, amount: Cents): Leg[] {
           ]
         : [{ accountId: o.accountId, deltaCents: -amount }];
   }
+}
+
+/** The two legs of a transfer (one out, one in), or null for anything else. */
+function transferLegs(e: ForecastEvent): { src: Leg; dst: Leg } | null {
+  if (e.legs.length !== 2) return null;
+  const src = e.legs.find((l) => l.deltaCents < 0);
+  const dst = e.legs.find((l) => l.deltaCents > 0);
+  return src && dst ? { src, dst } : null;
 }
 
 export function buildForecast(input: ForecastInput): Forecast {
@@ -233,6 +280,10 @@ export function buildForecast(input: ForecastInput): Forecast {
   const days: ForecastDay[] = [];
   const unfunded: UnfundedTransfer[] = [];
   const shortfalls: AccountShortfall[] = [];
+  const covered: CoveredPayment[] = [];
+  const advanceList: CashAdvance[] = [];
+  /** Per card: planned cash-advance money still owed (never more than the card's projected balance owed). */
+  const advanceOwed = new Map<ID, Cents>();
   const total = diffDays(horizonEnd, today);
   for (let i = 0; i <= total; i++) {
     const date = addDays(today, i);
@@ -251,43 +302,139 @@ export function buildForecast(input: ForecastInput): Forecast {
       }
       e.legs = legsForOccurrence(o, amount);
     }
-    // Money going out first (bills and other outflows, then transfers out), then money coming in.
-    // A transfer out of a non-spendable asset account (savings) can move at most what that account
-    // holds at that moment, after its own outflows that day; the rest is unfunded and never arrives.
-    const isTransfer = (e: ForecastEvent) => e.legs.length === 2 && e.legs.some((l) => l.deltaCents < 0) && e.legs.some((l) => l.deltaCents > 0);
-    const apply = (l: Leg) => balances.set(l.accountId, (balances.get(l.accountId) ?? 0) + l.deltaCents);
+    // Same-day order (Phase 4A.4; docs/calculation-rules.md "Same-day order"):
+    //  1. morning: moves out of spendable accounts (incl. card payments) settle, then bills and other payments.
+    //     A payment from a non-spendable account (savings) uses what that account holds; the rest has to
+    //     come from the spendable accounts and is counted against them ("covered").
+    //  2. account check: every spendable account that paid something today and is below zero is recorded.
+    //  3. afternoon: income and card cash advances arrive.
+    //  4. evening: transfers out of non-spendable accounts, capped at what the account holds by then.
+    // The combined low point is unchanged: the day's money going out, before any money coming in.
+    const apply = (id: ID, d: Cents) => balances.set(id, (balances.get(id) ?? 0) + d);
+    const typeOf = (id: ID) => accountById.get(id)?.type;
+    const coverable = (id: ID) => {
+      const a = accountById.get(id);
+      return !!a && !cashIds.has(id) && a.type !== 'credit_card' && !a.archived && a.currency === baseCurrency;
+    };
     const paidOut = new Map<ID, string[]>();
-    const noteOut = (l: Leg, e: ForecastEvent) => { if (l.deltaCents < 0) paidOut.set(l.accountId, [...(paidOut.get(l.accountId) ?? []), e.label]); };
-    for (const e of events) if (!isTransfer(e)) for (const l of e.legs) if (l.deltaCents < 0) { apply(l); noteOut(l, e); }
+    const noteOut = (id: ID, label: string) => paidOut.set(id, [...(paidOut.get(id) ?? []), label]);
+    const syncAdvances = () => {
+      for (const [card, owed] of advanceOwed) advanceOwed.set(card, Math.min(owed, Math.max(0, -(balances.get(card) ?? 0))));
+    };
+    const owedTotal = () => [...advanceOwed.values()].reduce((a, b) => a + b, 0);
+    type Move = { e: ForecastEvent; src: ID; dst: ID; requested: Cents; funded: Cents; cls: 0 | 1 | 2 };
+    const advances: { e: ForecastEvent; src: ID; dst: ID; cents: Cents }[] = [];
+    const reserveMoves: Move[] = [];
+    const payments: ForecastEvent[] = [];
+    const incoming: ForecastEvent[] = [];
+    // 1a. moves out of spendable accounts (and card-to-card), both legs
     for (const e of events) {
-      if (!isTransfer(e)) continue;
-      const src = e.legs.find((l) => l.deltaCents < 0)!;
-      const dst = e.legs.find((l) => l.deltaCents > 0)!;
-      const from = accountById.get(src.accountId);
-      const capped = !!from && !cashIds.has(from.id) && from.type !== 'credit_card';
-      const requested = -src.deltaCents;
-      if (capped) {
-        const funded = Math.min(requested, Math.max(0, balances.get(src.accountId) ?? 0));
-        if (funded < requested) {
-          e.legs = [{ accountId: src.accountId, deltaCents: -funded }, { accountId: dst.accountId, deltaCents: funded }];
-          e.unfundedCents = requested - funded;
-          unfunded.push({ eventId: e.id, label: e.label, date, fromAccountId: src.accountId, toAccountId: dst.accountId, requestedCents: requested, fundedCents: funded });
+      const t = transferLegs(e);
+      if (!t) { payments.push(e); continue; }
+      const srcType = typeOf(t.src.accountId);
+      if (cashIds.has(t.src.accountId) || (srcType === 'credit_card' && typeOf(t.dst.accountId) === 'credit_card')) {
+        apply(t.src.accountId, t.src.deltaCents);
+        apply(t.dst.accountId, t.dst.deltaCents);
+        noteOut(t.src.accountId, e.label);
+      } else if (srcType === 'credit_card') {
+        advances.push({ e, src: t.src.accountId, dst: t.dst.accountId, cents: t.dst.deltaCents });
+      } else {
+        const dstType = typeOf(t.dst.accountId);
+        reserveMoves.push({ e, src: t.src.accountId, dst: t.dst.accountId, requested: t.dst.deltaCents, funded: 0, cls: dstType === 'credit_card' ? 0 : cashIds.has(t.dst.accountId) ? 2 : 1 });
+      }
+    }
+    // 1b. bills and other payments (non-transfer money going out)
+    for (const e of payments) {
+      for (const l of e.legs) {
+        if (l.deltaCents >= 0) continue;
+        if (coverable(l.accountId)) {
+          const bal = balances.get(l.accountId) ?? 0;
+          const requested = -l.deltaCents;
+          const funded = Math.min(requested, Math.max(0, bal));
+          apply(l.accountId, -funded); // the rest is paid with money moved in from the spendable accounts
+          if (funded < requested) {
+            e.coverCents = (e.coverCents ?? 0) + (requested - funded);
+            covered.push({ eventId: e.id, label: e.label, date, accountId: l.accountId, requestedCents: requested, fundedCents: funded, coveredCents: requested - funded, accountBalanceCents: bal });
+          }
+        } else {
+          apply(l.accountId, l.deltaCents);
+          noteOut(l.accountId, e.label);
         }
       }
-      for (const l of e.legs) if (l.deltaCents < 0) { apply(l); noteOut(l, e); }
+      for (const l of e.legs) if (l.deltaCents > 0) incoming.push(e);
     }
+    syncAdvances();
+    const owedAtLow = owedTotal();
+    // 2. account check (spendable accounts; non-spendable ones never go below zero here)
     for (const [id, labels] of paidOut) {
-      const a = accountById.get(id);
       const bal = balances.get(id) ?? 0;
-      if (a && a.type !== 'credit_card' && bal < 0 && !shortfalls.some((x) => x.accountId === id)) shortfalls.push({ accountId: id, date, lowCents: bal, labels });
+      if (cashIds.has(id) && bal < 0) shortfalls.push({ accountId: id, date, lowCents: bal, labels });
     }
-    for (const e of events) for (const l of e.legs) if (l.deltaCents > 0) apply(l);
+    // 3. income, refunds, cash advances
+    for (const e of new Set(incoming)) for (const l of e.legs) if (l.deltaCents > 0) apply(l.accountId, l.deltaCents);
+    for (const a of advances) {
+      apply(a.src, -a.cents);
+      apply(a.dst, a.cents);
+      if (typeOf(a.dst) !== 'credit_card') {
+        advanceOwed.set(a.src, (advanceOwed.get(a.src) ?? 0) + a.cents);
+        advanceList.push({ eventId: a.e.id, label: a.e.label, date, cardId: a.src, toAccountId: a.dst, cents: a.cents });
+      }
+    }
+    // 4. transfers out of non-spendable accounts: at most what the account holds now. When it can't cover all
+    //    of them: card payments first, then moves that stay outside the spendable accounts, then moves INTO
+    //    spendable accounts (so any shortage lands on the money Safe to Spend would count), shared in proportion.
+    //    Repeated so a same-day chain (A -> B -> Checking) can pass money along; it can never create money.
+    const sourceBalance = new Map<ID, Cents>();
+    for (const m of reserveMoves) if (!sourceBalance.has(m.src)) sourceBalance.set(m.src, balances.get(m.src) ?? 0);
+    for (let pass = 0, progress = true; progress && pass <= reserveMoves.length; pass++) {
+      progress = false;
+      const sources = [...new Set(reserveMoves.filter((m) => m.funded < m.requested).map((m) => m.src))].sort();
+      for (const src of sources) {
+        let avail = Math.max(0, balances.get(src) ?? 0);
+        for (const cls of [0, 1, 2] as const) {
+          const group = reserveMoves.filter((m) => m.src === src && m.cls === cls && m.funded < m.requested).sort((a, b) => (a.e.id < b.e.id ? -1 : a.e.id > b.e.id ? 1 : 0));
+          if (!group.length || avail <= 0) continue;
+          const need = group.reduce((s, m) => s + (m.requested - m.funded), 0);
+          const give = Math.min(avail, need);
+          const shares = group.map((m) => Number((BigInt(give) * BigInt(m.requested - m.funded)) / BigInt(need)));
+          let left = give - shares.reduce((a, b) => a + b, 0);
+          for (let k = 0; left > 0; k = (k + 1) % group.length) {
+            if (shares[k]! < group[k]!.requested - group[k]!.funded) { shares[k]!++; left--; }
+          }
+          group.forEach((m, k) => {
+            const sh = shares[k]!;
+            if (sh <= 0) return;
+            apply(m.src, -sh);
+            apply(m.dst, sh);
+            m.funded += sh;
+            progress = true;
+          });
+          avail -= give;
+        }
+      }
+    }
+    for (const m of reserveMoves) {
+      if (m.funded === m.requested) continue;
+      const short = m.requested - m.funded;
+      if (m.cls === 0) {
+        // A card payment is an obligation: the part savings can't pay has to come from the spendable accounts.
+        apply(m.dst, short);
+        m.e.legs = [{ accountId: m.src, deltaCents: -m.funded }, { accountId: m.dst, deltaCents: m.requested }];
+        m.e.coverCents = short;
+        covered.push({ eventId: m.e.id, label: m.e.label, date, accountId: m.src, requestedCents: m.requested, fundedCents: m.funded, coveredCents: short, accountBalanceCents: sourceBalance.get(m.src) ?? 0 });
+      } else {
+        m.e.legs = [{ accountId: m.src, deltaCents: -m.funded }, { accountId: m.dst, deltaCents: m.funded }];
+        m.e.unfundedCents = short;
+        unfunded.push({ eventId: m.e.id, label: m.e.label, date, fromAccountId: m.src, toAccountId: m.dst, requestedCents: m.requested, fundedCents: m.funded, sourceBalanceCents: sourceBalance.get(m.src) ?? 0 });
+      }
+    }
+    syncAdvances();
 
     const start = cash;
     let outflow = 0;
     let inflow = 0;
     for (const e of events) {
-      e.cashDeltaCents = e.legs.reduce((s, l) => s + (cashIds.has(l.accountId) ? l.deltaCents : 0), 0);
+      e.cashDeltaCents = e.legs.reduce((s, l) => s + (cashIds.has(l.accountId) ? l.deltaCents : 0), 0) - (e.coverCents ?? 0);
       if (e.cashDeltaCents < 0) outflow += e.cashDeltaCents;
       else inflow += e.cashDeltaCents;
     }
@@ -295,7 +442,7 @@ export function buildForecast(input: ForecastInput): Forecast {
     cash = low + inflow;
     // Order inside a day: outflows first, then inflows (what the low point assumes).
     events.sort((a, b) => a.cashDeltaCents - b.cashDeltaCents);
-    days.push({ date, startCashCents: start, lowCashCents: low, endCashCents: cash, events });
+    days.push({ date, startCashCents: start, lowCashCents: low, endCashCents: cash, advanceOwedAtLowCents: owedAtLow, advanceOwedEndCents: owedTotal(), events });
   }
 
   return {
@@ -309,6 +456,8 @@ export function buildForecast(input: ForecastInput): Forecast {
     endBalances: Object.fromEntries(balances),
     unfundedTransfers: unfunded,
     accountShortfalls: shortfalls,
+    coveredPayments: covered,
+    cashAdvances: advanceList,
   };
 }
 
@@ -319,14 +468,20 @@ export interface LowPoint {
   obligations: ForecastEvent[];
   /** Inflows counted before the low point. */
   incomeBefore: ForecastEvent[];
+  /** Borrowed (cash-advance) money still owed at the low point, already subtracted from `cents` (own-money lows only). */
+  advanceOwedCents: Cents;
 }
 
-/** Lowest intraday cash level in [from, to] (inclusive). Ties → earliest date. */
-export function lowestBetween(f: Forecast, from: ISODate, to: ISODate): LowPoint | null {
+/**
+ * Lowest intraday cash level in [from, to] (inclusive). Ties → earliest date.
+ * ownMoney: subtract planned cash-advance money still owed (Safe to Spend never counts borrowed money).
+ */
+export function lowestBetween(f: Forecast, from: ISODate, to: ISODate, opts: { ownMoney?: boolean } = {}): LowPoint | null {
+  const v = (d: ForecastDay) => d.lowCashCents - (opts.ownMoney ? d.advanceOwedAtLowCents : 0);
   let best: ForecastDay | null = null;
   for (const d of f.days) {
     if (d.date < from || d.date > to) continue;
-    if (!best || d.lowCashCents < best.lowCashCents) best = d;
+    if (!best || v(d) < v(best)) best = d;
   }
   if (!best) return null;
   const lowDate = best.date;
@@ -339,7 +494,7 @@ export function lowestBetween(f: Forecast, from: ISODate, to: ISODate): LowPoint
       else if (e.cashDeltaCents > 0 && d.date < lowDate) incomeBefore.push(e);
     }
   }
-  return { cents: best.lowCashCents, date: lowDate, obligations, incomeBefore };
+  return { cents: v(best), date: lowDate, obligations, incomeBefore, advanceOwedCents: opts.ownMoney ? best.advanceOwedAtLowCents : 0 };
 }
 
 export function dayOf(f: Forecast, date: ISODate): ForecastDay | undefined {

@@ -229,3 +229,33 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
   - "Lowest projected balance" is renamed "Lowest balance this month" (`TERMS.lowestBalance`).
 - **[Finding]** Add Transaction already links a matching planned entry to the bill ("This pays Rent due Dec 1…"), so the audit's duplicate only arises from unlinked data. The engine flags it ("Possible duplicate"), and both stay counted.
 - **[Lesson]** Safe to Spend is the minimum over every day *including today*; hand-derived expectations must include today's balance (one of my own test expectations missed it).
+
+## Phase 4A.4 (2026-11-14): financial integrity corrections (audit F1–F8)
+- **[Verified defect, fixed] F1:** a bill paid from savings or another non-spendable account was never counted against spendable cash. Now savings pays what it holds; the rest is counted against the spendable accounts (`coverCents` / `Forecast.coveredPayments`).
+  - Audit case (Checking $1,000, Savings $0, tuition $500): $1,000 → **$500**.
+  - Applies to card payments from savings too.
+- **[Verified defect, fixed] F2:** planned cash advances raised Safe to Spend. Now Safe to Spend subtracts advance money still owed.
+  - A card payment reduces what is owed, never below what the card owes after it, so it pays purchases first.
+  - Audit case: +$100 → **−$900**, whatever the repayment date or amount.
+- **[Verified defect, fixed] F3:** "Can I afford this?" now has two more answers:
+  - `unverified`: the date is after the horizon;
+  - `move_first`: the account it's paid from can't cover it.
+
+  Neither is ever shown as "Yes". Bills with no amount are named.
+- **[Verified defect, fixed] F4:** every account-shortfall day is recorded. One warning per account lists them all, and the amount to move is the deepest.
+- **[Decision] Same-day order** (docs/calculation-rules.md):
+  1. morning: moves out of spendable accounts, then payments;
+  2. account check;
+  3. afternoon: income and advances;
+  4. evening: transfers out of savings, capped by then, repeated for chains.
+
+  The combined low is unchanged (money in after money out).
+  - Competing transfers from one source: card payments, then moves that stay outside spendable cash, then moves into it, pro rata. Never by name.
+  - Fixes F5 (same-day top-up) and F6 (paycheck-and-sweep).
+- **[Decision, conservative]** Money moved in from savings, paychecks and advances still arrive after the same day's bills. Not changed, because it would raise Safe to Spend on timing the app can't know.
+- **[Fixed] F7:** a duplicate is matched by name when amounts tie; ambiguous cases list the candidates.
+- **[Fixed] F8:** warnings show the actual (possibly negative) balance.
+- **[Limitations]** Interest, fees and card limits are not modelled.
+  - An advance into savings is still counted as owed (conservative).
+  - Foreign-currency or archived non-spendable accounts are not covered by F1.
+- **[Lesson]** Probe the audit scenarios before and after with the same script. Every 4A.3 example is now a named test in `packages/engine/test/financial-integrity.test.ts`.

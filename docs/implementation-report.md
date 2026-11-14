@@ -278,6 +278,26 @@ The step-by-step checklist is in `docs/device-test-script.md`.
 - **Tests:** `packages/engine/test/account-integrity.test.ts` (22), `apps/web/e2e/phase4a2.spec.ts` (4), plus the cross-platform fixture and mobile test updates.
 - **Not verified:** physical devices, Safari, real-world credit limits, bank-side overdraft behaviour.
 
+## 7h. Phase 4A.4: financial integrity corrections (audit F1–F8)
+
+| Defect | Scenario (audit example) | Before | After |
+|---|---|---|---|
+| F1 | Checking $1,000, Savings $0, tuition $500 from Savings Nov 20 | $1,000, false "Safe to Spend assumes…" advice | **$500**, "Tuition: Savings can't cover it" |
+| F2 | Checking $300, $1,000 advance Nov 20, rent $1,200 Dec 1, no payment / full Dec 15 / Jan 15 / $50 | +$100 / −$900 / +$100 / +$50 | **−$900** in every case, plus an advance warning |
+| F3 | $5,000 on Feb 1 / $400 from Savings $0 / $400 from Cash $100 | "Yes" ×3 | "Can't check Feb 1 yet…" / "Only if you move $400.00 into Savings…" / "Only if you move $300.00 into Cash…" |
+| F4 | Cash $300 pays $200, $300, $400 | "move $200" only | −$200 Nov 20 and −$600 Dec 5; "move $600" |
+| F5 | $300 top-up on the bill day | warning stayed | no warning (Cash ends $0) |
+| F6 | $1,000 paycheck into Savings + same-day sweep, rent $800 | short by $800 | $0 (lowest is today) |
+| F7 | "Phone Co" $50 vs Gym/Phone $50 | named Gym | names Phone; ambiguous → lists both |
+| F8 | Savings at −$100 | "$0.00" | "−$100.00" |
+
+- Same-day order and reasons are in docs/calculation-rules.md ("Same-day order").
+- **Tests:**
+  - `packages/engine/test/financial-integrity.test.ts`: 38 tests, every audit example, plus a reconciliation check per scenario;
+  - `apps/web/e2e/phase4a4.spec.ts`: 2 tests;
+  - `apps/mobile/test/financial-integrity.test.tsx`: 1 test, same F1 result as web ($1,927.17).
+- **Not verified:** physical devices, Safari, real card terms (interest, fees, limits), bank transfer timing.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

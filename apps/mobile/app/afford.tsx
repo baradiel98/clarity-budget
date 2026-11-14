@@ -28,7 +28,8 @@ export default function Afford() {
   const [date, setDate] = useState(today);
   const cents = parseAmountInput(amount || '0', cur) ?? 0;
   const r = useMemo(() => (cents > 0 && accountId ? canIAfford(engineInput(data, today), { amountCents: cents, accountId, date }) : null), [cents, accountId, date, data, today]);
-  const tone = r?.verdict === 'yes' ? 'positive' : r?.verdict === 'tight' ? 'warning' : 'negative';
+  // move_first and unverified are never a plain yes (Phase 4A.4).
+  const tone = r?.verdict === 'yes' ? 'positive' : r?.verdict === 'no' ? 'negative' : 'warning';
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16 }}>
@@ -44,12 +45,14 @@ export default function Afford() {
         <DateField label="When" value={date} minimum={today} onChange={setDate} />
         {r && (
           <Card>
-            <T variant="title2" color={tone}>{r.headline}</T>
+            <T variant="title2" color={tone} testID="afford-headline">{r.headline}</T>
+            {r.verdict !== 'unverified' && <>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 }}>
               <View><T variant="caption" color="textTertiary">{TERMS.safeToSpend} now</T><Money cents={r.before.cents} currency={cur} variant="headline" /></View>
               <View style={{ alignItems: 'flex-end' }}><T variant="caption" color="textTertiary">Safe to Spend after</T><Money cents={r.after.cents} currency={cur} variant="headline" color={r.after.cents < 0 ? 'negative' : 'text'} /></View>
             </View>
             <T variant="footnote" color="textSecondary" style={{ marginTop: 8 }}>New lowest point: {formatShortDate(r.after.lowPoint.date)}</T>
+            </>}
             {r.verdict === 'no' && <T color="negative">You'd be short {/* engine value */}<Money cents={r.shortfallCents} currency={cur} color="negative" />.</T>}
             <T variant="footnote" color="textSecondary" testID="afford-scope">{r.scope}</T>
             {r.notes.map((n) => <T key={n} variant="footnote" color="textSecondary">{n}</T>)}

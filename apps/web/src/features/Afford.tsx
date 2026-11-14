@@ -24,8 +24,9 @@ export function AffordDialog({ onClose }: { onClose: () => void }) {
   const cents = parseAmountInput(amount, cur);
   const result = useMemo(() => (cents && cents > 0 && accountId ? canIAfford(engineInput(data, today), { amountCents: cents, accountId, date, label }) : null), [cents, accountId, date, label, data, today]);
 
-  const tone = result?.verdict === 'yes' ? 'pos' : result?.verdict === 'tight' ? 'warn' : 'neg';
-  const Icon = result?.verdict === 'yes' ? CheckCircle2 : result?.verdict === 'tight' ? CircleMinus : CircleAlert;
+  // move_first and unverified are never a plain yes (Phase 4A.4).
+  const tone = result?.verdict === 'yes' ? 'pos' : result?.verdict === 'no' ? 'neg' : 'warn';
+  const Icon = result?.verdict === 'yes' ? CheckCircle2 : result?.verdict === 'no' ? CircleAlert : CircleMinus;
 
   return (
     <Dialog
@@ -49,15 +50,15 @@ export function AffordDialog({ onClose }: { onClose: () => void }) {
         </div>
         {result && (
           <div className="card" style={{ background: 'var(--c-surface-muted)', border: 0 }} data-testid="afford-result" aria-live="polite">
-            <div className={`row ${tone}`} style={{ fontWeight: 600, fontSize: 16 }}><Icon size={20} /> {result.headline}</div>
-            <div className="facts" style={{ borderTop: 0, paddingTop: 0 }}>
+            <div className={`row ${tone}`} style={{ fontWeight: 600, fontSize: 16 }} data-testid="afford-headline"><Icon size={20} /> {result.headline}</div>
+            {result.verdict !== 'unverified' && <div className="facts" style={{ borderTop: 0, paddingTop: 0 }}>
               <div><div className="k">{TERMS.safeToSpend} now</div><div className="v"><Money cents={result.before.cents} currency={cur} /></div></div>
               <div><div className="k">Safe to Spend after this purchase</div><div className={`v ${result.after.cents < 0 ? 'neg' : ''}`}><Money cents={result.after.cents} currency={cur} /></div></div>
               <div><div className="k">New lowest point</div><div className={`v ${result.after.lowPoint.cents < 0 ? 'neg' : ''}`}><Money cents={result.after.lowPoint.cents} currency={cur} /> <span className="faint t-footnote">{formatShortDate(result.after.lowPoint.date)}</span></div></div>
-            </div>
+            </div>}
             {result.verdict === 'no' && <p className="t-callout neg" style={{ marginBottom: 0 }}>You'd be short <Money cents={result.shortfallCents} currency={cur} /> before {formatShortDate(result.after.lowPoint.date)}.</p>}
             <p className="t-footnote" style={{ marginBottom: 0 }} data-testid="afford-scope">{result.scope}</p>
-            {result.notes.map((n) => <p key={n} className="t-footnote muted" style={{ marginBottom: 0 }}>{n}</p>)}
+            {result.notes.map((n) => <p key={n} className="t-footnote muted" style={{ marginBottom: 0 }} data-testid="afford-note">{n}</p>)}
             <p className="hint" style={{ marginBottom: 0 }}>This is a what-if. Nothing has been saved.</p>
           </div>
         )}
