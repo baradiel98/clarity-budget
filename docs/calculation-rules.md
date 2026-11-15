@@ -254,6 +254,16 @@ A read-only view of the same forecast, for all spendable cash or one account (Pl
 - **Cards and interest (owner decision, option b):** the forecast stays interest-free. Card balances are projected from recorded and scheduled charges, payments and refunds only, and say so ("Interest and fees you haven't recorded aren't included").
 - **Estimated income:** counted and marked ≈, as in Planning's schedule. Safe to Spend still counts only fixed income.
 
+### One account's own balance (Phase 5A.1)
+When a non-spendable account (savings) can't pay what is due from it, or is overdrawn, the forecast counts the missing part against the spendable accounts as a whole (`coverCents`, now attributed with `coverAccountId`). The forecast's working balance for that account assumes the money is moved in. Before 5A.1 the account view showed that working balance, so overdrawn savings looked like $0.
+
+The account view now shows the account's own balance: working balance − (covered − repaid) for that account so far (`repaidAccountId`: money arriving later that repays a counted overdrawn balance).
+- Savings −$100 stays −$100.
+- Savings $50 paying $120 shows −$70, with "Savings can cover $50.00 of it; the other $70.00 has to come from your spendable accounts (Clarity hasn't chosen which)" and a badge.
+- Money moved in later shows in full (−$100 + $30 = −$70).
+
+Spendable accounts and cards are never adjusted (tested). The combined view, Safe to Spend and every other figure are unchanged: compared with the pre-fix and pre-5A engines on 67 workspaces.
+
 ### Today's starting balance: the cutoff from the last confirmed balance
 The anchor is `balanceAsOfDate`: the opening date, or the latest Update balance or adjustment. The rules are the existing ones (Phase 4A.5.6–4A.5.17), stated here:
 1. A confirmed balance is the bank's **posted** balance. A transaction still pending then, or posted only after that date, is not in it and is counted on top, whatever its date.
@@ -264,8 +274,12 @@ The anchor is `balanceAsOfDate`: the opening date, or the latest Update balance 
 **Which figure starts the trail:**
 - **Opening balance:** the figure entered when the account was added. Every counted transaction since is listed.
 - **Confirmed (from Phase 5A on):** the posted figure entered with Update balance, stored with its time on the account (`Account.balanceConfirmation`, optional, written only by Update balance, never used in a calculation). Items recorded after it are listed. If a transaction dated on or before it was later edited, deleted or posted, the difference is shown as its own line, "Changes since you confirmed it…", so the trail always adds up.
-- **Confirmed before Phase 5A, with an adjustment:** the same figure, worked out from the adjustment's time.
-- **Confirmed before Phase 5A as an exact match (no adjustment):** Clarity has no time to compare with, so the trail starts from the posted balance on that date as now recorded and says it can't tell which items were recorded afterwards.
+- **Confirmed before Phase 5A, with an adjustment** (from Update balance or a statement import): "Balance on <date>, reconstructed", worked out from the adjustment's time. The figure entered then isn't stored, so later edits or deletions of transactions dated on or before it are inside this figure and can't be shown separately; the note says so (Phase 5A.1).
+- **Confirmed before Phase 5A as an exact match (no adjustment):** "Posted balance on <date>, as recorded now". Clarity has neither the time nor the figure, so it can't tell which items were recorded or changed afterwards; the note says so.
+- **Change line (stored confirmations only, Phase 5A.1):**
+  - Transactions dated on or before the confirmation, recorded before it and changed after it (their own `updatedAt`), are named under the change line with their current amount.
+  - How much each one changed can't be known, because earlier versions aren't kept.
+  - Deleted transactions aren't kept either (only encrypted storage tombstones the engine never sees). When nothing is named, the line says it is likely a deletion. Nothing is ever attributed by guess.
 
 Anchor + listed items (+ any change line) = the recorded balance today. Then recorded − pending credits = available = the first day's start in the ledger (tested for every account).
 

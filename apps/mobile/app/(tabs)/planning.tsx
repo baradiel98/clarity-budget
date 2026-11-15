@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from 'react';
 import { ActionSheetIOS, Alert, Platform, Pressable, View } from 'react-native';
 import { catchUp, clearOccurrenceException, deleteRecurring, engineInput, estimateNote, paidThisMonth, warningsBesideCatchUp, recurringAmountView, setOccurrenceException, setRecurringPaused } from '@clarity/data';
 import { annualEquivalentCents, applyWeekendRule, balanceOnDate, buildDailyLedger, buildDashboard, buildForecast, ledgerAccounts, ledgerDayExplanation, computeSafeToSpend, describeSchedule, monthlyEquivalentCents, nextScheduleDate, planningWindowEnd, type Occurrence } from '@clarity/engine';
-import { addDays, CATCHUP_ACTION_LABEL, INCOME_STATUS_LABEL, OCCURRENCE_STATUS_LABEL, CATCHUP_COUNT, CATCHUP_DONE, CATCHUP_HINT, CATCHUP_TITLE, endOfMonth, formatCents, formatShortDate, formatWeekdayDate, LEDGER_ALL_CASH, LEDGER_CARD_NOTE, LEDGER_DAY_DETAILS, LEDGER_DAY_LABEL, LEDGER_SHOW, monthNameLong, PAID_DUE, PAID_EMPTY, PAID_HINT, PAID_TITLE, parseISO, TERMS, type RecurringItem } from '@clarity/shared';
+import { addDays, CATCHUP_ACTION_LABEL, INCOME_STATUS_LABEL, OCCURRENCE_STATUS_LABEL, CATCHUP_COUNT, CATCHUP_DONE, CATCHUP_HINT, CATCHUP_TITLE, endOfMonth, formatCents, formatShortDate, formatWeekdayDate, LEDGER_ALL_CASH, LEDGER_CARD_NOTE, LEDGER_COVER_BADGE, LEDGER_DAY_DETAILS, LEDGER_DAY_LABEL, LEDGER_SHOW, monthNameLong, PAID_DUE, PAID_EMPTY, PAID_HINT, PAID_TITLE, parseISO, TERMS, type RecurringItem } from '@clarity/shared';
 import { setAddPrefill, setExplain } from '../../src/state/nav';
 import { useData, useRun, useSession, useStore } from '../../src/state/session';
 import { Button, LinkButton } from '../../src/ui/Button';
@@ -63,7 +63,7 @@ export default function Planning() {
   const scopeName = data.accounts.find((a) => a.id === scopeId)?.name ?? LEDGER_ALL_CASH;
   const ledger = useMemo(() => buildDailyLedger(engineInput(data, today), scopeId === 'cash' ? { kind: 'cash' } : { kind: 'account', accountId: scopeId }, { forecast }), [data, today, scopeId, forecast]);
   const dayDetails = (date: string) => { const ex = ledgerDayExplanation(engineInput(data, today), ledger, date, { forecast }); if (ex) { setExplain(ex); router.push('/explain'); } };
-  type Row = { key: string; label: string; cents: number; currency: string; occ?: Occurrence; excluded?: string; isIncome: boolean };
+  type Row = { key: string; label: string; cents: number; currency: string; occ?: Occurrence; excluded?: string; isIncome: boolean; covered?: number; infoOnly?: boolean };
   const scheduleDays = useMemo(() => {
     const out: { date: string; end: number; rows: Row[] }[] = [];
     for (const d of ledger.days) {
@@ -78,7 +78,7 @@ export default function Planning() {
           rows.push({ key: e.id, label: e.label, cents, currency, ...(e.occurrence ? { occ: e.occurrence } : {}), ...(e.excluded ? { excluded: e.excluded } : {}), isIncome });
         }
       } else {
-        for (const e of d.entries) rows.push({ key: e.eventId, label: e.label, cents: e.deltaCents, currency: ledger.currency, ...(e.occurrence ? { occ: e.occurrence } : {}), isIncome: e.deltaCents > 0 });
+        for (const e of d.entries) rows.push({ key: e.eventId, label: e.label, cents: e.deltaCents, currency: ledger.currency, ...(e.occurrence ? { occ: e.occurrence } : {}), isIncome: e.deltaCents > 0, ...(e.coveredCents ? { covered: e.coveredCents } : {}), ...(e.deltaCents === 0 ? { infoOnly: true } : {}) });
         for (const e of d.notCounted) rows.push({ key: e.id, label: e.label, cents: 0, currency: ledger.currency, ...(e.occurrence ? { occ: e.occurrence } : {}), excluded: e.excluded ?? 'unknown_amount', isIncome: true });
       }
       // today always: its details show how the day starts
@@ -225,7 +225,8 @@ export default function Planning() {
               <Pressable key={e.key} disabled={!e.occ} onPress={() => e.occ && occActions(e.occ, e.isIncome)} accessibilityRole={e.occ ? 'button' : undefined} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 }}>
                 <T style={{ flex: 1 }} numberOfLines={1}>{e.label}</T>
                 {e.excluded ? <Badge label={e.excluded === 'unknown_amount' ? 'Amount unknown' : 'Not counted'} tone="warn" /> : e.occ && e.occ.status !== 'expected' ? <StatusBadge u={{ status: e.occ.status, isIncome: e.isIncome }} /> : null}
-                {e.excluded ? <T color="textTertiary">—</T> : <Money cents={e.cents} currency={e.currency} sign="always" color={e.cents > 0 ? 'positive' : 'text'} style={{ fontFamily: 'Inter_600SemiBold' }} />}
+                {e.covered ? <View testID="covered-badge"><Badge label={LEDGER_COVER_BADGE(formatCents(e.covered, e.currency))} tone="warn" /></View> : null}
+                {e.excluded || e.infoOnly ? <T color="textTertiary">—</T> : <Money cents={e.cents} currency={e.currency} sign="always" color={e.cents > 0 ? 'positive' : 'text'} style={{ fontFamily: 'Inter_600SemiBold' }} />}
               </Pressable>
             ))}
           </View>

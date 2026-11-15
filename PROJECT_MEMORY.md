@@ -738,3 +738,10 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Assumption]** One-account views list items in the forecast's application order; the combined view sorts money out largest first. The end of the day is the same; intermediate running figures can differ.
 - **[Open]** Pre-5A exact-match confirmations have no stored time, so their trail starts from the posted balance as now recorded, with a note.
 - **[Lesson]** Listing today in the schedule changed the first row; tests should target a day by its content, not by position.
+
+## Phase 5A.1 (2026-11-15): daily ledger display corrections
+- **[Verified]** Account views show the account's OWN balance: forecast working balance − (covered − repaid) for that account (`ForecastEvent.coverAccountId/repaidAccountId`). Only non-spendable accounts are ever adjusted; combined view, Safe to Spend and all financial outputs are identical to before (differential test on 67 workspaces).
+- **[Decision, owner]** Never move an unallocated shortfall into a spendable account; say Clarity hasn't chosen which account covers it.
+- **[Verified]** Older confirmations are labelled reconstructed / as recorded now. Changes after a stored confirmation are named only via each transaction's own `updatedAt`; amounts per change and deleted transactions can't be known (no version history; tombstones live only in encrypted storage).
+- **[Lesson]** A JSON comparison of engine outputs must ignore read-only ledger fields that appear inside events (applied, account snapshots, cover/repaid attribution).
+- **[Open]** Device, Safari and screen-reader QA for 5A/5A.1: `docs/device-test-script.md` §2c, NOT RUN. Phase 4B.5 remains incomplete and untagged.

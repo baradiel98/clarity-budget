@@ -909,6 +909,34 @@ Checkpoints: `phase5a-checkpoint-before` (316a147), engine commit f11ee21. Owner
 
 **Not done (per instruction):** simulation (5B), debt data (5C) and later phases.
 
+## 7ah. Phase 5A.1: daily ledger display corrections (D1–D5 from the final review)
+
+Base: `phase5a-complete` (1ea3d1a, unchanged).
+- **D1:**
+  - Account views show the account's own balance: overdrawn savings stays negative; a payment savings can't fully fund leaves it negative.
+  - Engine: `coverAccountId`/`repaidAccountId` on events, and zero-amount applied legs recorded. Both are output only.
+- **D2:** in that account's view, a note says what the account can cover and what must come from the spendable accounts (Clarity hasn't chosen which), and a badge appears on web and mobile.
+- **D3:** separate summaries. The combined view says money out is "listed largest first" and that the order doesn't change the low or end; the account view says "in the order the forecast applies it to this account".
+- **D4:**
+  - Older confirmations are labelled "reconstructed" / "as recorded now", and the notes explain the limitation.
+  - "Update balance or a statement import" is named as the possible source.
+  - Lines say "recorded after that balance adjustment".
+- **D5:** with a stored confirmation, transactions changed after it are named under the change line (current amount only). Otherwise, a generic line says it is likely a deletion.
+
+**Verified:**
+- Tests:
+  - 12 package tests (`daily-ledger-5a1.test.ts`, mutation-checked);
+  - the 5A invariant updated to the exact new identity;
+  - 1 Chromium e2e test (`phase5a1.spec.ts`);
+  - 1 mobile component test.
+- Differential comparison on 67 workspaces against `phase5a-complete` and `316a147`:
+  - Safe to Spend, dashboard and balance-on-a-date are identical;
+  - the combined ledger and every trail are identical;
+  - only non-spendable account views changed.
+- Backups: new and old both restore.
+
+**Not run:** devices, Safari, screen readers (`docs/device-test-script.md` §2c, all NOT RUN).
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

@@ -19,9 +19,16 @@ import {
   LEDGER_NOT_POSTED_BY,
   LEDGER_PENDING_HELD,
   LEDGER_RECORDED_AFTER,
+  LEDGER_RECORDED_AFTER_ADJUSTMENT,
+  LEDGER_CHANGES_NAMED,
+  LEDGER_CHANGES_UNNAMED,
+  LEDGER_CHANGED_AFTER,
   LEDGER_RECORDED_TODAY,
   LEDGER_START_OF_DAY,
   LEDGER_SUMMARY,
+  LEDGER_SUMMARY_ACCOUNT,
+  LEDGER_COVER_OVERDRAWN,
+  LEDGER_COVER_PAYMENT,
   type Account,
   type Cents,
   type CurrencyCode,
@@ -40,6 +47,13 @@ import { ASSUMPTIONS_BASE, excludedLine, planningWindowEnd, startLines, type Eng
  * applies it), the day's low and its end. Nothing here calculates a balance of its own: every amount is the forecast's
  * (`ForecastEvent.applied`, `cashDeltaCents`, `ForecastDay.accountStartCents/accountEndCents`), so the ledger always
  * agrees with Safe to Spend, Planning and Home. Tests check that each day's items add up to the forecast's own figures.
+ *
+ * Phase 5A.1 (D1): one account is shown with its OWN balance. Where a non-spendable account (savings) can't pay what is
+ * due from it, or is overdrawn, the forecast counts the missing part against the spendable accounts as a whole
+ * (`coverCents`), and its working balance for that account assumes the money is moved in. The account view takes that
+ * part back out (and adds back what `repaidCents` gave to the spendable accounts), so it shows what the account itself
+ * would hold if nothing is moved in: savings −$100 stays −$100; $50 paying $120 shows −$70. The combined view is
+ * unchanged. Identity (tested): account view balance = forecast working balance − (covered − repaid) so far.
  */
 export type LedgerScope = { kind: 'cash' } | { kind: 'account'; accountId: ID };
 export type LedgerBasis = 'planned' | 'scheduled' | 'estimated' | 'overdue' | 'hypothetical' | 'overdrawn';
@@ -56,6 +70,12 @@ export interface LedgerEntry {
   accountIds: ID[];
   /** Why the amount differs from the scheduled one (a capped transfer, a payment covered from spendable accounts). */
   notes: string[];
+  /**
+   * Phase 5A.1 (account view only): the part of this account's payment (or overdrawn balance) it can't cover, counted
+   * against the spendable accounts as a whole. It is still in this account's balance; Clarity doesn't choose which
+   * spendable account covers it.
+   */
+  coveredCents?: Cents;
   occurrence?: Occurrence;
   txId?: ID;
 }
@@ -95,12 +115,20 @@ function accountOfExcluded(e: ForecastEvent, transactions: readonly Transaction[
   return e.occurrence?.accountId ?? (e.txId ? transactions.find((t) => t.id === e.txId)?.accountId : undefined);
 }
 
-function notesFor(e: ForecastEvent, scope: LedgerScope, cur: CurrencyCode): string[] {
+function notesFor(e: ForecastEvent, scope: LedgerScope, cur: CurrencyCode, name: (id: ID) => string): string[] {
   const out: string[] = [];
   if (e.unfundedCents) out.push(`${formatCents(e.unfundedCents, cur)} of it can't be moved: the account it comes from doesn't hold enough, so that part isn't counted`);
-  if (e.source === 'archived_balance') out.push(LEDGER_COVERED);
-  else if (e.coverCents) out.push(`the account it's paid from is short; ${formatCents(e.coverCents, cur)} has to come from your spendable accounts${scope.kind === 'account' ? ', so it is counted there, not here' : ''}`);
-  if (e.repaidCents) out.push(`${formatCents(e.repaidCents, cur)} of it repays an overdrawn balance already counted, so it isn't counted again`);
+  if (e.coverCents && e.coverAccountId) {
+    const who = name(e.coverAccountId);
+    const own = scope.kind === 'account' && scope.accountId === e.coverAccountId;
+    if (e.source === 'archived_balance') out.push(LEDGER_COVER_OVERDRAWN(who, formatCents(e.coverCents, cur), own));
+    else {
+      const total = -(e.legs.find((l) => l.accountId === e.coverAccountId)?.deltaCents ?? 0);
+      const requested = total > 0 ? total : e.coverCents;
+      out.push(LEDGER_COVER_PAYMENT(who, formatCents(requested - e.coverCents, cur), formatCents(e.coverCents, cur), own));
+    }
+  } else if (e.source === 'archived_balance') out.push(LEDGER_COVERED);
+  if (e.repaidCents) out.push(`${formatCents(e.repaidCents, cur)} of it repays an overdrawn balance already counted against your spendable accounts, so it isn't counted again there`);
   return out;
 }
 
@@ -117,7 +145,10 @@ export function buildDailyLedger(input: EngineInput, scope: LedgerScope, opts: {
   if (scope.kind === 'account' && !account) throw new Error('Account not found');
   const cur = account?.currency ?? input.baseCurrency;
   const cashIds = new Set(f.cashAccountIds);
+  const name = (id: ID) => input.accounts.find((a) => a.id === id)?.name ?? 'Account';
   let estimatedIncome = false;
+  /** Account view: what the forecast's working balance holds beyond the account's own money (covered − repaid so far). */
+  let offset = 0;
   const days: LedgerDay[] = f.days.map((d) => {
     const entries: LedgerEntry[] = [];
     let start: Cents;
@@ -133,7 +164,7 @@ export function buildDailyLedger(input: EngineInput, scope: LedgerScope, opts: {
       low = d.lowCashCents;
     } else {
       const id = scope.accountId;
-      start = d.accountStartCents[id] ?? 0;
+      start = (d.accountStartCents[id] ?? 0) - offset;
       const mine = d.events
         .map((e) => ({ e, leg: e.applied?.find((l) => l.accountId === id) }))
         .filter((x): x is { e: ForecastEvent; leg: NonNullable<typeof x.leg> } => !!x.leg)
@@ -141,12 +172,18 @@ export function buildDailyLedger(input: EngineInput, scope: LedgerScope, opts: {
       let run = start;
       low = start;
       for (const { e, leg } of mine) {
-        run += leg.deltaCents;
+        const covered = e.coverAccountId === id ? e.coverCents ?? 0 : 0;
+        const repaid = e.repaidAccountId === id ? e.repaidCents ?? 0 : 0;
+        const own = covered - repaid;
+        const delta = leg.deltaCents - own;
+        offset += own;
+        if (delta === 0 && own === 0) continue; // nothing happened to this account (e.g. a full-balance payment of $0)
+        run += delta;
         if (run < low) low = run;
-        entries.push(entryOf(e, leg.deltaCents, run));
+        entries.push({ ...entryOf(e, delta, run), ...(covered ? { coveredCents: covered } : {}) });
       }
     }
-    const end = scope.kind === 'cash' ? d.endCashCents : d.accountEndCents[scope.accountId] ?? 0;
+    const end = scope.kind === 'cash' ? d.endCashCents : (d.accountEndCents[scope.accountId] ?? 0) - offset;
     const notCounted = f.excludedEvents.filter((e) => {
       if (e.date !== d.date) return false;
       const acct = accountOfExcluded(e, input.transactions);
@@ -160,7 +197,7 @@ export function buildDailyLedger(input: EngineInput, scope: LedgerScope, opts: {
     if (e.estimated && delta > 0 && e.occurrence?.kind === 'income') estimatedIncome = true;
     return {
       eventId: e.id, date: e.date, label: e.label, basis: basisOf(e), deltaCents: delta, balanceAfterCents: after,
-      accountIds: [...(e.applied ?? [])].sort((a, b) => a.seq - b.seq).map((l) => l.accountId), notes: notesFor(e, scope, cur),
+      accountIds: [...(e.applied ?? [])].sort((a, b) => a.seq - b.seq).map((l) => l.accountId), notes: notesFor(e, scope, cur, name),
       ...(e.occurrence ? { occurrence: e.occurrence } : {}), ...(e.txId ? { txId: e.txId } : {}),
     };
   }
@@ -193,6 +230,12 @@ export interface BalanceTrail {
    * date (an edit, a deletion, a payment marked posted). Zero otherwise; it makes the trail add up exactly.
    */
   changesSinceCents: Cents;
+  /**
+   * Phase 5A.1 (D5): with a stored confirmation, transactions on this account dated on or before it, recorded before it
+   * and changed after it (their own `updatedAt`). Only listed when `changesSinceCents` isn't zero. They are the only
+   * changes Clarity can name; how much each changed, and any deleted transaction, can't be known.
+   */
+  changedAfter: { txId: ID; date: ISODate; label: string; cents: Cents; counted: boolean }[];
   /** Transactions dated on the anchor date that are part of the anchor balance (history only), listed, never counted. */
   alreadyIncluded: { txId: ID; date: ISODate; label: string; cents: Cents }[];
   earlierIncludedCount: number;
@@ -253,6 +296,10 @@ export function balanceTrail(input: EngineInput, accountId: ID): BalanceTrail {
     anchor: { kind, date: kind === 'opening' ? account.openingDate : D, cents: anchorCents },
     lines,
     changesSinceCents: recorded - run,
+    changedAfter: conf && recorded !== run
+      ? txs.filter((t) => t.accountId === accountId && t.date <= D && t.createdAt < conf.at && t.updatedAt > conf.at).sort(order)
+        .map((t) => ({ txId: t.id, date: t.date, label: txLabel(t), cents: amt(t), counted: counted.includes(t) }))
+      : [],
     alreadyIncluded: history.filter((t) => t.date === D).sort(order).map((t) => ({ txId: t.id, date: t.date, label: txLabel(t), cents: t.amountCents })),
     earlierIncludedCount: history.filter((t) => t.date < D).length,
     recordedCents: recorded,
@@ -287,10 +334,13 @@ export function ledgerDayExplanation(input: EngineInput, ledger: DailyLedger, da
     for (const a of t.alreadyIncluded) lines.push({ kind: 'info', label: a.label, date: a.date, note: `${formatCents(k * a.cents, cur, { sign: 'always' })} · ${LEDGER_ALREADY_INCLUDED}` });
     if (t.earlierIncludedCount) lines.push({ kind: 'info', label: LEDGER_EARLIER_INCLUDED(t.earlierIncludedCount) });
     for (const l of t.lines) {
-      const why = l.reason === 'recorded_after' ? LEDGER_RECORDED_AFTER : l.reason === 'not_posted' ? LEDGER_NOT_POSTED_BY(formatShortDate(t.anchor.date)) : undefined;
+      const why = l.reason === 'recorded_after' ? (t.anchor.kind === 'confirmed' ? LEDGER_RECORDED_AFTER : LEDGER_RECORDED_AFTER_ADJUSTMENT) : l.reason === 'not_posted' ? LEDGER_NOT_POSTED_BY(formatShortDate(t.anchor.date)) : undefined;
       lines.push({ kind: k * l.deltaCents < 0 ? 'out' : 'in', label: l.label, cents: k * l.deltaCents, date: l.date, note: [l.pending ? LEDGER_BASIS.pending : LEDGER_BASIS.recorded, why].filter(Boolean).join(' · '), balanceAfterCents: k * l.balanceAfterCents });
     }
-    if (t.changesSinceCents) lines.push({ kind: k * t.changesSinceCents < 0 ? 'out' : 'in', label: LEDGER_CHANGES_SINCE(formatShortDate(t.anchor.date)), cents: k * t.changesSinceCents, balanceAfterCents: k * t.recordedCents });
+    if (t.changesSinceCents) {
+      lines.push({ kind: k * t.changesSinceCents < 0 ? 'out' : 'in', label: LEDGER_CHANGES_SINCE(formatShortDate(t.anchor.date)), cents: k * t.changesSinceCents, note: t.changedAfter.length ? LEDGER_CHANGES_NAMED : LEDGER_CHANGES_UNNAMED, balanceAfterCents: k * t.recordedCents });
+      for (const c of t.changedAfter) lines.push({ kind: 'info', label: c.label, date: c.date, note: LEDGER_CHANGED_AFTER(formatCents(k * c.cents, cur, { sign: 'always' }), c.counted) });
+    }
     lines.push({ kind: 'start', label: ledger.isCard ? `${LEDGER_RECORDED_TODAY}, owed` : LEDGER_RECORDED_TODAY, cents: k * t.recordedCents });
     if (t.pendingCreditCents) {
       lines.push({ kind: 'out', label: LEDGER_PENDING_HELD, cents: -t.pendingCreditCents, note: "pending; it's in your recorded balance but not counted until it clears", balanceAfterCents: t.availableCents });
@@ -308,7 +358,10 @@ export function ledgerDayExplanation(input: EngineInput, ledger: DailyLedger, da
   for (const e of day.entries) {
     const others = account ? e.accountIds.filter((id) => id !== account.id).map(name) : [];
     const where = account ? (others.length ? `${e.deltaCents < 0 ? 'to' : 'from'} ${others.join(', ')}` : '') : e.accountIds.map(name).join(' → ');
-    lines.push({ kind: k * e.deltaCents < 0 ? 'out' : 'in', label: e.label, cents: k * e.deltaCents, date: e.date, note: [LEDGER_BASIS[e.basis], where, ...e.notes].filter(Boolean).join(' · '), balanceAfterCents: k * e.balanceAfterCents });
+    const note = [LEDGER_BASIS[e.basis], where, ...e.notes].filter(Boolean).join(' · ');
+    // Phase 5A.1: an item that doesn't change this account's own balance (its overdrawn balance counted elsewhere) is information only
+    if (e.deltaCents === 0) lines.push({ kind: 'info', label: e.label, date: e.date, note, balanceAfterCents: k * e.balanceAfterCents });
+    else lines.push({ kind: k * e.deltaCents < 0 ? 'out' : 'in', label: e.label, cents: k * e.deltaCents, date: e.date, note, balanceAfterCents: k * e.balanceAfterCents });
   }
   if (day.entries.length && day.lowCents < Math.min(day.startCents, day.endCents) && !ledger.isCard) lines.push({ kind: 'info', label: LEDGER_LOWEST, cents: day.lowCents });
   lines.push({ kind: 'result', label: ledger.isCard ? `${LEDGER_END_OF_DAY}, owed` : LEDGER_END_OF_DAY, cents: k * day.endCents });
@@ -318,7 +371,7 @@ export function ledgerDayExplanation(input: EngineInput, ledger: DailyLedger, da
   return {
     title: `${formatWeekdayDate(date)} · ${scopeName}`,
     resultCents: k * day.endCents,
-    summary: LEDGER_SUMMARY,
+    summary: account ? LEDGER_SUMMARY_ACCOUNT : LEDGER_SUMMARY,
     lines,
     assumptions,
     ...(cur !== input.baseCurrency ? { currency: cur } : {}),

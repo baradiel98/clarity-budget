@@ -274,9 +274,14 @@ function checkInvariants(input: EngineInput) {
   });
   for (const a of input.accounts) {
     const l = buildDailyLedger(input, { kind: 'account', accountId: a.id }, { forecast: f });
+    // Phase 5A.1 (D1): the account's own balance = the forecast's working balance − (covered − repaid) for this account so far
+    let own = 0;
     l.days.forEach((d, i) => {
+      for (const e of f.days[i]!.events) own += (e.coverAccountId === a.id ? e.coverCents ?? 0 : 0) - (e.repaidAccountId === a.id ? e.repaidCents ?? 0 : 0);
       expect(d.startCents + d.entries.reduce((s, e) => s + e.deltaCents, 0)).toBe(d.endCents);
-      expect(d.endCents).toBe(f.days[i]!.accountEndCents[a.id]);
+      expect(d.endCents).toBe(f.days[i]!.accountEndCents[a.id]! - own);
+      // a spendable account or a card is never adjusted: only non-spendable accounts carry covered or repaid amounts
+      if (f.cashAccountIds.includes(a.id) || a.type === 'credit_card') expect(own).toBe(0);
       if (i > 0) expect(d.startCents).toBe(l.days[i - 1]!.endCents);
       expect(d.lowCents).toBeLessThanOrEqual(Math.min(d.startCents, d.endCents));
     });

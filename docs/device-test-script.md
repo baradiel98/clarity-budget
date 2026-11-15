@@ -102,6 +102,29 @@ Start with **Sample data** for M13–M20 (nothing is saved). Use a new test work
 | M24 | Largest system text size: Home, Catch up, Add | Text scales (capped); buttons stay tappable; no overlapping text |
 | M25 | Welcome screen on a 375–390pt phone | "Restore backup" may wrap onto two lines inside its button (seen in the web rendering); note whether it does on the device |
 
+## 2c. Phase 5A daily ledger (iPhone and Android): NOT RUN
+None of these has been run on a real device, a simulator, Safari, VoiceOver or TalkBack. Browser automation (Chromium) and component tests in Node covered the logic and the web layout only (`apps/web/e2e/phase5a*.spec.ts`, `apps/mobile/test/phase5a*.test.tsx`); that is **not** device QA. Use sample data unless a step says otherwise.
+
+| # | Step | Expected | Status |
+|---|---|---|---|
+| P1 | Planning → "Show" → pick each account from the sheet (All spendable cash, Everyday Checking, Savings, Visa Card) | The sheet lists every account plus Cancel; the chip shows the chosen account; the schedule updates | NOT RUN |
+| P2 | Day details on today and on Wed, Nov 18 (Everyday Checking) | Lines scroll; every item shows its amount and the balance after it underneath (Nov 18: Electricity ≈ −$91.40, $2,779.83); Done returns to Planning | NOT RUN |
+| P3 | Show → Visa Card | Day ends read "Owed $…"; the note says interest and fees you haven't recorded aren't included | NOT RUN |
+| P4 | Add an $85 purchase today from Everyday Checking, reopen today's Day details | It appears once, labelled Recorded, with $2,786.23 after it | NOT RUN |
+| P5 | New workspace: Update balance on an account, then add a purchase dated the same day; open today's Day details for that account | Starts at "Confirmed balance (date)" with the figure entered; the purchase line says "recorded after you confirmed the balance" | NOT RUN |
+| P6 | Make a backup on the phone, restore it on the web (and the reverse); compare P5's Day details | Same lines and figures on both | NOT RUN |
+| P7 | Smallest phone (iPhone SE / 360dp) and the largest system text size; Planning schedule and Day details | The day header (date, amount, Day details) and badges don't clip or overlap; Day details stays tappable (44pt / 48dp) | NOT RUN |
+| P8 | Add a $6,000 purchase from Savings dated Nov 20 (Savings holds $5,200); Show → Savings | Nov 20 ends at −$800.00 with a "$800.00 counted against spendable accounts" badge; Day details explains $5,200 covered, $800 from spendable accounts, Clarity hasn't chosen which | NOT RUN |
+
+### Accessibility (VoiceOver on iPhone, TalkBack on Android): NOT RUN
+| # | Step | Expected | Status |
+|---|---|---|---|
+| A1 | Swipe to a day's "Day details" | Reads "Day details: Wed, Nov 18, Everyday Checking" (date and scope) | NOT RUN |
+| A2 | In Day details, swipe through the lines | Each line reads its label, amount and "Balance after: $…". Known risk: each line is grouped as one element on mobile, so the "Balance after" label may not be spoken; record what is read | NOT RUN |
+| A3 | Focus the "Show" chip | Reads "Show: <account>. Change" and opens the sheet on double-tap | NOT RUN |
+
+Safari (macOS and iOS): Planning's Show menu, Day details drawer, and P8 on the web app: NOT RUN.
+
 ## 3. Desktop web only
 | # | Step | Expected |
 |---|---|---|

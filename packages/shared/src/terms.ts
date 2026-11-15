@@ -239,24 +239,43 @@ export const LEDGER_END_OF_DAY = 'End of day';
 export const LEDGER_LOWEST = 'Lowest during the day';
 export const LEDGER_BALANCE_AFTER = 'Balance after';
 export const LEDGER_OWED_AFTER = 'Owed after';
-export const LEDGER_SUMMARY = 'How the end-of-day balance is worked out: the balance at the start of the day, then each item in the order the forecast applies it (money going out before money coming in). The same numbers Safe to Spend and Planning use.';
+/** Phase 5A.1 (D3): the combined view arranges money going out largest first; that is a presentation order, not the forecast's. */
+export const LEDGER_SUMMARY = "How the end-of-day balance is worked out: the balance at the start of the day, then the day's money going out (listed largest first), then the money coming in. The forecast counts all of a day's money going out before any money coming in, so the order of the outgoing items doesn't change the day's lowest point or its end. The same numbers Safe to Spend and Planning use.";
+export const LEDGER_SUMMARY_ACCOUNT = "How this account's end-of-day balance is worked out: the balance at the start of the day, then each item in the order the forecast applies it to this account. The same forecast Safe to Spend and Planning use.";
+/** Phase 5A.1 (D1/D2): a payment or overdrawn balance a non-spendable account can't cover itself. */
+export const LEDGER_COVER_PAYMENT = (account: string, canCover: string, rest: string, own: boolean) =>
+  `${account} can cover ${canCover} of it; the other ${rest} has to come from your spendable accounts (Clarity hasn't chosen which).${own ? ` The balance shown is what ${account} would hold if nothing is moved in.` : ''}`;
+export const LEDGER_COVER_OVERDRAWN = (account: string, amount: string, own: boolean) =>
+  `${account} is overdrawn by ${amount}. Safe to Spend counts it against your spendable accounts (Clarity hasn't chosen which).${own ? ' It stays in this account\'s balance until money is moved in.' : ''}`;
+export const LEDGER_COVER_BADGE = (amount: string) => `${amount} counted against spendable accounts`;
 export const LEDGER_ANCHOR: Record<'opening' | 'confirmed' | 'confirmed_from_records' | 'posted_in_records', (date: string) => string> = {
   opening: (d) => `Opening balance (${d})`,
   confirmed: (d) => `Confirmed balance (${d})`,
-  confirmed_from_records: (d) => `Confirmed balance (${d})`,
-  posted_in_records: (d) => `Posted balance on ${d}`,
+  // Phase 5A.1 (D4): figures Clarity works out (the one entered then isn't stored) are never called "confirmed"
+  confirmed_from_records: (d) => `Balance on ${d}, reconstructed`,
+  posted_in_records: (d) => `Posted balance on ${d}, as recorded now`,
 };
 export const LEDGER_ANCHOR_NOTE: Record<'opening' | 'confirmed' | 'confirmed_from_records' | 'posted_in_records', string> = {
   opening: 'the posted balance you entered when you added the account',
   confirmed: 'the posted balance you entered with Update balance',
-  confirmed_from_records: 'your last Update balance, worked out from your records',
-  posted_in_records: "as recorded in Clarity; it can't tell which of these were recorded after you confirmed the balance",
+  confirmed_from_records:
+    "worked out from your records as they were when a balance adjustment was recorded on this date (from Update balance or a statement import). The figure entered then isn't stored, so it may differ from it: later edits or deletions of transactions dated on or before this date are included here and can't be shown separately",
+  posted_in_records:
+    "the balance was confirmed on this date without an adjustment, and Clarity doesn't have the time or figure of that confirmation, so it can't tell which of these transactions were recorded or changed after it",
 };
 export const LEDGER_RECORDED_AFTER = 'recorded after you confirmed the balance';
+export const LEDGER_RECORDED_AFTER_ADJUSTMENT = 'recorded after that balance adjustment';
 export const LEDGER_NOT_POSTED_BY = (d: string) => `not posted by ${d}, so not in that balance`;
 export const LEDGER_ALREADY_INCLUDED = 'Already in this balance, not counted again';
 export const LEDGER_EARLIER_INCLUDED = (n: number) => `${n} earlier transaction${n === 1 ? ' is' : 's are'} part of this balance and not counted again.`;
 export const LEDGER_CHANGES_SINCE = (d: string) => `Changes since you confirmed it to transactions dated on or before ${d}`;
+/**
+ * Phase 5A.1 (D5): Clarity keeps no earlier versions of a transaction and no record of deleted ones, so it can name
+ * transactions changed after the confirmation (their own change time) but never how much each one changed.
+ */
+export const LEDGER_CHANGES_NAMED = "Clarity doesn't keep earlier versions of a transaction, so it can't show how much each one below changed. A deleted transaction can't be listed.";
+export const LEDGER_CHANGES_UNNAMED = "No transaction dated on or before that date was edited after you confirmed it, so this is likely a deleted transaction. Clarity doesn't keep deleted transactions, so it can't name it.";
+export const LEDGER_CHANGED_AFTER = (now: string, counted: boolean) => `changed after you confirmed this balance; now ${now}${counted ? '' : ', not counted'}`;
 export const LEDGER_RECORDED_TODAY = 'Recorded balance today';
 export const LEDGER_PENDING_HELD = 'Pending credits not yet available';
 export const LEDGER_AVAILABLE_TODAY = 'Available at the start of today';
