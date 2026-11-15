@@ -255,7 +255,7 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
     if (r.ok) {
       toast({ message: 'Transaction deleted', action: { label: 'Undo', run: () => void store.undo() } });
       onClose();
-    }
+    } else setErrors({ delete: r.errors.map((x) => x.message).join(' ') }); // Phase 4A.7: e.g. a payment with returns
   };
 
   if (data.accounts.filter((a) => !a.archived).length === 0) {
@@ -418,7 +418,7 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
           </div>
         )}
         {/* Phase 4A.5.14: also changes refused because another tab changed the data (stale) or because a linked item can't be made pending (status) */}
-        {(errors.form ?? errors.includedInBalance ?? errors.stale ?? errors.status ?? errors.transfer) && <div className="error-text" role="alert" data-testid="form-error">{errors.form ?? errors.includedInBalance ?? errors.stale ?? errors.status ?? errors.transfer}</div>}
+        {(errors.form ?? errors.return ?? errors.delete ?? errors.includedInBalance ?? errors.stale ?? errors.status ?? errors.transfer) && <div className="error-text" role="alert" data-testid="form-error">{errors.form ?? errors.return ?? errors.delete ?? errors.includedInBalance ?? errors.stale ?? errors.status ?? errors.transfer}</div>}
       </form>
     </Dialog>
   );

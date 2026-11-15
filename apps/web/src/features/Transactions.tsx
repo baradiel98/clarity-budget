@@ -1,6 +1,6 @@
 import { ArrowDown, ArrowUp, ReceiptText, Search, Sparkles, Trash2, Upload } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { deleteTransaction, transferSettlement, type Op } from '@clarity/data';
+import { deleteTransactions, transferSettlement, type Op } from '@clarity/data';
 import { balanceAsOfDate, historyStatus, periodTotals } from '@clarity/engine';
 import { addDays, BEFORE_OPENING_BADGE, BEFORE_OPENING_REASON, endOfMonth, formatMonthYear, formatShortDate, HISTORY_ONLY_BADGE, HISTORY_ONLY_REASON, startOfMonth, TERMS, type Transaction } from '@clarity/shared';
 import { isFresh } from '../state/fresh';
@@ -95,21 +95,12 @@ export function Transactions() {
   const visible = rows.slice(0, limit);
 
   const remove = async (ids: string[]) => {
-    const seen = new Set<string>();
-    const r = await run((ctx) => {
-      const ops: Op[] = [];
-      for (const id of ids) {
-        const t = ctx.data.transactions.find((x) => x.id === id);
-        if (!t || seen.has(t.transferGroupId ?? t.id)) continue;
-        seen.add(t.transferGroupId ?? t.id);
-        ops.push(...deleteTransaction(ctx, id));
-      }
-      return ops;
-    }, { undoLabel: 'Delete' });
+    // Phase 4A.7: a card payment with recorded returns can't be deleted on its own; nothing is deleted and the reason is shown
+    const r = await run((ctx) => deleteTransactions(ctx, ids.filter((id) => ctx.data.transactions.some((x) => x.id === id))), { undoLabel: 'Delete' });
     if (r.ok) {
       setSelected(new Set());
       toast({ message: ids.length === 1 ? 'Transaction deleted' : `${ids.length} transactions deleted`, action: { label: 'Undo', run: () => void store.undo() } });
-    }
+    } else toast({ message: `Nothing was deleted: ${r.errors.map((e) => e.message).join(' ')}` });
   };
 
   const recategorize = async (cat: string | null) => {

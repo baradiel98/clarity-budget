@@ -2,7 +2,7 @@ import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { KeyboardAvoidingView, Platform, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { addTransactions } from '@clarity/data';
+import { saveCaptured } from '@clarity/data';
 import { CaptureView } from '../src/features/Capture';
 import { useData, useRun, useSession, useStore } from '../src/state/session';
 import { LinkButton } from '../src/ui/Button';
@@ -35,7 +35,7 @@ export default function CaptureScreen() {
           disabled={demo}
           onAddManually={() => router.push('/add')}
           approve={async (inputs) => {
-            const r = await run((ctx) => addTransactions(ctx, inputs), { undoLabel: `Captured ${inputs.length}` });
+            const r = await run((ctx) => saveCaptured(ctx, inputs), { undoLabel: `Captured ${inputs.length}` }); // Phase 4A.7: returns recorded as returns
             if (!r.ok) return r.errors.map((e) => e.message).join(' ');
             void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             toast({ message: inputs.length === 1 ? 'Saved 1 transaction' : `Saved ${inputs.length} transactions`, action: { label: 'Undo', run: () => void store.undo() } });

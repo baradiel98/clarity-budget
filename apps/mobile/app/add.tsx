@@ -3,7 +3,7 @@ import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { addTransaction, deleteTransaction, markPostedBeforeOpening, matchOptionView, recordPaymentReturn, returnOptionsForEntry, updateTransaction, type TxInput } from '@clarity/data';
+import { addTransaction, deleteProblem, deleteTransaction, markPostedBeforeOpening, matchOptionView, recordPaymentReturn, returnOptionsForEntry, updateTransaction, type TxInput } from '@clarity/data';
 import { addDays, ALREADY_INCLUDED_HINT, ALREADY_INCLUDED_LABEL, OPENING_POSTED_HINT, OPENING_POSTED_LABEL, RETURN_ASK_LINK, RETURN_CHECK_TITLE, RETURN_DECIDE_HINT, RETURN_NEEDS_DECISION, RETURN_SEPARATE_LABEL, centsToDecimalString, formatCents, formatShortDate, legsPendingOf, parseAmountInput, TERMS, transferChoiceOf, TRANSFER_STATUS_HINT, TRANSFER_STATUS_LABEL, transferStatusOptions } from '@clarity/shared';
 import { balanceAsOfDate, buildMerchantMemory, inclusionProblem, expandOccurrences, findPossibleDuplicates, merchantKey, suggestOccurrenceMatch } from '@clarity/engine';
 import { Check } from '../src/features/Welcome';
@@ -180,7 +180,7 @@ export default function AddScreen() {
         <LinkButton title="Cancel" color="textSecondary" onPress={() => router.back()} />
         <T variant="headline" accessibilityRole="header">{isEdit ? 'Edit transaction' : prefill.occurrenceName ? `Record ${prefill.occurrenceName}` : TERMS.addTransaction}</T>
         {isEdit ? (
-          <LinkButton title="Delete" color="negative" onPress={() => Alert.alert('Delete this transaction?', undefined, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: async () => { const r = await run((ctx) => deleteTransaction(ctx, src!.id), { undoLabel: 'Delete' }); if (r.ok) { toast({ message: 'Transaction deleted', action: { label: 'Undo', run: () => void store.undo() } }); router.back(); } } }])} />
+          <LinkButton title="Delete" color="negative" onPress={() => { const why = deleteProblem(data, src!.id); if (why) { fail(why); return; } Alert.alert('Delete this transaction?', undefined, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: async () => { const r = await run((ctx) => deleteTransaction(ctx, src!.id), { undoLabel: 'Delete' }); if (r.ok) { toast({ message: 'Transaction deleted', action: { label: 'Undo', run: () => void store.undo() } }); router.back(); } else fail(r.errors.map((e) => e.message).join(' ')); } }]); }} />
         ) : <View style={{ width: 52 }} />}
       </View>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 16, gap: 14, paddingBottom: 16 }}>

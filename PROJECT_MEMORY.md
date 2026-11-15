@@ -462,13 +462,37 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
   - Partial and multiple returns, capped at the payment total (`paymentReturnStatus`).
   - Older-than-30-day returns: suggested with description evidence, and always selectable by the user.
   - Review rows confirmed as returns hide type/category and say what is recorded. The button reads "Record N returned payment(s)".
-  - Deleting a payment deletes its returns.
+  - ~~Deleting a payment deletes its returns.~~ **Superseded (4A.7):** deleting a payment with returns is refused.
   - Opening correction `markPostedBeforeOpening`, with a button in the Edit form.
 - **[Decisions, mine; documented]**
   - Partial amounts and older payments are suggested only with description evidence; otherwise the user picks them via "This is a returned card payment…".
   - "Decide later" means closing the form without saving.
 - **[Lesson]** The first engine generalisation kept the returned share in the card's recorded balance (−$300 instead of −$500); Safe to Spend was right but the account figure misleading. `effectiveAmount` fixes it.
 - **[Known limitations]**
-  - A return typed in as income through other paths (Clarity Capture, recurring confirmation) isn't checked.
+  - ~~A return typed in as income through other paths (Clarity Capture, recurring confirmation) isn't checked.~~ **Superseded (4A.6/4A.7):** recurring confirmation already used the Add form's check; Capture now checks too.
   - Partial returns of transfer fees aren't modelled.
   - The opening correction is offered for non-transfer items only; a transfer leg uses the statement-link route.
+
+## Phase 4A.7 (2026-11-15): transaction lifecycle integrity (audit 4A.6 H1, H2, H3, M1, M2)
+- **[Confirmed policy, owner-specified in the phase brief]** A card payment and its returns stay linked. Unsafe actions are refused, never auto-resolved:
+  - undoing the import that created a payment with recorded returns is refused (no partial undo, no return deleted to make it work);
+  - deleting such a payment is refused (supersedes 4A.5.18's cascade delete);
+  - editing it below the returned total, to another account or card, to a non-transfer, or after its first return date is refused;
+  - Capture asks the same return question as the Add form, and saves confirmed returns through `recordPaymentReturn`.
+- **[Verified implementation]**
+  - `packages/data/src/commands.ts`: `paymentReturns`, `deleteProblem`, `deleteTransactions` (bulk; returns first), `returnEditProblem` (in `updateTransaction`, which now also keeps `returnOf` on an edited return), the dependent-return check in `importUndoProblem`, `CaptureItem` and `saveCaptured` (with a data-layer check for undecided captured income), and `recordPaymentReturn({ provenance })`.
+  - `packages/capture`: `draftReturnOptions`, `chosenReturnOf`, `toCaptureItem`, the `possible_return`/`return_unavailable` issues, and the draft fields `returnChoice`/`askReturn` (never copied from interpreter output).
+  - Web and mobile Capture show the decision. Web and mobile delete paths explain refusals: the web Edit form error, the list toast "Nothing was deleted: …", the mobile Edit form message, and the list alert "Can't delete this payment".
+- **[Data model]** No schema change and no migration. Only optional draft fields (in memory, never stored) and an optional `provenance` input.
+- **[Decisions, mine; documented]**
+  - Resolving a dependency means deleting the return, or undoing the import that recorded it.
+  - Undoing an import that only linked (posted) a payment stays allowed.
+  - A card payment captured in the same entry doesn't trigger the check on a deposit.
+  - A captured return is named after the merchant the user wrote, or "Returned payment".
+- **[Lesson]** Sample-data (demo) mode turns Capture approval off, so browser tests of Capture saving must use a fresh workspace.
+- **[Lesson]** A guard in one entry path (the Add form) doesn't protect the books: every entry, edit, delete and undo command needs the same rule at the data layer.
+- **[Known limitations]**
+  - If the user deletes an imported return and then its payment (both explicit), re-importing the return's statement offers the row as ordinary income (no payment left to match). The file is flagged as already imported, but the row isn't.
+  - Partial returns of transfer fees aren't modelled.
+  - Not verified on simulators, devices, Safari or with a screen reader.
+

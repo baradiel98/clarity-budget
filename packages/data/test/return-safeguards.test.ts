@@ -149,13 +149,19 @@ describe('dates, duplicates and other paths', () => {
     expect([b.sts(), inTransit(b)]).toEqual([50000, [20000]]);
     expect(row(b.review(c, [['2026-09-12', 'RETURNED PAYMENT', 20000, 100000]]), 'RETURNED PAYMENT').matchCandidates.map((x) => x.basis)).toEqual(['return']);
   });
-  it('editing the original payment ($200 → $300 after an $80 return) keeps the return; deleting the payment deletes its returns', () => {
+  it('editing the original payment ($200 → $300 after an $80 return) keeps the return; Phase 4A.7: the payment can be deleted only after its return', () => {
     const { b, c, v } = setup();
     const t = b.transfer(c, v, '2026-09-10', 20000);
     manualReturn(b, t.out.id, c, 8000);
     b.data = applyOps(b.data, updateTransaction(b.ctx(), t.out.id, { kind: 'transfer', accountId: c, toAccountId: v, date: '2026-09-10', amountCents: 30000, merchant: 'Transfer', categoryId: null, status: 'pending' }).ops);
     // checking 1,000 − 300 + 80 = 780; Visa 500 − 220 = 280 → 500
     expect([b.sts(), inTransit(b)]).toEqual([50000, [22000]]);
+    // Phase 4A.7 (supersedes 4A.5.18's cascade): refused, nothing changes; the return is deleted first, then the payment
+    expect(() => deleteTransaction(b.ctx(), t.out.id)).toThrow(/can't be deleted while a return is recorded/);
+    const ret = b.data.transactions.find((x) => x.returnOf && x.accountId === c)!;
+    b.data = applyOps(b.data, deleteTransaction(b.ctx(), ret.id));
+    // checking 1,000 − 300 = 700; Visa 500 − 300 in transit = 200 → 500
+    expect([b.sts(), inTransit(b)]).toEqual([50000, [30000]]);
     b.data = applyOps(b.data, deleteTransaction(b.ctx(), t.out.id));
     expect([b.sts(), b.data.transactions.length]).toEqual([50000, 0]);
   });

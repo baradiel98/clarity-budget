@@ -1,7 +1,7 @@
 import { isValidISO, type ISODate } from '@clarity/shared';
-import type { TxInput } from '@clarity/data';
+import type { CaptureItem, TxInput } from '@clarity/data';
 import type { CaptureContext, CaptureDraft, DraftKind, DraftSplit, IssueCode, TransferRole } from './types';
-import { reviewDraft } from './review';
+import { chosenReturnOf, draftReturnOptions, reviewDraft } from './review';
 
 /**
  * Interpreter output is untrusted (today it is the local interpreter; later it could be a cloud model).
@@ -79,7 +79,10 @@ export function parseDrafts(raw: unknown, ctx: CaptureContext): ParseResult {
  */
 export function toTxInput(d: CaptureDraft, ctx: CaptureContext): TxInput | null {
   if (reviewDraft(d, ctx).some((i) => i.blocking)) return null;
-  const provenance = { source: 'capture' as const, rawDescription: d.sourceText.slice(0, 500) };
+  if (d.returnChoice && d.returnChoice !== 'separate') return null; // a return is recorded with toCaptureItem
+  // Phase 4A.7: the user said it's separate income: the payments it could have been are kept on record
+  const separateFrom = d.returnChoice === 'separate' ? draftReturnOptions(d, ctx).map((m) => m.txId) : [];
+  const provenance = { source: 'capture' as const, rawDescription: d.sourceText.slice(0, 500), ...(separateFrom.length ? { separateFrom } : {}) };
   const base = { accountId: d.accountId!, date: d.date!, amountCents: d.amountCents!, provenance };
   if (d.kind === 'transfer') {
     const to = ctx.accounts.find((a) => a.id === d.toAccountId)!;
@@ -90,4 +93,17 @@ export function toTxInput(d: CaptureDraft, ctx: CaptureContext): TxInput | null 
     return { ...base, kind: 'expense', merchant: d.merchant.trim(), categoryId: null, splits: d.splits.map((s) => ({ categoryId: s.categoryId!, amountCents: s.amountCents })) };
   }
   return { ...base, kind: d.kind, merchant: d.merchant.trim(), categoryId: d.categoryId };
+}
+
+/**
+ * Phase 4A.7: an approved draft → what Capture saves (saveCaptured): a new transaction, or, when the user confirmed it
+ * is a returned card payment, that return (the same accounting as the Add form and the import review), named after
+ * the merchant the user wrote, or "Returned payment" when none was named. Null while anything still blocks it.
+ */
+export function toCaptureItem(d: CaptureDraft, ctx: CaptureContext): CaptureItem | null {
+  if (reviewDraft(d, ctx).some((i) => i.blocking)) return null;
+  const ret = chosenReturnOf(d, ctx);
+  if (ret) return { paymentReturn: { paymentLegId: ret.txId, accountId: d.accountId!, amountCents: d.amountCents!, date: d.date!, merchant: (d.merchantSource === 'words' && d.merchant.trim()) || 'Returned payment', provenance: { source: 'capture', rawDescription: d.sourceText.slice(0, 500) } } };
+  const input = toTxInput(d, ctx);
+  return input ? { input } : null;
 }

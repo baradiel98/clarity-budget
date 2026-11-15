@@ -53,6 +53,14 @@ export interface CaptureDraft {
   sourceText: string;
   /** Issue codes the user has confirmed (approximate amount, assumed date, possible duplicate…). */
   acknowledged: IssueCode[];
+  /**
+   * Phase 4A.7: the user's answer to "is this money a returned card payment?": the payment leg it is the return of,
+   * 'separate' (it's separate income), or unset (not decided). Only ever set by the user in the review, never by the
+   * interpreter (parseDrafts never copies it).
+   */
+  returnChoice?: string | 'separate' | null;
+  /** Phase 4A.7: the user asked to see every card payment this could be a return of (not only the suggestions). */
+  askReturn?: boolean;
 }
 
 export type IssueCode =
@@ -64,11 +72,12 @@ export type IssueCode =
   | 'to_account_missing' | 'same_account'
   | 'kind_unclear'
   | 'splits_mismatch' | 'split_category_missing'
-  | 'duplicate';
+  | 'duplicate'
+  | 'possible_return' | 'return_unavailable';
 
 export interface Issue {
   code: IssueCode;
-  field: 'amount' | 'date' | 'merchant' | 'category' | 'account' | 'toAccount' | 'kind' | 'splits' | 'currency';
+  field: 'amount' | 'date' | 'merchant' | 'category' | 'account' | 'toAccount' | 'kind' | 'splits' | 'currency' | 'return';
   message: string;
   /** Blocks approval until fixed (or confirmed, when `confirmable`). */
   blocking: boolean;

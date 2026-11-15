@@ -601,6 +601,45 @@ Owner policy: each transfer leg settles on its own; money in transit isn't spend
   - The opening correction is for non-transfer items only (a transfer leg uses the statement-link route).
   - Not verified on simulators, devices, Safari or with a screen reader.
 
+## 7w. Phase 4A.7: transaction lifecycle integrity (audit 4A.6 H1, H2, H3, M1, M2)
+
+| Case (checking $1,000, Visa owes $500, $200 payment; truth by hand) | Truth | Before (77f8fc9) | After |
+|---|---:|---:|---:|
+| H1: the returned $200 entered through Clarity Capture | $500 | $700 (saved as income) | **$500** (Capture asks; return recorded) |
+| H2: undo the import that created the payment, after its return | refused or consistent | checking $1,200, Visa $700, orphaned return | **refused**, nothing changed; allowed once the return is removed |
+| H3: fully returned $200 payment edited to $100 | refused | $600 ($100 created) | **refused**, $500 |
+| M2: returned payment's card changed Visa → Savings | refused | Visa $700, Savings $200, $300 | **refused**, $500 |
+| M1: delete a payment that has an imported return | refused | return silently deleted; "Removed 0 imported transactions" | **refused**, history and links intact |
+
+- **Policy (as specified):** refuse unsafe actions; never auto-delete a return to make an action succeed. Rules: `docs/calculation-rules.md` ("Returned payments: lifecycle integrity").
+- **Data layer (both apps):**
+  - `deleteProblem` and `deleteTransactions`;
+  - `returnEditProblem` in `updateTransaction`, which also keeps `returnOf` on edited returns;
+  - the dependent-return check in `importUndoProblem`;
+  - `saveCaptured`, which refuses undecided captured income;
+  - `recordPaymentReturn` provenance.
+- **Capture:** `draftReturnOptions`, `chosenReturnOf`, `toCaptureItem`, and the issues `possible_return` / `return_unavailable`. Web and mobile Capture show the same choice as the Add form.
+- **Data model:** no schema change and no migration.
+- **Superseded:** 4A.5.18's "deleting a payment deletes its returns". One existing test was updated to the new policy, with hand-calculated values.
+- **Tests (all after the final code change):**
+  - **Unit:** vitest 699 passed, 1 skipped (41 files).
+  - New unit files:
+    - `packages/data/test/lifecycle-integrity.test.ts`: 20 tests covering undo, edit, delete, re-import, two-tab stale undo, and multiple returns.
+    - `packages/capture/test/capture-returns.test.ts`: 11 tests covering full, partial, multiple payments, genuine income, several items, draft edits, settlement orders, the data-layer refusal, and that the interpreter can't decide.
+    - `packages/capture/test/lifecycle-randomized.test.ts`: the randomized model below.
+  - **Mobile:** jest 61 passed (16 suites). New: 3 Capture return tests and `test/lifecycle-integrity.test.tsx` (3 delete tests).
+  - **Browser:** Playwright 179 passed, 10 skipped (Chromium). New: `e2e/phase4a7.spec.ts`, 3 tests covering a Capture return, several items with "separate income", and a refused delete in the Edit dialog and in the list.
+  - **Checks:** root, web and mobile typechecks clean; lint clean; iOS and Android bundles exported.
+- **Randomized independent model:**
+  - **Scale:** 300 scenarios, 3,440 actions, 308 expected refusals verified to change nothing.
+  - **Result:** 0 mismatches in Safe to Spend or checking balance, and 0 orphaned returns. There is no re-sync, so any mismatch would fail the test.
+  - **Mutation check:** disabling the undo, delete or edit guard makes it fail.
+  - This is evidence, not proof.
+- **Limitations:**
+  - After the user explicitly deletes an imported return and then its payment, re-importing the return statement offers the row as income (the file is flagged as already imported, but the row isn't).
+  - In Capture, the Category field stays visible after "It's the return" is chosen. It is not saved: a return has no category.
+  - Not verified on simulators, devices, Safari or with a screen reader.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

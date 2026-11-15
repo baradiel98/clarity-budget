@@ -1,9 +1,9 @@
 import { AlertTriangle, Check, Info, ShieldCheck, Trash2 } from 'lucide-react-native';
 import { useMemo, useState, useSyncExternalStore } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
-import { captureTotals, localInterpreter, parseDrafts, reviewDraft, toTxInput, type CaptureContext, type CaptureDraft, type DraftKind, type Issue } from '@clarity/capture';
-import type { TxInput } from '@clarity/data';
-import { centsToDecimalString, formatCents, parseAmountInput, type WorkspaceData } from '@clarity/shared';
+import { captureTotals, chosenReturnOf, draftReturnOptions, localInterpreter, parseDrafts, reviewDraft, toCaptureItem, type CaptureContext, type CaptureDraft, type DraftKind, type Issue } from '@clarity/capture';
+import { matchOptionView, type CaptureItem } from '@clarity/data';
+import { centsToDecimalString, formatCents, parseAmountInput, RETURN_ASK_LINK, RETURN_CHECK_TITLE, RETURN_DECIDE_HINT, RETURN_SEPARATE_LABEL, type WorkspaceData } from '@clarity/shared';
 import { captureStore } from '../state/capture';
 import { Button } from '../ui/Button';
 import { DateField } from '../ui/DateField';
@@ -53,8 +53,8 @@ function Choices<V extends string>({ label, value, options, onChange }: { label:
 export interface CaptureViewProps {
   data: WorkspaceData;
   today: string;
-  /** Saves the inputs atomically. Returns an error message, or null on success. */
-  approve: (inputs: TxInput[]) => Promise<string | null>;
+  /** Saves the approved drafts atomically (saveCaptured). Returns an error message, or null on success. */
+  approve: (items: CaptureItem[]) => Promise<string | null>;
   onAddManually: () => void;
   disabled?: boolean;
 }
@@ -92,10 +92,10 @@ export function CaptureView({ data, today, approve, onAddManually, disabled }: C
 
   const update = (id: string, patch: Partial<CaptureDraft>) => captureStore.set((s) => ({ drafts: s.drafts.map((d) => (d.id === id ? { ...d, ...patch } : d)) }));
   const doApprove = async (ids: string[]) => {
-    const inputs = st.drafts.filter((d) => ids.includes(d.id)).map((d) => toTxInput(d, ctx));
+    const inputs = st.drafts.filter((d) => ids.includes(d.id)).map((d) => toCaptureItem(d, ctx));
     if (!inputs.length || inputs.some((x) => !x)) return;
     setSaving(true);
-    const err = await approve(inputs as TxInput[]);
+    const err = await approve(inputs as CaptureItem[]);
     setSaving(false);
     if (err) { captureStore.set({ error: `Nothing was saved: ${err} Your drafts are still here.` }); return; }
     captureStore.set((s) => ({ drafts: s.drafts.filter((d) => !ids.includes(d.id)), error: null, saved: s.saved + inputs.length }));
@@ -145,7 +145,7 @@ export function CaptureView({ data, today, approve, onAddManually, disabled }: C
           </View>
           <T variant="caption" color="textTertiary">Drafts don’t change your balances, budget or Safe to Spend until you approve them.</T>
           {st.drafts.map((d) => (
-            <DraftCard key={d.id} d={d} issues={reviews.get(d.id)!} data={data} today={today} cur={cur} busy={saving || !!disabled}
+            <DraftCard key={d.id} d={d} issues={reviews.get(d.id)!} data={data} ctx={ctx} today={today} cur={cur} busy={saving || !!disabled}
               onChange={(p) => update(d.id, p)} onRemove={() => captureStore.set((s) => ({ drafts: s.drafts.filter((x) => x.id !== d.id) }))} onApprove={() => void doApprove([d.id])} />
           ))}
           <Button testID="approve-all" title={ready.length === st.drafts.length ? `Approve all ${ready.length}` : `Approve ${ready.length} ready`} disabled={ready.length === 0 || saving || disabled} busy={saving} onPress={() => void doApprove(ready.map((d) => d.id))} />
@@ -162,8 +162,8 @@ export function CaptureView({ data, today, approve, onAddManually, disabled }: C
   );
 }
 
-function DraftCard({ d, issues, data, today, cur, busy, onChange, onRemove, onApprove }: {
-  d: CaptureDraft; issues: Issue[]; data: WorkspaceData; today: string; cur: string; busy: boolean;
+function DraftCard({ d, issues, data, ctx, today, cur, busy, onChange, onRemove, onApprove }: {
+  d: CaptureDraft; issues: Issue[]; data: WorkspaceData; ctx: CaptureContext; today: string; cur: string; busy: boolean;
   onChange: (p: Partial<CaptureDraft>) => void; onRemove: () => void; onApprove: () => void;
 }) {
   const { c } = useTheme();
@@ -203,6 +203,7 @@ function DraftCard({ d, issues, data, today, cur, busy, onChange, onRemove, onAp
       {d.kind === 'transfer' && (
         <Choices label={d.role === 'card_payment' ? 'Card paid' : 'To account'} value={d.toAccountId} options={accounts.filter((a) => a.id !== d.accountId).map((a) => ({ value: a.id, label: a.name }))} onChange={(v) => onChange({ toAccountId: v, toAccountWords: null })} />
       )}
+      <ReturnCheck d={d} data={data} ctx={ctx} cur={cur} onChange={onChange} />
       {blocking.map((i) => (
         <View key={i.code} style={{ flexDirection: 'row', gap: 8, alignItems: 'center', backgroundColor: c.warningSoft, borderRadius: 10, padding: 10 }}>
           <AlertTriangle size={14} color={c.warning} />
@@ -217,6 +218,33 @@ function DraftCard({ d, issues, data, today, cur, busy, onChange, onRemove, onAp
         </View>
       ))}
       <Button small kind="secondary" title="Approve" accessibilityLabel={`Approve ${label}`} disabled={blocking.length > 0 || busy} onPress={onApprove} />
+    </View>
+  );
+}
+
+/** Phase 4A.7: the returned-card-payment decision for money coming in (same choice as the Add form and the web app). */
+function ReturnCheck({ d, data, ctx, cur, onChange }: { d: CaptureDraft; data: WorkspaceData; ctx: CaptureContext; cur: string; onChange: (p: Partial<CaptureDraft>) => void }) {
+  const { c } = useTheme();
+  const suggested = draftReturnOptions(d, ctx);
+  const options = d.askReturn ? draftReturnOptions(d, ctx, true) : suggested;
+  const chosen = chosenReturnOf(d, ctx);
+  if (options.length === 0) {
+    return !d.askReturn && draftReturnOptions(d, ctx, true).length > 0
+      ? <Pressable testID="capture-return-ask" accessibilityRole="button" onPress={() => onChange({ askReturn: true })}><T variant="footnote" color="accent">{RETURN_ASK_LINK}</T></Pressable>
+      : null;
+  }
+  const opt = (id: string, label: string) => (
+    <Pressable key={id} testID={`capture-return-${id}`} accessibilityRole="radio" accessibilityState={{ checked: d.returnChoice === id }} accessibilityLabel={label} onPress={() => onChange({ returnChoice: id })}
+      style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-start', padding: 10, borderRadius: 10, borderWidth: 1, borderColor: d.returnChoice === id ? c.accent : c.border, backgroundColor: d.returnChoice === id ? c.accentSoft : c.surface }}>
+      <T variant="footnote" style={{ flex: 1 }}>{label}</T>
+    </Pressable>
+  );
+  return (
+    <View testID="capture-return-check" accessibilityRole="radiogroup" accessibilityLabel={RETURN_CHECK_TITLE} style={{ gap: 8 }}>
+      <T variant="footnote" style={{ fontFamily: FONT.semibold }}>{RETURN_CHECK_TITLE}</T>
+      {options.map((m) => opt(m.txId, matchOptionView(m, d.amountCents ?? 0, data, cur).label))}
+      {opt('separate', RETURN_SEPARATE_LABEL)}
+      <T variant="caption" color="textSecondary" testID={chosen ? 'capture-return-note' : undefined}>{chosen ? matchOptionView(chosen, d.amountCents ?? 0, data, cur).note : RETURN_DECIDE_HINT.replace('Close without saving and decide later', 'Leave this draft and decide later')}</T>
     </View>
   );
 }

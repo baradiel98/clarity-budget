@@ -1,8 +1,8 @@
 import { AlertTriangle, ArrowRight, Check, CircleAlert, Info, PenLine, Plus, ShieldCheck, Sparkles, Trash2 } from 'lucide-react';
 import { useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { captureTotals, localInterpreter, parseDrafts, reviewDraft, toTxInput, type CaptureContext, type CaptureDraft, type DraftKind, type Issue } from '@clarity/capture';
-import { addTransactions } from '@clarity/data';
-import { centsToDecimalString, formatCents, parseAmountInput, type WorkspaceData } from '@clarity/shared';
+import { captureTotals, chosenReturnOf, draftReturnOptions, localInterpreter, parseDrafts, reviewDraft, toCaptureItem, type CaptureContext, type CaptureDraft, type DraftKind, type Issue } from '@clarity/capture';
+import { matchOptionView, saveCaptured } from '@clarity/data';
+import { centsToDecimalString, formatCents, parseAmountInput, RETURN_ASK_LINK, RETURN_CHECK_TITLE, RETURN_DECIDE_HINT, RETURN_SEPARATE_LABEL, type WorkspaceData } from '@clarity/shared';
 import { Link } from '../lib/router';
 import { captureStore } from '../state/capture';
 import { useData, useRun, useSession, useStore } from '../state/session';
@@ -72,10 +72,11 @@ export function CapturePage() {
 
   const approve = async (ids: string[]) => {
     const chosen = st.drafts.filter((d) => ids.includes(d.id));
-    const inputs = chosen.map((d) => toTxInput(d, ctx));
+    const inputs = chosen.map((d) => toCaptureItem(d, ctx));
     if (inputs.some((x) => !x) || inputs.length === 0) return;
     setSaving(true);
-    const r = await run((c) => addTransactions(c, inputs.map((x) => x!)), { undoLabel: `Captured ${inputs.length}` });
+    // Phase 4A.7: a draft confirmed as a returned card payment is recorded as that return, not as income
+    const r = await run((c) => saveCaptured(c, inputs.map((x) => x!)), { undoLabel: `Captured ${inputs.length}` });
     setSaving(false);
     if (!r.ok) {
       captureStore.set({ error: `Nothing was saved: ${r.errors.map((e) => e.message).join(' ')} Your drafts are still here.` });
@@ -157,7 +158,7 @@ export function CapturePage() {
           <p className="hint capture-note">Drafts don’t change your balances, budget or Safe to Spend until you approve them.</p>
           <div className="capture-list stagger">
             {st.drafts.map((d) => (
-              <DraftCard key={d.id} d={d} issues={reviews.get(d.id)!} data={data} cur={cur} saving={saving || demo}
+              <DraftCard key={d.id} d={d} issues={reviews.get(d.id)!} data={data} ctx={ctx} cur={cur} saving={saving || demo}
                 onChange={(p) => update(d.id, p)} onRemove={() => remove(d.id)} onApprove={() => void approve([d.id])} />
             ))}
           </div>
@@ -173,8 +174,8 @@ export function CapturePage() {
   );
 }
 
-function DraftCard({ d, issues, data, cur, saving, onChange, onRemove, onApprove }: {
-  d: CaptureDraft; issues: Issue[]; data: WorkspaceData; cur: string; saving: boolean;
+function DraftCard({ d, issues, data, ctx, cur, saving, onChange, onRemove, onApprove }: {
+  d: CaptureDraft; issues: Issue[]; data: WorkspaceData; ctx: CaptureContext; cur: string; saving: boolean;
   onChange: (p: Partial<CaptureDraft>) => void; onRemove: () => void; onApprove: () => void;
 }) {
   const [amountText, setAmountText] = useState(d.amountCents === null ? '' : centsToDecimalString(d.amountCents));
@@ -254,6 +255,8 @@ function DraftCard({ d, issues, data, cur, saving, onChange, onRemove, onApprove
         </div>
       )}
 
+      <ReturnCheck d={d} data={data} ctx={ctx} cur={cur} onChange={onChange} />
+
       {(blocking.length > 0 || notes.length > 0) && (
         <ul className="draft-issues">
           {blocking.map((i) => (
@@ -272,6 +275,29 @@ function DraftCard({ d, issues, data, cur, saving, onChange, onRemove, onApprove
         </button>
       </footer>
     </article>
+  );
+}
+
+/**
+ * Phase 4A.7: money coming in that could be a returned card payment: the same choice as the Add form (the payment,
+ * how much of it, or "separate income"). Nothing is chosen for the user; the draft can't be approved until they choose.
+ */
+function ReturnCheck({ d, data, ctx, cur, onChange }: { d: CaptureDraft; data: WorkspaceData; ctx: CaptureContext; cur: string; onChange: (p: Partial<CaptureDraft>) => void }) {
+  const name = useId();
+  const suggested = draftReturnOptions(d, ctx);
+  const options = d.askReturn ? draftReturnOptions(d, ctx, true) : suggested;
+  const chosen = chosenReturnOf(d, ctx);
+  const anyPossible = !d.askReturn && suggested.length === 0 && draftReturnOptions(d, ctx, true).length > 0;
+  if (options.length === 0) return anyPossible ? <button type="button" className="btn-link" onClick={() => onChange({ askReturn: true })} data-testid="capture-return-ask">{RETURN_ASK_LINK}</button> : null;
+  return (
+    <div className="callout" role="radiogroup" aria-label={RETURN_CHECK_TITLE} data-testid="capture-return-check">
+      <strong>{RETURN_CHECK_TITLE}</strong>
+      {options.map((m) => (
+        <label key={m.txId} className="check"><input type="radio" name={name} checked={d.returnChoice === m.txId} onChange={() => onChange({ returnChoice: m.txId })} /><span>{matchOptionView(m, d.amountCents ?? 0, data, cur).label}</span></label>
+      ))}
+      <label className="check"><input type="radio" name={name} checked={d.returnChoice === 'separate'} onChange={() => onChange({ returnChoice: 'separate' })} /><span>{RETURN_SEPARATE_LABEL}</span></label>
+      {chosen ? <div className="hint" data-testid="capture-return-note">{matchOptionView(chosen, d.amountCents ?? 0, data, cur).note}</div> : <div className="hint">{RETURN_DECIDE_HINT.replace('Close without saving and decide later', 'Leave this draft and decide later')}</div>}
+    </div>
   );
 }
 

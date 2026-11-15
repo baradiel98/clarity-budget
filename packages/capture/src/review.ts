@@ -1,6 +1,25 @@
 import { normalizeDescription, similarity } from '@clarity/engine';
 import { diffDays, formatCents, formatShortDate, isValidISO, type Cents, type Transaction } from '@clarity/shared';
+import { findReturnCandidates, type MatchCandidate } from '@clarity/import';
 import type { CaptureContext, CaptureDraft, Issue, IssueCode } from './types';
+
+/**
+ * Phase 4A.7: the card payments money coming in (an income or refund draft) could be a return of, by the same rules
+ * as the Add form and the import review (findReturnCandidates). `all`: every possibility (the user's own "it's a
+ * returned card payment" choice); otherwise only the credible suggestions, which require a decision.
+ */
+export function draftReturnOptions(d: CaptureDraft, ctx: CaptureContext, all = false): MatchCandidate[] {
+  if ((d.kind !== 'income' && d.kind !== 'refund') || d.amountCents === null || d.amountCents <= 0 || !d.date || !isValidISO(d.date)) return [];
+  const account = ctx.accounts.find((a) => a.id === d.accountId && !a.archived);
+  if (!account || account.type === 'credit_card') return [];
+  return findReturnCandidates({ date: d.date, amountCents: d.amountCents, rawDescription: d.merchant || d.sourceText, merchant: d.merchant }, account, ctx.transactions, ctx.accounts, { all });
+}
+
+/** Phase 4A.7: the payment leg this draft was confirmed as a return of, if that choice is still possible. */
+export function chosenReturnOf(d: CaptureDraft, ctx: CaptureContext): MatchCandidate | null {
+  if (!d.returnChoice || d.returnChoice === 'separate') return null;
+  return draftReturnOptions(d, ctx, true).find((m) => m.txId === d.returnChoice) ?? null;
+}
 
 /**
  * Deterministic review rules. Recomputed after every edit. A draft can be approved only when it has
@@ -67,8 +86,17 @@ export function reviewDraft(d: CaptureDraft, ctx: CaptureContext): Issue[] {
     } else if (d.toAccountId === d.accountId) add('same_account', 'toAccount', 'Choose two different accounts.', true);
   }
 
+  // Phase 4A.7: money coming in that could be a returned card payment needs the user's decision (never automatic)
+  if (d.kind === 'income' || d.kind === 'refund') {
+    if (d.returnChoice && d.returnChoice !== 'separate') {
+      if (!chosenReturnOf(d, ctx)) add('return_unavailable', 'return', 'The card payment you chose can’t take this return any more (it was changed, removed or already returned, or the amount, date or account changed). Choose again.', true);
+    } else if (d.returnChoice !== 'separate' && draftReturnOptions(d, ctx).length > 0) {
+      add('possible_return', 'return', 'This could be a card payment coming back to you (returned or reversed). Choose below whether it is, or that it’s separate income. Not sure? Leave this draft; nothing is saved until you choose.', true);
+    }
+  }
+
   // Possible duplicate of a saved transaction
-  const dup = d.kind !== 'transfer' ? possibleDuplicate(d, ctx.transactions) : null;
+  const dup = d.kind !== 'transfer' && !chosenReturnOf(d, ctx) ? possibleDuplicate(d, ctx.transactions) : null;
   if (dup) add('duplicate', 'amount', `Looks like “${dup.merchant || 'a transaction'}” for ${cur(Math.abs(dup.amountCents))} on ${formatShortDate(dup.date)}, already saved. Keep this only if it is a separate purchase.`, true, true);
 
   return out;

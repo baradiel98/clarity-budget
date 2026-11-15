@@ -474,11 +474,58 @@ export function addTransactions(ctx: Ctx, inputs: readonly TxInput[]): { ops: Op
   return { ops, txs };
 }
 
+/** Phase 4A.7: one approved Clarity Capture draft: a new transaction, or a confirmed return of a card payment. */
+export type CaptureItem = { input: TxInput } | { paymentReturn: PaymentReturnInput };
+
+/**
+ * Phase 4A.7: save approved Capture drafts in one atomic change (like addTransactions: if any one fails, nothing is
+ * saved). A draft confirmed as a returned card payment is recorded with recordPaymentReturn (the same accounting as
+ * the Add form and the import review). Money coming in that could be the return of a card payment already recorded
+ * is refused unless the user said it's separate (provenance.separateFrom covers every current suggestion), so a
+ * captured return can never be saved as income by mistake, even if the payments changed since the review (another
+ * tab). Payments captured in the same batch don't count: the user reviewed the drafts together.
+ */
+export function saveCaptured(ctx: Ctx, items: readonly CaptureItem[]): { ops: Op[]; txs: Transaction[] } {
+  if (items.length === 0) fail('Nothing to save.');
+  const before = ctx.data;
+  let data = ctx.data;
+  const ops: Op[] = [];
+  const txs: Transaction[] = [];
+  items.forEach((item, i) => {
+    let r: { ops: Op[]; txs: Transaction[] };
+    try {
+      if ('paymentReturn' in item) {
+        if (item.paymentReturn.replaceTxId) fail('A captured return is always new.');
+        r = recordPaymentReturn({ ...ctx, data }, item.paymentReturn);
+      } else {
+        const x = item.input;
+        if (x.kind === 'income' || x.kind === 'refund') {
+          const open = returnOptionsForEntry(before, { kind: x.kind, accountId: x.accountId, amountCents: x.amountCents, date: x.date, merchant: x.merchant });
+          const separate = new Set(x.provenance?.separateFrom ?? []);
+          const undecided = open.filter((m) => !separate.has(m.txId));
+          if (undecided.length) fail(`this could be the return of the card payment ${txLabel(before.transactions.find((t) => t.id === undecided[0]!.txId), before.settings.baseCurrency)}. Choose whether it is, or that it's separate income.`, 'return');
+        }
+        r = addTransaction({ ...ctx, data }, x);
+      }
+    } catch (e) {
+      if (e instanceof CommandError) throw new CommandError(e.issues.map((x) => ({ ...x, message: `Item ${i + 1}: ${x.message}` })));
+      throw e;
+    }
+    ops.push(...r.ops);
+    txs.push(...r.txs);
+    data = applyLocal(data, r.ops);
+  });
+  return { ops, txs };
+}
+
 /** Transfer legs are always edited together. */
 export function updateTransaction(ctx: Ctx, id: ID, input: TxInput): { ops: Op[]; txs: Transaction[] } {
   const existing = ctx.data.transactions.find((t) => t.id === id) ?? fail('Transaction not found.');
   // Phase 4A.5.8: an adjustment is a reconciliation record; editing it as an expense or income would flip its sign.
   if (existing.kind === 'adjustment') fail('Balance adjustments can’t be edited. Delete it, or use Update balance again.');
+  // Phase 4A.7: a payment with returns, or a return, keeps the relationship between them (see returnEditProblem)
+  const retProblem = returnEditProblem(ctx.data, existing, input);
+  if (retProblem) fail(retProblem, 'return');
   const legs = existing.transferGroupId ? ctx.data.transactions.filter((t) => t.transferGroupId === existing.transferGroupId) : [existing];
   const source = legs.find((l) => l.amountCents < 0) ?? legs[0]!;
   const pair = legs.find((l) => l.id !== source.id);
@@ -495,6 +542,7 @@ export function updateTransaction(ctx: Ctx, id: ID, input: TxInput): { ops: Op[]
     const prev = legs.find((l) => l.id === t.id);
     if (prev?.provenance) t.provenance = prev.provenance;
     if (prev?.statementMatch) t.statementMatch = prev.statementMatch; // Phase 4A.5.10: the link survives edits
+    if (prev?.returnOf) t.returnOf = prev.returnOf; // Phase 4A.7: an edited return is still that payment's return
   }
   // put after del for the same ids → final state is the put
   return { ops: [...ops.filter((o) => o.t === 'del' && !txs.some((t) => t.id === o.id)), ...txs.map((value): Op => ({ t: 'put', table: 'transactions', value }))], txs };
@@ -502,10 +550,114 @@ export function updateTransaction(ctx: Ctx, id: ID, input: TxInput): { ops: Op[]
 
 export function deleteTransaction(ctx: Ctx, id: ID): Op[] {
   const t = ctx.data.transactions.find((x) => x.id === id) ?? fail('Transaction not found.');
+  // Phase 4A.7: a card payment with recorded returns is never deleted together with them (that silently erased the
+  // returns and their statement evidence); the user resolves the returns first. See deleteProblem.
+  const problem = deleteProblem(ctx.data, id);
+  if (problem) fail(problem, 'delete');
   // Phase 4A.5.14: a transfer's confirmed fee belongs to it and goes with it
-  // Phase 4A.5.18: and its recorded returns (a return of a payment that never happened can't stand on its own)
-  const legs = t.transferGroupId ? ctx.data.transactions.filter((x) => x.transferGroupId === t.transferGroupId || x.transferFeeOf === t.transferGroupId || (!t.returnOf && x.returnOf === t.transferGroupId)) : [t];
+  const legs = t.transferGroupId ? ctx.data.transactions.filter((x) => x.transferGroupId === t.transferGroupId || x.transferFeeOf === t.transferGroupId) : [t];
   return legs.map((l) => ({ t: 'del', table: 'transactions', id: l.id }));
+}
+
+/**
+ * Phase 4A.7: delete several transactions at once (the Transactions list's bulk delete). Returns are deleted before
+ * payments, so a payment selected together with all its returns can go; a payment whose returns aren't all selected is
+ * refused (nothing is deleted). Transfer legs and fees go with their transfer, once.
+ */
+export function deleteTransactions(ctx: Ctx, ids: readonly ID[]): Op[] {
+  const picked = ids.map((id) => ctx.data.transactions.find((x) => x.id === id) ?? fail('Transaction not found.'));
+  const order = [...picked].sort((a, b) => Number(!a.returnOf) - Number(!b.returnOf));
+  let data = ctx.data;
+  const ops: Op[] = [];
+  const seen = new Set<string>();
+  for (const t of order) {
+    if (seen.has(t.transferGroupId ?? t.id)) continue;
+    seen.add(t.transferGroupId ?? t.id);
+    const o = deleteTransaction({ ...ctx, data }, t.id);
+    ops.push(...o);
+    data = applyLocal(data, o);
+  }
+  return ops;
+}
+
+/**
+ * Phase 4A.7: the returns recorded against a card payment (one entry per return: the leg in the account the money came
+ * back to, i.e. the side opposite the payment's sending leg), oldest first. Empty for anything that isn't a payment.
+ */
+export function paymentReturns(data: WorkspaceData, groupId: string | undefined): Transaction[] {
+  if (!groupId) return [];
+  const send = data.transactions.find((t) => t.transferGroupId === groupId && !t.returnOf && t.amountCents < 0);
+  return data.transactions
+    .filter((t) => t.returnOf === groupId && (send ? t.accountId === send.accountId : t.amountCents > 0))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.createdAt - b.createdAt));
+}
+
+/** Phase 4A.7: one return in words, with where it came from and how to remove it. */
+function returnLabel(data: WorkspaceData, r: Transaction): string {
+  const cur = data.accounts.find((a) => a.id === r.accountId)?.currency ?? data.settings.baseCurrency;
+  const legs = data.transactions.filter((t) => t.transferGroupId === r.transferGroupId);
+  const batchId = legs.map((l) => l.provenance.importBatchId).find(Boolean);
+  const batch = batchId ? data.importBatches.find((b) => b.id === batchId && !b.undoneAt) : undefined;
+  return `“${r.merchant || 'Returned payment'}” (${formatShortDate(r.date)}, ${formatCents(Math.abs(r.amountCents), cur)}${batch ? `, recorded by the import of ${batch.fileName}` : ''})`;
+}
+
+/** Phase 4A.7: what the user must do with a payment's returns before the payment can be changed or removed. */
+function resolveReturnsHint(data: WorkspaceData, returns: readonly Transaction[]): string {
+  const imported = returns.some((r) => data.transactions.some((t) => t.transferGroupId === r.transferGroupId && t.provenance.importBatchId && data.importBatches.some((b) => b.id === t.provenance.importBatchId && !b.undoneAt)));
+  return imported ? 'Undo the import that recorded a return (Import history), or delete the return itself, first.' : 'Delete the return first (it is listed with your transactions as “Returned card payment”).';
+}
+
+/**
+ * Phase 4A.7: why this transaction can't be deleted now, or null. A card payment that has returns recorded against it
+ * can't be deleted: the returns would be left describing money coming back from a payment that no longer exists.
+ * Deleting a return itself is always allowed (the payment counts as paying the card again).
+ */
+export function deleteProblem(data: WorkspaceData, id: ID): string | null {
+  const t = data.transactions.find((x) => x.id === id);
+  if (!t || !t.transferGroupId || t.returnOf) return null;
+  const returns = paymentReturns(data, t.transferGroupId);
+  if (!returns.length) return null;
+  return `This card payment can't be deleted while ${returns.length === 1 ? 'a return is' : `${returns.length} returns are`} recorded against it: ${returns.map((r) => returnLabel(data, r)).join('; ')}. ${resolveReturnsHint(data, returns)}`;
+}
+
+/**
+ * Phase 4A.7: why this edit would break a payment's returns, or null. A card payment with returns keeps its accounts
+ * (the money came back to the account it left), stays a transfer, can't be dated after its first return, and can't be
+ * made smaller than what was returned. A return keeps its accounts and can't be dated before the payment or exceed
+ * what is left of it. Descriptions, notes, categories and statuses can still change.
+ */
+export function returnEditProblem(data: WorkspaceData, existing: Transaction, input: TxInput): string | null {
+  const cur = (accountId: ID) => data.accounts.find((a) => a.id === accountId)?.currency ?? data.settings.baseCurrency;
+  if (existing.transferGroupId && !existing.returnOf) {
+    const returns = paymentReturns(data, existing.transferGroupId);
+    if (!returns.length) return null;
+    const legs = data.transactions.filter((t) => t.transferGroupId === existing.transferGroupId);
+    const source = legs.find((l) => l.amountCents < 0)!;
+    const pair = legs.find((l) => l.id !== source.id)!;
+    const st = paymentReturnStatus(existing.transferGroupId, data.transactions);
+    const c = cur(source.accountId);
+    const what = `This card payment has ${formatCents(st.returnedCents, c)} returned (${returns.map((r) => returnLabel(data, r)).join('; ')})`;
+    const fix = `To correct it, ${resolveReturnsHint(data, returns).replace(/^./, (x) => x.toLowerCase())}`;
+    if (input.kind !== 'transfer') return `${what}, so it must stay a transfer. ${fix}`;
+    if (input.accountId !== source.accountId || input.toAccountId !== pair.accountId) return `${what}, so its accounts can't change: the money came back to ${data.accounts.find((a) => a.id === source.accountId)?.name ?? 'the account it was paid from'}. ${fix}`;
+    if (input.amountCents < st.returnedCents) return `${what}, so it can't be less than ${formatCents(st.returnedCents, c)}. ${fix}`;
+    if (input.date > returns[0]!.date) return `${what}, so it can't be dated after its first return (${formatShortDate(returns[0]!.date)}). ${fix}`;
+    return null;
+  }
+  if (existing.returnOf) {
+    const legs = data.transactions.filter((t) => t.transferGroupId === existing.transferGroupId);
+    const source = legs.find((l) => l.amountCents < 0)!;
+    const pair = legs.find((l) => l.id !== source.id)!;
+    const payment = data.transactions.filter((t) => t.transferGroupId === existing.returnOf);
+    const st = paymentReturnStatus(existing.returnOf, data.transactions);
+    const mine = Math.abs(source.amountCents);
+    const c = cur(source.accountId);
+    if (input.kind !== 'transfer' || input.accountId !== source.accountId || input.toAccountId !== pair.accountId) return 'A returned card payment keeps its accounts and type. If it isn’t a return, delete it and enter the money again.';
+    if (input.amountCents > st.remainingCents + mine) return `Only ${formatCents(st.remainingCents + mine, c)} of this ${formatCents(st.paymentCents, c)} payment can be returned (other returns already cover the rest). Returns can't exceed the payment.`;
+    const paidOn = payment.map((p) => p.date).sort()[0];
+    if (paidOn && input.date < paidOn) return `A return can't be dated before the payment (${formatShortDate(paidOn)}).`;
+  }
+  return null;
 }
 
 // ───────────────────────── recurring ─────────────────────────
@@ -1082,7 +1234,9 @@ function buildPaymentReturn(ctx: Ctx, o: { leg: Transaction; accountId: ID; amou
  * provenance and statement link carry over, so re-importing its statement still recognises the row). Undo through the
  * store's undo.
  */
-export function recordPaymentReturn(ctx: Ctx, input: { paymentLegId: ID; accountId: ID; amountCents: Cents; date: ISODate; status?: TxStatus; merchant?: string; replaceTxId?: ID }): { ops: Op[]; txs: Transaction[] } {
+export interface PaymentReturnInput { paymentLegId: ID; accountId: ID; amountCents: Cents; date: ISODate; status?: TxStatus; merchant?: string; replaceTxId?: ID; /** Phase 4A.7: where it was entered (Capture); manual by default. */ provenance?: Provenance }
+
+export function recordPaymentReturn(ctx: Ctx, input: PaymentReturnInput): { ops: Op[]; txs: Transaction[] } {
   const leg = ctx.data.transactions.find((t) => t.id === input.paymentLegId) ?? fail('That card payment no longer exists.', 'return');
   const old = input.replaceTxId ? ctx.data.transactions.find((t) => t.id === input.replaceTxId) ?? fail('Transaction not found.') : undefined;
   if (old) {
@@ -1091,7 +1245,7 @@ export function recordPaymentReturn(ctx: Ctx, input: { paymentLegId: ID; account
   }
   const r = buildPaymentReturn(ctx, {
     leg, accountId: input.accountId, amountCents: input.amountCents, date: old?.date ?? input.date, status: old?.status ?? input.status ?? 'confirmed',
-    provenance: old ? { ...old.provenance } : { source: 'manual' }, note: old ? 'confirmed by correcting the transaction' : 'entered by hand', ...(input.merchant ?? old?.merchant ? { merchant: input.merchant ?? old?.merchant } : {}),
+    provenance: old ? { ...old.provenance } : input.provenance ?? { source: 'manual' }, note: old ? 'confirmed by correcting the transaction' : input.provenance?.source === 'capture' ? 'entered with Clarity Capture' : 'entered by hand', ...(input.merchant ?? old?.merchant ? { merchant: input.merchant ?? old?.merchant } : {}),
   });
   if (old?.statementMatch) r.here.statementMatch = old.statementMatch;
   if (old?.postedDate) r.here.postedDate = old.postedDate;
@@ -1185,6 +1339,15 @@ export function importUndoProblem(data: WorkspaceData, batchId: ID): string | nu
       const later = batches(t.statementMatch.importBatchId);
       return `“${t.merchant || t.kind}” was added by this import and is now linked to a row of a later import${later ? ` (${later.fileName})` : ''}. Undo that import first.`;
     }
+  }
+  // Phase 4A.7: a card payment this import added that has a return recorded since (by hand, Capture or a later
+  // import): undoing would leave the return describing money coming back from a payment that no longer exists.
+  const created = new Set(data.transactions.filter((t) => t.provenance.importBatchId === batchId && t.transferGroupId).map((t) => t.transferGroupId!));
+  for (const g of created) {
+    const dependents = paymentReturns(data, g).filter((r) => !created.has(r.transferGroupId!));
+    if (!dependents.length) continue;
+    const pay = data.transactions.find((t) => t.transferGroupId === g && t.amountCents < 0) ?? data.transactions.find((t) => t.transferGroupId === g)!;
+    return `the card payment “${pay.merchant || 'Transfer'}” (${formatShortDate(pay.date)}) was added by this import and has ${dependents.length === 1 ? 'a return' : `${dependents.length} returns`} recorded against it: ${dependents.map((r) => returnLabel(data, r)).join('; ')}. ${resolveReturnsHint(data, dependents)} Nothing was changed.`;
   }
   for (const t of data.transactions) {
     const fee = t.statementMatch?.importBatchId === batchId ? t.statementMatch.fee : undefined;

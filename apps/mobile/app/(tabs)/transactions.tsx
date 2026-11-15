@@ -3,7 +3,7 @@ import { Search, Sparkles, Upload } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
 import { Alert, Pressable, SectionList, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { deleteTransaction, transferSettlement } from '@clarity/data';
+import { deleteProblem, deleteTransaction, transferSettlement } from '@clarity/data';
 import { balanceAsOfDate, historyStatus, periodTotals } from '@clarity/engine';
 import { addDays, BEFORE_OPENING_BADGE, BEFORE_OPENING_REASON, endOfMonth, formatMonthYear, formatShortDate, formatWeekdayDate, HISTORY_ONLY_BADGE, HISTORY_ONLY_REASON, startOfMonth, TERMS } from '@clarity/shared';
 import { setAddPrefill } from '../../src/state/nav';
@@ -100,7 +100,7 @@ export default function Transactions() {
               accessibilityLabel={`${title}, ${cat?.name ?? ''}${histReason ? `. ${histReason}` : ''}`}
               accessibilityHint="Opens the transaction. Long press to delete."
               onPress={() => { setAddPrefill({ editId: t.id }); router.push('/add'); }}
-              onLongPress={() => Alert.alert('Delete this transaction?', title, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: async () => { const r = await run((ctx) => deleteTransaction(ctx, t.id), { undoLabel: 'Delete' }); if (r.ok) toast({ message: 'Transaction deleted', action: { label: 'Undo', run: () => void store.undo() } }); } }])}
+              onLongPress={() => { const why = deleteProblem(data, t.id); if (why) { Alert.alert("Can't delete this payment", why); return; } Alert.alert('Delete this transaction?', title, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: async () => { const r = await run((ctx) => deleteTransaction(ctx, t.id), { undoLabel: 'Delete' }); if (r.ok) toast({ message: 'Transaction deleted', action: { label: 'Undo', run: () => void store.undo() } }); else toast({ message: `Nothing was deleted: ${r.errors.map((e) => e.message).join(' ')}` }); } }]); }}
               style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, backgroundColor: c.surface, paddingHorizontal: 12, borderRadius: 14, marginBottom: 6, opacity: pressed ? 0.7 : 1 })}
             >
               <IconBubble tone={t.amountCents > 0 && t.kind !== 'transfer' ? 'inflow' : 'neutral'}><CategoryIcon name={t.kind === 'transfer' ? 'transfer' : t.kind === 'adjustment' ? 'adjustment' : cat?.icon} color={t.amountCents > 0 && t.kind !== 'transfer' ? c.positive : c.textSecondary} /></IconBubble>
