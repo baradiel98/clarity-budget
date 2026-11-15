@@ -474,23 +474,27 @@ tr.fresh > td:first-child { animation-name: fresh; }
 }
 
 /* ───────── dashboard ───────── */
-.overview { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(320px, 1fr); gap: var(--space-lg); align-items: stretch; position: relative; isolation: isolate; }
+.overview { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(320px, 1fr); grid-template-areas: 'bal side' 'fore side'; gap: var(--space-lg); align-items: stretch; position: relative; isolation: isolate; }
+/* Phase 4B.2: recorded balance (hero) and Safe to Spend first; on one column: balance, Safe to Spend, then the forecast. */
+.overview > .hero-card { grid-area: bal; }
+.overview > .outlook { grid-area: fore; }
+.overview > .side { grid-area: side; }
 /* Home signature: soft ambient blue light behind the two headline cards, layered blue glow on the cards.
    Tints stay light at the top and fade to the plain surface, so text keeps its AA contrast. */
 .overview::before { content: ''; position: absolute; z-index: -1; inset: -48px 0 -24px; pointer-events: none;
   background: radial-gradient(ellipse 55% 60% at 28% 40%, color-mix(in srgb, var(--c-accent) 24%, transparent), transparent 70%),
               radial-gradient(ellipse 40% 55% at 82% 35%, color-mix(in srgb, var(--c-accent) 20%, transparent), transparent 70%); }
-.overview .card.outlook, .overview .card.sts {
+.overview .card.hero-card, .overview .card.sts {
   border-color: color-mix(in srgb, var(--c-accent) 22%, var(--c-border));
   box-shadow: 0 1px 3px color-mix(in srgb, var(--c-accent) 12%, transparent),
               0 4px 16px color-mix(in srgb, var(--c-accent) 12%, transparent),
               0 16px 52px color-mix(in srgb, var(--c-accent) 22%, transparent); }
-.overview .card.outlook { background: linear-gradient(180deg, color-mix(in srgb, var(--c-accent) 6%, var(--c-surface)), var(--c-surface) 42%); }
+.overview .card.hero-card { background: linear-gradient(180deg, color-mix(in srgb, var(--c-accent) 6%, var(--c-surface)), var(--c-surface) 42%); }
 .overview .card.next-income { border-color: color-mix(in srgb, var(--c-accent) 12%, var(--c-border)); box-shadow: 0 6px 24px color-mix(in srgb, var(--c-accent) 9%, transparent); }
-@media (max-width: 1080px) { .overview { grid-template-columns: minmax(0, 1fr); } }
-.outlook .t-hero { margin: 6px 0 8px; }
+@media (max-width: 1080px) { .overview { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'bal' 'side' 'fore'; } }
+.hero-card .t-hero { margin: 6px 0 8px; }
 /* Long amounts: font size = the smaller of the design size and what fits the card (≈0.62em per character). */
-.card.outlook, .card.sts { container-type: inline-size; }
+.card.hero-card, .card.outlook, .card.sts { container-type: inline-size; }
 /* (.card prefix: must beat .sts .metric / .t-hero media rules declared later) */
 .card .t-hero.fit, .card .metric.fit { white-space: nowrap; font-size: min(var(--fit-max), calc(100cqi / (var(--chars) * 0.62))); line-height: 1.1; }
 .t-hero.fit { --fit-max: 56px; }
@@ -499,11 +503,12 @@ tr.fresh > td:first-child { animation-name: fresh; }
 /* The chart takes the hero card's remaining height instead of leaving an empty block under it. */
 .overview .card.outlook { display: flex; flex-direction: column; }
 .overview .card.outlook .chart-box { flex: 1 1 auto; }
+/* Phase 4B.2: the forecast card no longer shares a row with the taller Safe to Spend card, so give the chart its own height on desktop */
+@media (min-width: 1081px) { .overview .card.outlook .chart-area { min-height: 320px; } }
 @media (min-width: 1600px) { .overview { grid-template-columns: minmax(0, 1.85fr) minmax(360px, 1fr); } }
 .sts-after { margin: -6px 0 14px; max-width: 60ch; line-height: 18px; }
 /* Phase 4A.2: what Safe to Spend does not cover, visible on the card itself. */
 .sts-note { margin: 8px 0 12px; font-size: 13px; line-height: 18px; color: var(--c-text-secondary); }
-.stat .v.repeat { color: var(--c-text-secondary); }
 .upcoming-note { margin: -6px 0 10px; }
 /* Later items that Safe to Spend counts (after the Upcoming window): a compact list, no actions. */
 .up-later { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--c-border); }
@@ -530,7 +535,8 @@ tr.fresh > td:first-child { animation-name: fresh; }
 .approx { margin-right: 3px; color: var(--c-warning); font-weight: 600; }
 .badge.est { background: transparent; box-shadow: inset 0 0 0 1px currentColor; border: 0; }
 .side { display: flex; flex-direction: column; gap: var(--space-lg); min-width: 0; }
-.side .sts { flex: 1; }
+/* Phase 4B.2: Safe to Spend sizes to its content (it no longer holds the breakdown), so its actions sit under its text. */
+.overview > .side { align-self: start; }
 .next-income { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 16px 20px; }
 .delta { display: flex; align-items: flex-start; gap: 8px; font-size: 14px; line-height: 21px; color: var(--c-text-secondary); }
 .delta svg { flex: none; margin-top: 2px; }
@@ -545,14 +551,24 @@ tr.fresh > td:first-child { animation-name: fresh; }
 .eq .sub { color: var(--c-text-tertiary); font-size: 12px; }
 .eq .total { border-bottom: 0; color: var(--c-text); font-weight: 600; padding-top: 12px; }
 .eq .total > :last-child { font-weight: 700; }
+/* Phase 4B.2: Home hierarchy. The recorded balance is the hero; the month-end projection and any low point that isn't
+   already on screen sit below it as supporting figures, smaller than Safe to Spend's amount. */
+.hero-k { display: flex; align-items: center; gap: 4px; }
+.hero-sub { margin-top: -2px; }
+.outlook-figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 16px 20px; margin: 0 0 8px; }
+.fig { min-width: 0; }
+.fig .k { display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--c-text-secondary); min-height: 22px; }
+.fig .v { font-size: 22px; line-height: 28px; font-weight: 600; letter-spacing: -0.4px; margin-top: 2px; }
+.fig .v.neg { color: var(--c-negative); }
+.fig .s { font-size: 12px; color: var(--c-text-tertiary); margin-top: 2px; }
+.fig .s.delta { display: flex; gap: 4px; align-items: flex-start; }
+.chart-head { margin-top: 8px; align-items: center; }
+.sts-low { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 10px 0; margin: 4px 0 6px; border-top: 1px solid var(--c-border); border-bottom: 1px solid var(--c-border); font-size: 14px; color: var(--c-text-secondary); }
+.sts-low .sub { color: var(--c-text-tertiary); font-size: 12px; }
+.sts-low .num { color: var(--c-text); font-weight: 600; }
+.sts-low .num.neg { color: var(--c-negative); }
 .sts-actions { margin-top: auto; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 
-.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--radius-lg); box-shadow: var(--c-shadow-sm); }
-.stat { padding: 18px 20px; border-left: 1px solid var(--c-border); min-width: 0; }
-.stat:first-child { border-left: 0; }
-.stat .k { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 12px; font-weight: 600; color: var(--c-text-secondary); min-height: 22px; }
-.stat .v { font-size: 22px; line-height: 28px; font-weight: 600; letter-spacing: -0.4px; margin-top: 4px; }
-.stat .s { font-size: 12px; color: var(--c-text-tertiary); margin-top: 2px; }
 .why { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; border: 0; background: transparent; color: var(--c-text-tertiary); cursor: pointer; flex: none; }
 .why:hover { background: var(--c-surface-muted); color: var(--c-accent); }
 .why:focus-visible { outline: 2px solid var(--c-focus); outline-offset: 2px; }
@@ -563,8 +579,6 @@ tr.fresh > td:first-child { animation-name: fresh; }
   .btn-link { position: relative; }
   .btn-link::after { content: ''; position: absolute; inset: -10px -2px; }
 }
-@media (max-width: 1080px) { .stats { grid-template-columns: 1fr 1fr; } .stat:nth-child(3) { border-left: 0; } .stat:nth-child(n + 3) { border-top: 1px solid var(--c-border); } }
-@media (max-width: 420px) { .stat { padding: 14px; } .stat .v { font-size: 19px; } }
 
 .warning-row { display: grid; grid-template-columns: auto 1fr; gap: 12px; padding: 12px 0; border-top: 1px solid var(--c-border); }
 .warning-row:first-child { border-top: 0; padding-top: 0; }

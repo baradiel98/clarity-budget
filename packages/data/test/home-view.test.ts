@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatCents as f, formatShortDate as s, formatWeekdayDate as w, INCOME_STATUS_LABEL, OCCURRENCE_STATUS_LABEL } from '@clarity/shared';
+import { formatCents as f, formatShortDate as s, formatWeekdayDate as w, INCOME_STATUS_LABEL, LOWEST_MONTH_SUB, LOWEST_THROUGH, OCCURRENCE_STATUS_LABEL } from '@clarity/shared';
 import { buildDashboard } from '@clarity/engine';
 import { buildDemoWorkspace, buildHomeView, engineInput, recentRow, upcomingLaterPreview } from '../src';
 import { HOME_SAMPLE as X, SAMPLE_NOW, SAMPLE_TODAY } from './fixtures/home-sample-nov13';
@@ -22,11 +22,18 @@ describe('shared Home view model', () => {
     expect(`${d.safeToSpend.caption} Your balance is lowest on ${s(d.safeToSpend.lowPoint.date)}.`).toBe(X.safeToSpendLine);
     expect(d.safeToSpend.nextAfterNote).toBe(X.safeToSpendNext);
     expect(f(d.balances.availableCashCents)).toBe(X.recordedBalance);
-    expect([f(d.lowestThroughMonthEnd.cents), `${s(d.lowestThroughMonthEnd.date)} · through month-end`]).toEqual([X.lowest, X.lowestSub]);
-    expect(v.sameLow).toBe(true);
+    expect([f(d.lowestThroughMonthEnd.cents), LOWEST_MONTH_SUB(s(d.lowestThroughMonthEnd.date), s(d.monthEnd.date))]).toEqual([X.lowest, X.lowestSub]);
+    expect([`${LOWEST_THROUGH(s(d.safeToSpend.horizonEnd))} · ${s(d.safeToSpend.lowPoint.date)}`, f(d.safeToSpend.lowPoint.cents)]).toEqual([X.stsLow, X.stsLowAmount]);
+    // Phase 4B.2: shown and hidden figures. The two lows are different points (Nov 18 this month, Dec 1 through Dec 31): both shown.
+    expect(v.show).toEqual({ stsLow: true, monthLow: true, lowBeforeIncome: false, endOfDay: false });
+    expect(v.sameLow).toBe(true); // the lowest before next income IS this month's low → hidden
     expect(f(d.lowestBeforeNextIncome!.cents)).toBe(X.lowestBeforeIncome);
-    expect(`Same low point (${s(d.lowestBeforeNextIncome!.date)}), before your ${s(d.lowestBeforeNextIncome!.nextIncome.date)} income`).toBe(X.lowestBeforeIncomeSub);
-    expect([f(d.endOfDay.cents), v.quietToday]).toEqual([X.endOfDay, true]);
+    expect([f(d.endOfDay.cents), v.quietToday]).toEqual([X.endOfDay, true]); // end of today IS the recorded balance → hidden
+    expect(X.endOfDay).toBe(X.recordedBalance);
+    // the card's former "after the low point" sentence now ends the "Why this number?" summary; lines unchanged
+    expect(v.stsExplanation.summary).toBe(`${d.safeToSpend.explanation.summary} ${X.safeToSpendAfterLow}`);
+    expect(v.stsExplanation.lines).toBe(d.safeToSpend.explanation.lines);
+    expect(v.stsExplanation.assumptions).toBe(d.safeToSpend.explanation.assumptions);
     expect(s(d.upcomingUntil)).toBe(X.upcomingUntil);
     expect(d.upcoming.map((u) => [w(u.date), u.label, (u.isIncome ? INCOME_STATUS_LABEL : OCCURRENCE_STATUS_LABEL)[u.status], `${u.status === 'estimated' ? '≈' : ''}${f(u.cents, 'USD', { sign: 'always' })}`])).toEqual(X.upcoming);
     const later = upcomingLaterPreview(d);

@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import { Pressable, View } from 'react-native';
 import { buildHomeView, recentRow, upcomingLaterPreview } from '@clarity/data';
 import type { Explanation, UpcomingItem } from '@clarity/engine';
-import { formatCents, formatShortDate, formatWeekdayDate, INCOME_STATUS_LABEL, OCCURRENCE_STATUS_LABEL, STATUS_HELP, TERMS, UPCOMING_LATER_TITLE, UPCOMING_NOTE, type ISODate, type WorkspaceData } from '@clarity/shared';
+import { formatCents, formatShortDate, formatWeekdayDate, INCOME_STATUS_LABEL, LOWEST_MONTH_SUB, LOWEST_THROUGH, OCCURRENCE_STATUS_LABEL, STATUS_HELP, TERMS, UPCOMING_LATER_TITLE, UPCOMING_NOTE, type ISODate, type WorkspaceData } from '@clarity/shared';
 import type { AddPrefill } from '../state/nav';
 import { Button, LinkButton } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -61,16 +61,17 @@ export function HomeView({ data, today, backup, actions }: { data: WorkspaceData
         {/* soft ambient blue light behind the headline cards (decorative) */}
         <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ position: 'absolute', top: -40, left: 0, right: 0, bottom: -24, backgroundImage: ambientGlow(c) }} />
 
-        {/* 1. Where you are heading */}
-        <Card title={TERMS.projectedMonthEnd} glow="hero">
-          <Money cents={d.monthEnd.cents} currency={cur} variant="hero" color={d.monthEnd.cents < 0 ? 'negative' : 'text'} testID="month-end" numberOfLines={1} adjustsFontSizeToFit />
-          <T variant="footnote" color="textSecondary" testID="month-end-delta">
-            <Money cents={Math.abs(delta)} currency={cur} variant="footnote" color="textSecondary" /> {delta >= 0 ? 'more' : 'less'} than you have today, by {formatShortDate(d.monthEnd.date)}.
+        {/* Phase 4B.2 hierarchy: 1. what you have (recorded balance), 2. what you can safely spend (Safe to Spend),
+            3. where you are heading (month-end and the forecast, below). Same rules as web, from view.show. */}
+        <Card title={TERMS.recordedBalance} glow="hero">
+          <Money cents={d.balances.availableCashCents} currency={cur} variant="hero" color={d.balances.availableCashCents < 0 ? 'negative' : 'text'} testID="recorded-balance" numberOfLines={1} adjustsFontSizeToFit />
+          <T variant="footnote" color="textSecondary" testID="recorded-balance-sub">
+            {d.balances.cardOwedCents > 0 ? `Across spendable accounts · ${formatCents(d.balances.cardOwedCents, cur)} ${TERMS.cardOwed.toLowerCase()}` : 'Across spendable accounts'}
           </T>
-          <LinkButton title={TERMS.whyThisNumber} onPress={() => actions.explain(d.monthEnd.explanation)} />
+          <LinkButton title={TERMS.whyThisNumber} onPress={() => actions.explain(d.recordedBalanceExplanation)} />
         </Card>
 
-        {/* 2. Safe to Spend, with the engine's own arithmetic summary */}
+        {/* 2. Safe to Spend: the amount and its status; the full arithmetic is behind "Why this number?" */}
         <Card title={TERMS.safeToSpend} glow="sts">
           <View testID="safe-to-spend">
             {sts.cents < 0 ? (
@@ -82,44 +83,51 @@ export function HomeView({ data, today, backup, actions }: { data: WorkspaceData
           <T variant="footnote" color={sts.cents >= 0 && !sts.dependableIncome ? 'warning' : 'textSecondary'} testID="sts-caption">
             {`${sts.cents < 0 ? `What is scheduled is more than your cash and reserve cover through ${formatShortDate(sts.horizonEnd)}.` : sts.caption} Your balance is lowest on ${formatShortDate(sts.lowPoint.date)}.`}
           </T>
+          {view.show.stsLow && (
+            <View testID="sts-low" accessible style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, marginTop: 8, paddingVertical: 8, borderTopWidth: 1, borderBottomWidth: 1, borderColor: c.border }}>
+              <T variant="footnote" color="textSecondary" style={{ flex: 1 }}>{LOWEST_THROUGH(formatShortDate(sts.horizonEnd))} · {formatShortDate(sts.lowPoint.date)}</T>
+              <Money cents={sts.lowPoint.cents} currency={cur} variant="footnote" color={sts.lowPoint.cents < 0 ? 'negative' : 'text'} style={{ fontFamily: 'Inter_600SemiBold' }} />
+            </View>
+          )}
           {sts.nextAfterNote && <T variant="footnote" color="textSecondary" testID="sts-next" style={{ marginTop: 6 }}>{sts.nextAfterNote}</T>}
-          {sts.afterLow.note && <T variant="footnote" color="textTertiary" testID="sts-after" style={{ marginTop: 6 }}>{sts.afterLow.note}</T>}
           {sts.excludedIncome.length > 0 && (
-            <T variant="footnote" color="textTertiary" style={{ marginTop: 6 }}>{sts.excludedIncome.length} income item{sts.excludedIncome.length > 1 ? 's are' : ' is'} not counted because the amount is estimated, unknown or not yet recorded.</T>
+            <T variant="footnote" color="textTertiary" testID="sts-excluded" style={{ marginTop: 6 }}>{sts.excludedIncome.length} income item{sts.excludedIncome.length > 1 ? 's are' : ' is'} not counted because the amount is estimated, unknown or not yet recorded.</T>
           )}
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
-            <LinkButton title={TERMS.whyThisNumber} onPress={() => actions.explain(sts.explanation)} />
+            <LinkButton title={TERMS.whyThisNumber} onPress={() => actions.explain(view.stsExplanation)} />
             <Button title={TERMS.canIAfford} kind="secondary" small onPress={() => actions.open('/afford')} />
           </View>
         </Card>
       </View>
 
-      {/* 3. Supporting figures, 2 × 2. Tap a figure for "Why this number?". Repeated figures say so. */}
-      <Card title="Key balances">
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', rowGap: 14 }} testID="key-balances">
-          <Stat testID="recorded-balance" label={TERMS.recordedBalance} cents={d.balances.availableCashCents} cur={cur}
-            sub={d.balances.cardOwedCents > 0 ? `Cards owe ${formatCents(d.balances.cardOwedCents, cur, { compact: true })}` : 'Across spendable accounts'} onWhy={() => actions.explain(d.recordedBalanceExplanation)} />
-          <Stat testID="lowest" label={TERMS.lowestBalance} cents={d.lowestThroughMonthEnd.cents} cur={cur}
-            sub={`${formatShortDate(d.lowestThroughMonthEnd.date)} · through month-end`} onWhy={() => actions.explain(d.lowestThroughMonthEnd.explanation)} />
-          {lb ? (
-            <Stat testID="lowest-before-income" label={TERMS.lowestBeforeIncome} cents={lb.cents} cur={cur} repeat={view.sameLow}
-              sub={view.sameLow ? `Same low point (${formatShortDate(lb.date)}), before your ${formatShortDate(lb.nextIncome.date)} income` : `${formatShortDate(lb.date)} · next income ${formatShortDate(lb.nextIncome.date)}`}
-              onWhy={() => actions.explain(lb.explanation)} />
-          ) : (
-            <Stat testID="lowest-before-income" label={TERMS.lowestBeforeIncome} cents={null} cur={cur} sub="No income with a known amount is scheduled" />
-          )}
-          <Stat testID="end-of-day" label={TERMS.endOfDay} cents={d.endOfDay.cents} cur={cur} repeat={view.quietToday}
-            sub={view.quietToday ? 'Nothing else is scheduled today' : 'After what is scheduled today'} onWhy={() => actions.explain(d.endOfDay.explanation)} />
-        </View>
-      </Card>
-
-      <Card title="Where your cash is heading">
-        <View onLayout={(e) => setChartW(e.nativeEvent.layout.width)}>
+      {/* 3. Where you are heading: month-end, any low point not already shown, and the chart. Tap a figure for "Why this number?". */}
+      <Card title={TERMS.projectedMonthEnd}>
+        <Money cents={d.monthEnd.cents} currency={cur} variant="title1" color={d.monthEnd.cents < 0 ? 'negative' : 'text'} testID="month-end" numberOfLines={1} adjustsFontSizeToFit />
+        <T variant="footnote" color="textSecondary" testID="month-end-delta">
+          <Money cents={Math.abs(delta)} currency={cur} variant="footnote" color="textSecondary" /> {delta >= 0 ? 'more' : 'less'} than you have today, by {formatShortDate(d.monthEnd.date)}.
+        </T>
+        <LinkButton title={TERMS.whyThisNumber} onPress={() => actions.explain(d.monthEnd.explanation)} />
+        {(view.show.monthLow || view.show.lowBeforeIncome || view.show.endOfDay || !lb) && (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', rowGap: 14, marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: c.border }} testID="key-balances">
+            {view.show.monthLow && (
+              <Stat testID="lowest" label={TERMS.lowestBalance} cents={d.lowestThroughMonthEnd.cents} cur={cur}
+                sub={LOWEST_MONTH_SUB(formatShortDate(d.lowestThroughMonthEnd.date), formatShortDate(d.monthEnd.date))} onWhy={() => actions.explain(d.lowestThroughMonthEnd.explanation)} />
+            )}
+            {lb ? (view.show.lowBeforeIncome && (
+              <Stat testID="lowest-before-income" label={TERMS.lowestBeforeIncome} cents={lb.cents} cur={cur}
+                sub={`${formatShortDate(lb.date)} · next income ${formatShortDate(lb.nextIncome.date)}`} onWhy={() => actions.explain(lb.explanation)} />
+            )) : (
+              // mobile Home has no "Next income" card, so say it here
+              <Stat testID="lowest-before-income" label={TERMS.lowestBeforeIncome} cents={null} cur={cur} sub="No income with a known amount is scheduled" />
+            )}
+            {view.show.endOfDay && (
+              <Stat testID="end-of-day" label={TERMS.endOfDay} cents={d.endOfDay.cents} cur={cur} sub="After what is scheduled today" onWhy={() => actions.explain(d.endOfDay.explanation)} />
+            )}
+          </View>
+        )}
+        <View onLayout={(e) => setChartW(e.nativeEvent.layout.width)} style={{ marginTop: 12 }}>
           <ForecastChart forecast={d.forecast} currency={cur} low={d.lowestThroughMonthEnd} reserve={data.settings.minReserveCents} width={chartW} />
         </View>
-        <T variant="caption" color="textTertiary" style={{ marginTop: 6 }}>
-          Lowest {formatCents(d.lowestThroughMonthEnd.cents, cur)} on {formatShortDate(d.lowestThroughMonthEnd.date)}
-        </T>
       </Card>
 
       {d.warnings.length > 0 && (
@@ -227,7 +235,7 @@ export function HomeView({ data, today, backup, actions }: { data: WorkspaceData
   );
 }
 
-function Stat({ label, cents, cur, sub, onWhy, repeat, testID }: { label: string; cents: number | null; cur: string; sub: string; onWhy?: () => void; repeat?: boolean; testID?: string }) {
+function Stat({ label, cents, cur, sub, onWhy, testID }: { label: string; cents: number | null; cur: string; sub: string; onWhy?: () => void; testID?: string }) {
   const { c } = useTheme();
   return (
     <View style={{ width: '50%', paddingRight: 10 }} testID={testID}>
@@ -239,7 +247,7 @@ function Stat({ label, cents, cur, sub, onWhy, repeat, testID }: { label: string
       {cents === null ? (
         <T variant="headline" color="textTertiary">—</T>
       ) : (
-        <Money cents={cents} currency={cur} variant="headline" color={repeat ? 'textSecondary' : cents < 0 ? 'negative' : 'text'} numberOfLines={1} adjustsFontSizeToFit />
+        <Money cents={cents} currency={cur} variant="headline" color={cents < 0 ? 'negative' : 'text'} numberOfLines={1} adjustsFontSizeToFit />
       )}
       <T variant="caption" color="textTertiary">{sub}</T>
     </View>

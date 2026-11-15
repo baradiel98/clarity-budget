@@ -24,19 +24,48 @@ describe('mobile Home shows the same figures as web (sample data, Nov 13, 2026)'
     expect(ui.getByTestId('month-end-delta')).toHaveTextContent(X.monthEndDelta);
     expect(ui.getByTestId('safe-to-spend')).toHaveTextContent(X.safeToSpend);
     expect(ui.getByText(X.safeToSpendLine)).toBeTruthy();
-    expect(ui.getByTestId('sts-after')).toHaveTextContent(X.safeToSpendAfterLow);
     expect(ui.getByTestId('sts-next')).toHaveTextContent(X.safeToSpendNext);
-    const stat = (id: string) => ui.getByTestId(id);
-    expect(stat('recorded-balance')).toHaveTextContent(`Current recorded balance${X.recordedBalance}`, { exact: false });
-    expect(stat('lowest')).toHaveTextContent(`${X.lowest}${X.lowestSub}`, { exact: false });
-    expect(stat('lowest-before-income')).toHaveTextContent(`${X.lowestBeforeIncome}${X.lowestBeforeIncomeSub}`, { exact: false });
-    expect(stat('end-of-day')).toHaveTextContent(`${X.endOfDay}${X.endOfDaySub}`, { exact: false });
-    // every figure opens its own explanation from the engine
-    const v = buildHomeView(data, SAMPLE_TODAY).dashboard;
+    // Phase 4B.2: the recorded balance is the headline; Safe to Spend's own low is on its card, named by its span
+    expect(ui.getByTestId('recorded-balance')).toHaveTextContent(X.recordedBalance);
+    expect(ui.getByTestId('sts-low')).toHaveTextContent(`${X.stsLow}${X.stsLowAmount}`, { exact: false });
+    expect(ui.getByTestId('lowest')).toHaveTextContent(`${X.lowest}${X.lowestSub}`, { exact: false });
+    // repeats are hidden: the lowest before next income is this month's low; end of today is the recorded balance
+    expect(ui.queryByTestId('lowest-before-income')).toBeNull();
+    expect(ui.queryByTestId('end-of-day')).toBeNull();
+    // the long "after the low point" sentence moved into Safe to Spend's "Why this number?"
+    expect(ui.queryByTestId('sts-after')).toBeNull();
+    expect(ui.queryByText(X.safeToSpendAfterLow)).toBeNull();
+    const view = buildHomeView(data, SAMPLE_TODAY);
+    const v = view.dashboard;
     await fireEvent.press(ui.getByLabelText('Why this number? Lowest balance this month'));
-    await fireEvent.press(ui.getByLabelText('Why this number? Projected end of today'));
     expect(a.explain).toHaveBeenNthCalledWith(1, v.lowestThroughMonthEnd.explanation);
-    expect(a.explain).toHaveBeenNthCalledWith(2, v.endOfDay.explanation);
+    const whys = ui.getAllByText('Why this number?');
+    await fireEvent.press(whys[0]!); // recorded balance
+    await fireEvent.press(whys[1]!); // Safe to Spend
+    await fireEvent.press(whys[2]!); // projected month-end
+    expect(a.explain).toHaveBeenNthCalledWith(2, v.recordedBalanceExplanation);
+    expect(a.explain).toHaveBeenNthCalledWith(3, view.stsExplanation);
+    expect(view.stsExplanation.summary).toContain(X.safeToSpendAfterLow);
+    expect(a.explain).toHaveBeenNthCalledWith(4, v.monthEnd.explanation);
+  });
+
+  it('the hierarchy: recorded balance, then Safe to Spend, then month-end (screen order)', async () => {
+    const ui = await show(data);
+    const ids = ['recorded-balance', 'safe-to-spend', 'month-end'];
+    const order = JSON.stringify(ui.toJSON());
+    const at = ids.map((id) => order.indexOf(`"testID":"${id}"`));
+    expect(at.every((x) => x >= 0)).toBe(true);
+    expect([...at].sort((p, q) => p - q)).toEqual(at);
+  });
+
+  it('a shortfall (overdue bills, Jan 10, 2027): Short by, its low and the not-counted income stay on the card; repeats hidden', async () => {
+    const ui = await show(data, '2027-01-10');
+    expect(ui.getByTestId('safe-to-spend')).toHaveTextContent('Short by$1,536.89');
+    expect(ui.getByTestId('sts-caption')).toHaveTextContent('What is scheduled is more than your cash and reserve cover through Feb 28. Your balance is lowest on Jan 10.');
+    expect(ui.getByTestId('sts-low')).toHaveTextContent('Lowest through Feb 28 · Jan 10−$1,336.89', { exact: false });
+    expect(ui.getByTestId('sts-excluded')).toHaveTextContent('4 income items are not counted because the amount is estimated, unknown or not yet recorded.');
+    for (const id of ['lowest', 'lowest-before-income', 'end-of-day']) expect(ui.queryByTestId(id)).toBeNull(); // all −$1,336.89 on Jan 10
+    expect(ui.getByTestId('recorded-balance')).toHaveTextContent('$2,871.23');
   });
 
   it('Upcoming: dates, statuses, ≈ for estimates, full names, and status help on request', async () => {

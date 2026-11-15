@@ -182,9 +182,8 @@ test('6. empty Transactions at 320px: actions stay inside the card', async ({ pa
 
 test('7–8. one name for the recorded balance; clear affordability label', async ({ page }) => {
   await sample(page, 1280);
-  const eq = page.getByTestId('sts-breakdown');
-  await expect(eq).toContainText('Current recorded balance$2,871.23');
-  await expect(page.getByRole('region', { name: 'Key balances' })).toContainText('Current recorded balance');
+  // Phase 4B.2: the recorded balance is Home's headline (its own region); the breakdown is in "Why this number?"
+  await expect(page.getByRole('region', { name: 'Current recorded balance' })).toContainText('$2,871.23');
   await expect(page.locator('main')).not.toContainText('Available cash now');
   await page.getByTestId('why-sts').click();
   await expect(page.getByRole('dialog')).toContainText('Current recorded balance');

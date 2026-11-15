@@ -47,7 +47,10 @@ test('first run: short balance question with the full explanation on request; on
   await page.getByRole('button', { name: 'See my overview' }).click();
   await toDashboard(page);
   await expect(page.getByTestId('safe-to-spend')).toHaveText('$2,400.00');
-  await expect(page.getByTestId('sts-after')).toHaveText("Rent ($1,200.00) comes after Nov 15, once $5,400.00 has come in. Your balance stays at or above the Nov 15 low through Dec 31, so it doesn't lower Safe to Spend.");
+  // Phase 4B.2: this sentence is in "Why this number?" now
+  await page.getByTestId('why-sts').click();
+  await expect(page.getByRole('dialog')).toContainText("Rent ($1,200.00) comes after Nov 15, once $5,400.00 has come in. Your balance stays at or above the Nov 15 low through Dec 31, so it doesn't lower Safe to Spend.");
+  await page.keyboard.press('Escape');
   // the "Next after…" caption sits below the explanation with a visible gap (it used to touch it)
   const above = await page.locator('.card.sts > p.t-callout').boundingBox();
   const next = await page.getByTestId('sts-next').boundingBox();

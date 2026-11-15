@@ -18,17 +18,24 @@ test.describe('dashboard', () => {
   });
 
   test('Safe to Spend breakdown shows the engine arithmetic and adds up', async ({ page }) => {
-    const eq = page.getByTestId('sts-breakdown');
+    // Phase 4B.2: the breakdown is in "Why this number?" (the engine's own lines)
+    await page.getByTestId('why-sts').click();
+    let eq = page.getByRole('dialog');
     await expect(eq).toContainText('Current recorded balance$1,200.00');
-    await expect(eq).toContainText('Lowest point · Sep 3$1,200.00');
+    await expect(eq).toContainText('Lowest point: Sep 3$1,200.00');
     await expect(eq).toContainText('Safe to Spend$1,200.00');
+    await page.keyboard.press('Escape');
     // set a reserve: the breakdown and the headline change together
-    await page.keyboard.press('6');
+    await page.getByRole('link', { name: 'Settings' }).click();
     await page.getByLabel('Minimum cash reserve').fill('150');
     await page.getByLabel('Minimum cash reserve').blur();
-    await page.keyboard.press('1');
-    await expect(page.getByTestId('sts-breakdown')).toContainText('Minimum cash reserve−$150.00');
+    await page.getByRole('link', { name: 'Home', exact: true }).click();
     await expect(page.getByTestId('safe-to-spend')).toHaveText('$1,050.00');
+    await page.getByTestId('why-sts').click();
+    eq = page.getByRole('dialog');
+    await expect(eq).toContainText('Minimum cash reserve−$150.00');
+    await expect(eq).toContainText('Safe to Spend$1,050.00');
+    await page.keyboard.press('Escape');
   });
 
   test('forecast chart: hover, keyboard and range', async ({ page }) => {

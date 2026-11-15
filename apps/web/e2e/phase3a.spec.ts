@@ -152,13 +152,16 @@ test.describe('3. Touch targets on phones', () => {
   for (const w of PHONES) {
     test(`${w}px: Why icons and links, Budget category links are at least 40px and do not overlap others`, async ({ page }) => {
       await sample(page, w);
-      for (let i = 0; i < 4; i++) {
+      // Phase 4B.2: Home shows 3 figure icons on the sample day (repeated figures are hidden)
+      const icons = await page.locator('button.why').count();
+      expect(icons).toBeGreaterThanOrEqual(3);
+      for (let i = 0; i < icons; i++) {
         const h = await hitArea(page, 'button.why', i);
         expect(h.w, `why ${i}`).toBeGreaterThanOrEqual(40);
         expect(h.h, `why ${i}`).toBeGreaterThanOrEqual(40);
       }
       const links = await page.getByRole('button', { name: 'Why this number?', exact: true }).count();
-      expect(links).toBeGreaterThanOrEqual(2);
+      expect(links).toBeGreaterThanOrEqual(1);
       for (let i = 0; i < links; i++) {
         const h = await page.getByRole('button', { name: 'Why this number?', exact: true }).nth(i).evaluate((el) => { el.classList.add('qa-probe'); return 0; }).then(() => hitArea(page, '.qa-probe'));
         await page.locator('.qa-probe').evaluate((el) => el.classList.remove('qa-probe'));
@@ -166,8 +169,8 @@ test.describe('3. Touch targets on phones', () => {
       }
       // focus stays visible on the enlarged controls
       // keyboard: the enlarged control is still reachable with Tab and shows its focus ring
-      await page.locator('button.why').first().evaluate((e) => (e.closest('.stat') as HTMLElement).querySelector<HTMLElement>('.k')?.setAttribute('tabindex', '-1'));
-      await page.locator('.stat .k').first().focus();
+      await page.locator('#h-bal').evaluate((e) => e.setAttribute('tabindex', '-1'));
+      await page.locator('#h-bal').focus();
       await page.keyboard.press('Tab');
       const f = await page.evaluate(() => ({ why: document.activeElement?.classList.contains('why'), outline: getComputedStyle(document.activeElement!).outlineStyle }));
       expect(f).toEqual({ why: true, outline: 'solid' });

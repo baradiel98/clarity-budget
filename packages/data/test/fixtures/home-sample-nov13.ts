@@ -20,11 +20,15 @@ export const HOME_SAMPLE = {
   safeToSpendAfterLow: "Electricity, Phone, Card payment and Savings ($421.89) come after Dec 1, once $5,580.00 has come in. Your balance stays at or above the Dec 1 low through Dec 31, so they don't lower Safe to Spend.",
   recordedBalance: '$2,871.23',
   lowest: '$2,779.83',
-  lowestSub: 'Nov 18 · through month-end',
+  // Phase 4B.2: named by its time span (was "Nov 18 · through month-end")
+  lowestSub: 'Nov 18 · through Nov 30',
+  // Phase 4B.2: Safe to Spend's own low point, on its card, named by its span (a different point from this month's low)
+  stsLow: 'Lowest through Dec 31 · Dec 1',
+  stsLowAmount: '$2,627.17',
+  // Phase 4B.2: hidden on Home because they repeat a figure already shown (values kept here to prove it):
+  // the lowest before next income IS this month's low (same date and amount); end of today IS the recorded balance.
   lowestBeforeIncome: '$2,779.83',
-  lowestBeforeIncomeSub: 'Same low point (Nov 18), before your Nov 19 income',
   endOfDay: '$2,871.23',
-  endOfDaySub: 'Nothing else is scheduled today',
   upcomingUntil: 'Nov 30',
   /** [date, name, status label, amount as shown (≈ = estimated)] */
   upcoming: [

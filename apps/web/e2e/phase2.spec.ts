@@ -22,9 +22,10 @@ test.describe('dashboard (sample data, Nov 13 2026)', () => {
     }
     // Phase 4A: Safe to Spend now covers the Dec 1 rent (horizon = end of next month); it was $2,579.83 when it stopped at Nov 30.
     await expect(page.getByTestId('safe-to-spend')).toHaveText('$2,427.17');
-    await expect(page.getByTestId('sts-after')).toHaveText("Electricity, Phone, Card payment and Savings ($421.89) come after Dec 1, once $5,580.00 has come in. Your balance stays at or above the Dec 1 low through Dec 31, so they don't lower Safe to Spend.");
-    // "Why this number?" lists the later items too
+    // Phase 4B.2: the sentence about the later items is in "Why this number?" (no longer on the card), with each item listed
+    await expect(page.getByTestId('sts-after')).toHaveCount(0);
     await page.getByTestId('why-sts').click();
+    await expect(page.getByRole('dialog')).toContainText("Electricity, Phone, Card payment and Savings ($421.89) come after Dec 1, once $5,580.00 has come in. Your balance stays at or above the Dec 1 low through Dec 31, so they don't lower Safe to Spend.");
     await expect(page.getByRole('dialog')).toContainText("after the lowest point, doesn't lower it");
     await page.keyboard.press('Escape');
   });
@@ -41,12 +42,13 @@ test.describe('dashboard (sample data, Nov 13 2026)', () => {
     await expect(page.getByText('Nothing here is recorded until you record it or mark it paid.')).toBeVisible();
   });
 
-  test('repeated figures are said in words, not just repeated', async ({ page }) => {
+  test('repeated figures are not repeated (Phase 4B.2: hidden; they used to be greyed and said in words)', async ({ page }) => {
     await sampleOn(page, '2026-11-13');
-    await expect(page.getByText('Same low point (Nov 18), before your Nov 19 income')).toBeVisible();
-    await expect(page.getByText('Nothing else is scheduled today')).toBeVisible();
-    // "Why this number?" still available on every metric
-    await expect(page.getByRole('button', { name: /Why this number\?/ })).toHaveCount(6);
+    // the lowest before next income is this month's low (Nov 18); end of today is the recorded balance
+    await expect(page.getByTestId('lowest-before-income')).toHaveCount(0);
+    await expect(page.getByTestId('end-of-day')).toHaveCount(0);
+    // "Why this number?" on every figure shown: recorded balance, month-end, this month's low, Safe to Spend
+    await expect(page.getByRole('button', { name: /Why this number\?/ })).toHaveCount(4);
   });
 
   test('chart fills its card, labels do not collide, and stays usable on a phone', async ({ page }) => {

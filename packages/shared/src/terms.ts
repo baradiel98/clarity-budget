@@ -71,6 +71,12 @@ export const UPCOMING_LATER_TITLE = 'Later · also counted in Safe to Spend';
  */
 export const BALANCE_ENTRY_HINT =
   "Enter the posted (cleared) balance your bank shows right now, without pending items. If the account is overdrawn, type a minus sign (for example -50.00). Anything you record afterwards that's dated today or later is added to it; if something dated today is already in this balance, tick “Already included” when you record it.";
+/**
+ * Phase 4B.2: the two low points Home can show, named by their time span so they never look like two versions of one
+ * figure: Safe to Spend's ("Lowest through Dec 31") and this month's (TERMS.lowestBalance, "through Nov 30").
+ */
+export const LOWEST_THROUGH = (date: string) => `Lowest through ${date}`;
+export const LOWEST_MONTH_SUB = (date: string, monthEnd: string) => `${date} · through ${monthEnd}`;
 /** Phase 4B.1: the onboarding balance question keeps only this line visible; the full BALANCE_ENTRY_HINT is one tap away. */
 export const BALANCE_ENTRY_SHORT = 'The posted balance your bank shows right now.';
 export const BALANCE_ENTRY_MORE = 'More about this balance';

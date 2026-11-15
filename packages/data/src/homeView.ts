@@ -1,5 +1,5 @@
 import type { ISODate, Transaction, WorkspaceData } from '@clarity/shared';
-import { buildDashboard, type Dashboard } from '@clarity/engine';
+import { buildDashboard, type Dashboard, type Explanation } from '@clarity/engine';
 import { engineInput } from './selectors';
 
 /**
@@ -20,6 +20,22 @@ export interface HomeView {
   quietToday: boolean;
   /** Most recent recorded transactions (transfers once, from the sending side), newest first. */
   recent: Transaction[];
+  /**
+   * Phase 4B.2: which supporting figures Home shows (both apps). A figure is hidden only when it is the very same
+   * amount on the very same date as one already shown more prominently (the recorded balance, or another low point):
+   * - stsLow: Safe to Spend's lowest point (through its horizon), unless it is today's recorded balance or the very
+   *   amount Safe to Spend shows (no reserve: Safe to Spend IS the low, and its caption gives the date);
+   * - monthLow: the lowest balance this month, unless it is that same point (or today's recorded balance);
+   * - lowBeforeIncome: the lowest before next income, unless it is one of those points (false when there is none);
+   * - endOfDay: the end-of-today figure, unless nothing else is scheduled today (`quietToday`: it equals the balance) or
+ *   it is today's low point already shown (same amount, today).
+   */
+  show: { stsLow: boolean; monthLow: boolean; lowBeforeIncome: boolean; endOfDay: boolean };
+  /**
+   * Phase 4B.2: Safe to Spend's "Why this number?": the engine's explanation, with the card's former "after the low
+   * point" sentence added to its summary (the card no longer shows it). Lines, amounts and assumptions unchanged.
+   */
+  stsExplanation: Explanation;
 }
 
 export const RECENT_COUNT = 6;
@@ -28,17 +44,29 @@ export function buildHomeView(data: WorkspaceData, today: ISODate): HomeView {
   const d = buildDashboard(engineInput(data, today));
   const s = d.safeToSpend;
   const lb = d.lowestBeforeNextIncome;
+  const cash = d.balances.availableCashCents;
+  const same = (a: { date: ISODate; cents: number }, b: { date: ISODate; cents: number }) => a.date === b.date && a.cents === b.cents;
+  const isBalanceToday = (p: { date: ISODate; cents: number }) => same(p, { date: today, cents: cash });
+  const month = d.lowestThroughMonthEnd;
+  const quietToday = (d.forecast.days.find((x) => x.date === today)?.events.length ?? 0) === 0 && !d.upcoming.some((u) => u.status === 'overdue' && !u.isIncome);
   return {
     dashboard: d,
     monthEndDeltaCents: d.monthEnd.cents - d.balances.availableCashCents,
     stsIncomeBeforeCents: s.lowPoint.incomeBefore.reduce((a, e) => a + e.cashDeltaCents, 0),
     stsBillsBeforeCents: s.lowPoint.obligations.reduce((a, e) => a + e.cashDeltaCents, 0),
     sameLow: !!lb && lb.date === d.lowestThroughMonthEnd.date && lb.cents === d.lowestThroughMonthEnd.cents,
-    quietToday: (d.forecast.days.find((x) => x.date === today)?.events.length ?? 0) === 0 && !d.upcoming.some((u) => u.status === 'overdue' && !u.isIncome),
+    quietToday,
     recent: data.transactions
       .filter((t) => t.date <= today && (t.kind !== 'transfer' || t.amountCents < 0))
       .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.createdAt - a.createdAt))
       .slice(0, RECENT_COUNT),
+    show: {
+      stsLow: !isBalanceToday(s.lowPoint) && s.lowPoint.cents !== s.cents,
+      monthLow: !same(month, s.lowPoint) && !isBalanceToday(month),
+      lowBeforeIncome: !!lb && !same(lb, month) && !same(lb, s.lowPoint) && !isBalanceToday(lb),
+      endOfDay: !quietToday && !same({ date: today, cents: d.endOfDay.cents }, s.lowPoint) && !same({ date: today, cents: d.endOfDay.cents }, month),
+    },
+    stsExplanation: s.afterLow.note ? { ...s.explanation, summary: `${s.explanation.summary} ${s.afterLow.note}` } : s.explanation,
   };
 }
 

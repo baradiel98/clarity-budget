@@ -43,7 +43,7 @@ test('D1: an overdue rent paid 38 days late: Show older transactions lists it (u
   await go(page, '/');
   const beforeText = await page.getByTestId('safe-to-spend').innerText();
   const before = money(beforeText);
-  const recorded = await page.locator('.stat', { hasText: 'Current recorded balance' }).innerText();
+  const recorded = await page.getByTestId('available-cash').innerText();
   const markRent = page.getByRole('button', { name: 'Mark paid: Rent' });
   await markRent.first().click();
   const d = page.getByRole('dialog');
@@ -63,7 +63,7 @@ test('D1: an overdue rent paid 38 days late: Show older transactions lists it (u
   const after = money(afterText);
   // e.g. "Short by $2,986.89" → "Short by $1,536.89": the overdue $1,450 Dec 1 rent is no longer counted
   expect(after - before).toBe(145000);
-  expect(await page.locator('.stat', { hasText: 'Current recorded balance' }).innerText()).toBe(recorded); // $1,421.23 before and after
+  expect(await page.getByTestId('available-cash').innerText()).toBe(recorded); // $1,421.23 before and after
   await go(page, '/transactions');
   await expect(page.locator('table.data tbody tr').filter({ hasText: 'OAKWOOD RENT' })).toHaveCount(1);
 });

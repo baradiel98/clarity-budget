@@ -782,6 +782,26 @@ Tests:
   - `apps/web/e2e/phase4b1.spec.ts` (3).
 - **Updated on purpose:** `phase3c.spec.ts` and `phase4a56.spec.ts`.
 
+## 7ac. Phase 4B.2: Home hierarchy and clarity
+
+Home only; no calculation or data change. Checkpoint `phase4b2-checkpoint-before` (b028023).
+
+| Before | After |
+|---|---|
+| Headline: Projected month-end $4,077.17; Safe to Spend beside it; recorded balance in a row of 4 small figures | Headline: Current recorded balance $2,871.23; Safe to Spend beside it (desktop) or right after it (one column); month-end $4,077.17 as a supporting figure above the chart |
+| "Lowest balance this month $2,779.83 · Nov 18 · through month-end" and, in the Safe to Spend breakdown, "Lowest point · Dec 1 $2,627.17" | "Lowest balance this month $2,779.83 · Nov 18 · through Nov 30" and "Lowest through Dec 31 · Dec 1 $2,627.17" |
+| Lowest before next income $2,779.83 ("Same low point…") and Projected end of today $2,871.23 ("Nothing else is scheduled today"), greyed | Hidden (they repeat this month's low and the recorded balance) |
+| First run: $2,400.00 shown 7 times | Balance and Safe to Spend (plus the chart's low label) |
+| Safe to Spend card: 6-row breakdown and a 2–3 line "after the low point" sentence | In "Why this number?" (the engine's lines, with that sentence added to the summary) |
+| Shortfall (Jan 10, 2027): −$1,336.89 shown 4 times | Once, on the Safe to Spend card ("Lowest through Feb 28 · Jan 10"); Short by, its status and the not-counted income stay on the card |
+
+Tests:
+- **New:**
+  - `packages/data/test/home-hierarchy.test.ts` (4, hand-calculated: three different lows; first run; a bill due today; a shortfall);
+  - the mobile `home.test.tsx` hierarchy and shortfall cases;
+  - `apps/web/e2e/phase4b2.spec.ts` (5).
+- **Updated on purpose** (behaviour changed): the shared fixture `home-sample-nov13.ts`, `home-view.test.ts`, mobile `home.test.tsx`, and the e2e specs `phase2`, `phase3`, `phase3a`, `phase3c`, `phase4a2`, `phase4a11`, `phase4b1` and `redesign`.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

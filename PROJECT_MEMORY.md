@@ -66,7 +66,7 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Decision, user]** Visual reference is copilot.money: cool blue-tinted light background, white cards, navy text, a clear blue accent, soft blue shadows, pill buttons. Borrow the feel only, not their branding, logo, emoji, font (Matter, licensed) or layouts. The site is light-only, so Clarity's dark mode is our own cool navy version.
 - **[Verified]** Tokens now: bg #F2F6FC, text #12263F, accent #2559DB (Copilot's #437CEF fails AA for text, so it is deliberately deeper), dark bg #0A0F19 / accent #79A6FF. Radii 8/12/20/26, buttons and segmented controls are pills. `chartPositive` is a brighter green for fills only (never text). Spending bars use the accent blue. Category hues are saturated (blue, pink, teal, violet, orange, green, sky, rose). App icons regenerated in blue from `packages/design-system/icon.svg`.
 - **[Lesson]** Avoid warm/beige neutrals and earthy category hues: the user reads them as brown.
-- **[Decision, user]** Home has a stronger blue glow: an ambient blue light behind the overview, and a layered blue shadow plus light blue tint on the Projected month-end and Safe to Spend cards. Other cards stay plain. Tints are capped (Safe to Spend top at 10% accent) so all text stays ≥4.5:1.
+- **[Decision, user]** Home has a stronger blue glow: an ambient blue light behind the overview, and a layered blue shadow plus light blue tint on the two headline cards (Projected month-end and Safe to Spend until 4B.2; since 4B.2 Current recorded balance and Safe to Spend). Other cards stay plain. Tints are capped (Safe to Spend top at 10% accent) so all text stays ≥4.5:1.
 - **[Lesson]** Decorative layers must not extend past the content width (a -24px inset caused 8px of horizontal scroll on phones). `redesign.spec.ts` phone test catches this.
 - **[Verified]** Mobile Home has the same glow (`glowStyle`/`ambientGlow` in `apps/mobile/src/ui/theme.tsx`, using RN 0.88 `boxShadow` and `backgroundImage`; a contrast test covers the tints). Device rendering not yet verified; colored shadows need Android 9+.
 - **[Lesson]** The user saw no change on the live site after deploys: the PWA service worker serves the cached version until the page reloads, and iPhones keep tabs alive. Fix: Settings shows `App version` (git commit) with **Check for updates**, the app re-checks when it returns to the foreground, and a "new version is ready" banner offers Reload (never auto-reload: it would lock the app and could lose typing). **[Verified by user, 2026-11-13]** iPhone picked up the new version (3910f60) after the steps in `docs/device-test-script.md`; PC updated on its own.
@@ -169,7 +169,7 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Decision]** Native Home (`apps/mobile/src/features/Home.tsx`, a testable `HomeView`) now has the same information as web:
   - month-end with delta;
   - Safe to Spend with the after-low note;
-  - a "Key balances" 2×2 grid (recorded, lowest, lowest before income, end of today), where tapping a label opens "Why this number?";
+  - ~~a "Key balances" 2×2 grid (recorded, lowest, lowest before income, end of today)~~ **[Superseded in 4B.2]**: the recorded balance is the headline card and the other figures appear only when they are not repeats;
   - Upcoming with ≈, full names, card note, and a "What do these labels mean?" toggle;
   - Recent transactions.
 
@@ -635,3 +635,30 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Tests changed on purpose]**
   - `phase3c.spec.ts` now uses the sidebar button (the Home header button is gone).
   - `phase4a56.spec.ts` opens the disclosure before checking the hint text.
+
+## Phase 4B.2 (2026-11-15): Home hierarchy and clarity
+- **[Decision, user]** Home's order of importance:
+  1. Current recorded balance (How much do I have?);
+  2. Safe to Spend (How much can I safely spend?), prominent and never below the forecast;
+  3. Projected month-end balance (Where am I heading?), as a supporting figure.
+- **[Verified implementation]** Web and mobile, from the shared view model:
+  - **Web:**
+    - A hero card shows the recorded balance (`available-cash`).
+    - Safe to Spend sits beside it.
+    - A forecast card holds month-end, any non-repeated low point and the chart.
+    - Grid areas put Safe to Spend right after the balance on one column (≤1080px).
+    - The separate "Key balances" row is gone.
+  - **Mobile:** recorded-balance card (`recorded-balance`), then Safe to Spend, then a Projected month-end card with the supporting figures and the chart. The "Key balances" card and the duplicate "Lowest … on …" chart caption are gone.
+  - **`buildHomeView().show`** (`packages/data/src/homeView.ts`): a figure is hidden only when it is the very same amount on the very same date as one already shown.
+    - `stsLow` is hidden when it equals today's balance, or equals Safe to Spend itself (no reserve).
+    - `monthLow` is hidden when it is Safe to Spend's low, or today's balance.
+    - `lowBeforeIncome` is hidden when it is either of those points, or there is none. Mobile still shows "—, No income with a known amount is scheduled", because mobile Home has no Next income card.
+    - `endOfDay` is hidden when `quietToday`, or when it equals today's low already shown.
+  - **Distinct labels** (`LOWEST_THROUGH`, `LOWEST_MONTH_SUB` in terms.ts):
+    - Safe to Spend's card: "Lowest through Dec 31 · Dec 1  $2,627.17".
+    - The forecast card: "Lowest balance this month · Nov 18 · through Nov 30  $2,779.83".
+  - **Safe to Spend card** keeps the amount (or Short by), caption, its low, "Next after …", the not-counted income note, Can I afford this? and Why this number?. The breakdown and the "after the low point" sentence moved into Why this number? (`view.stsExplanation`: the engine's explanation, with that sentence added to the summary; lines and assumptions unchanged).
+- **[Verified]** No calculation changed. Every Home amount in the cross-platform fixture is unchanged; the fixture now also records which figures are hidden and why.
+- **[Kept]** The user-approved blue glow, now on the two headline cards (balance and Safe to Spend). No new gradients.
+- **[Lesson]** Full-page Playwright screenshots can show the forecast chart empty (the viewport is resized during capture); viewport screenshots show it. Not an app defect.
+- **[Lesson]** Keyboard shortcuts are ignored while a dialog is still closing (`anyOpen`), so a test that presses a shortcut right after Escape must wait or click instead.

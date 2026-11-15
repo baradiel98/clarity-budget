@@ -2,7 +2,7 @@ import { AlertTriangle, ArrowDownLeft, ArrowUpRight, CalendarClock, CircleAlert,
 import { useMemo, useState, type CSSProperties } from 'react';
 import { backupDue, buildHomeView, recentRow, upcomingLaterPreview } from '@clarity/data';
 import { buildForecast, cashHistory, type Explanation, type UpcomingItem } from '@clarity/engine';
-import { addDays, formatCents, formatMonthYear, formatShortDate, formatWeekdayDate, INCOME_STATUS_LABEL, OCCURRENCE_STATUS_LABEL, STATUS_HELP, TERMS, UPCOMING_LATER_TITLE, UPCOMING_NOTE } from '@clarity/shared';
+import { addDays, formatCents, formatMonthYear, formatShortDate, formatWeekdayDate, INCOME_STATUS_LABEL, LOWEST_MONTH_SUB, LOWEST_THROUGH, OCCURRENCE_STATUS_LABEL, STATUS_HELP, TERMS, UPCOMING_LATER_TITLE, UPCOMING_NOTE } from '@clarity/shared';
 import { isFresh } from '../state/fresh';
 import { CaptureLauncher } from './Capture';
 import { useRouter } from '../lib/router';
@@ -45,7 +45,7 @@ export function Home() {
   const history = useMemo(() => cashHistory(data.accounts, data.transactions, addDays(today, -14), addDays(today, -1), cur), [data.accounts, data.transactions, today, cur]);
 
   const later = upcomingLaterPreview(d);
-  const { monthEndDeltaCents: delta, stsBillsBeforeCents: billsBefore, stsIncomeBeforeCents: incomeBefore, sameLow, quietToday, recent } = view;
+  const { monthEndDeltaCents: delta, show, recent } = view;
   const cats = useMemo(() => new Map(data.categories.map((c) => [c.id, c])), [data.categories]);
   const Why = ({ ex, label }: { ex: Explanation; label: string }) => (
     <button className="why" aria-label={`${TERMS.whyThisNumber} ${label}`} title={TERMS.whyThisNumber} onClick={() => ui.explain(ex)}>
@@ -73,25 +73,61 @@ export function Home() {
       <div className="stack stagger">
         <CaptureLauncher onOpen={() => navigate('/capture')} />
         <div className="overview">
-          {/* 1. Where you are heading */}
-          <section className="card outlook" aria-labelledby="h-me">
-            <div className="row between wrap">
-              <h2 className="overline" id="h-me">{TERMS.projectedMonthEnd}</h2>
-              <Segmented label="Chart range" value={range} onChange={setRange} options={[{ value: 'month', label: 'Month-end' }, { value: '30', label: '30 days' }, { value: '90', label: '90 days' }]} />
+          {/* Phase 4B.2 hierarchy: 1. what you have (recorded balance), 2. what you can safely spend (Safe to Spend, beside
+              it), 3. where you are heading (month-end and the forecast). A supporting figure is shown only when it isn't the
+              very same amount and date as one already on screen (view.show). */}
+          <section className="card hero-card" aria-labelledby="h-bal">
+            <div className="hero-k">
+              <h2 className="overline" id="h-bal">{TERMS.recordedBalance}</h2>
+              <Why ex={d.recordedBalanceExplanation} label={TERMS.recordedBalance} />
             </div>
-            <div className={`t-hero fit money ${d.monthEnd.cents < 0 ? 'neg' : ''}`} style={fitChars(formatCents(d.monthEnd.cents, cur))} data-testid="month-end"><Money cents={d.monthEnd.cents} currency={cur} animate /></div>
-            <div className="delta">
-              {delta >= 0 ? <TrendingUp size={16} className="pos" /> : <TrendingDown size={16} className="neg" />}
-              <span>
-                <Money cents={Math.abs(delta)} currency={cur} /> {delta >= 0 ? 'more' : 'less'} than you have today, by {formatShortDate(d.monthEnd.date)}.{' '}
-                <button className="btn-link" onClick={() => ui.explain(d.monthEnd.explanation)}>{TERMS.whyThisNumber}</button>
-              </span>
+            <div className={`t-hero fit money ${d.balances.availableCashCents < 0 ? 'neg' : ''}`} style={fitChars(formatCents(d.balances.availableCashCents, cur))} data-testid="available-cash"><Money cents={d.balances.availableCashCents} currency={cur} animate /></div>
+            <div className="hero-sub muted t-callout">{d.balances.cardOwedCents > 0 ? <>Across spendable accounts · <Money cents={d.balances.cardOwedCents} currency={cur} /> {TERMS.cardOwed.toLowerCase()}</> : 'Across spendable accounts'}</div>
+          </section>
+
+          {/* 3. Where you are heading (on narrow windows this comes after Safe to Spend) */}
+          <section className="card outlook" aria-label="Where you are heading">
+            <div className="outlook-figures" data-testid="outlook-figures">
+              <div className="fig">
+                <div className="k">{TERMS.projectedMonthEnd} <Why ex={d.monthEnd.explanation} label={TERMS.projectedMonthEnd} /></div>
+                <div className={`v money ${d.monthEnd.cents < 0 ? 'neg' : ''}`} data-testid="month-end"><Money cents={d.monthEnd.cents} currency={cur} animate /></div>
+                <div className="s delta">
+                  {delta >= 0 ? <TrendingUp size={14} className="pos" /> : <TrendingDown size={14} className="neg" />}
+                  <span><Money cents={Math.abs(delta)} currency={cur} /> {delta >= 0 ? 'more' : 'less'} than you have today, by {formatShortDate(d.monthEnd.date)}.</span>
+                </div>
+              </div>
+              {show.monthLow && (
+                <div className="fig" data-testid="lowest-month">
+                  <div className="k">{TERMS.lowestBalance} <Why ex={d.lowestThroughMonthEnd.explanation} label={TERMS.lowestBalance} /></div>
+                  <div className={`v money ${d.lowestThroughMonthEnd.cents < 0 ? 'neg' : ''}`} data-testid="lowest"><Money cents={d.lowestThroughMonthEnd.cents} currency={cur} animate /></div>
+                  <div className="s">{LOWEST_MONTH_SUB(formatShortDate(d.lowestThroughMonthEnd.date), formatShortDate(d.monthEnd.date))}</div>
+                </div>
+              )}
+              {show.lowBeforeIncome && d.lowestBeforeNextIncome && (
+                <div className="fig" data-testid="lowest-before-income">
+                  <div className="k">{TERMS.lowestBeforeIncome} <Why ex={d.lowestBeforeNextIncome.explanation} label={TERMS.lowestBeforeIncome} /></div>
+                  <div className={`v money ${d.lowestBeforeNextIncome.cents < 0 ? 'neg' : ''}`}><Money cents={d.lowestBeforeNextIncome.cents} currency={cur} animate /></div>
+                  <div className="s">{formatShortDate(d.lowestBeforeNextIncome.date)} · next income {formatShortDate(d.lowestBeforeNextIncome.nextIncome.date)}</div>
+                </div>
+              )}
+              {show.endOfDay && (
+                <div className="fig" data-testid="end-of-day">
+                  <div className="k">{TERMS.endOfDay} <Why ex={d.endOfDay.explanation} label={TERMS.endOfDay} /></div>
+                  <div className={`v money ${d.endOfDay.cents < 0 ? 'neg' : ''}`}><Money cents={d.endOfDay.cents} currency={cur} animate /></div>
+                  <div className="s">After what is scheduled today</div>
+                </div>
+              )}
+            </div>
+
+            <div className="row between wrap chart-head">
+              <span className="overline">Cash over time</span>
+              <Segmented label="Chart range" value={range} onChange={setRange} options={[{ value: 'month', label: 'Month-end' }, { value: '30', label: '30 days' }, { value: '90', label: '90 days' }]} />
             </div>
             <ForecastChart history={history} forecast={forecast} currency={cur} reserve={data.settings.minReserveCents} monthEnd={d.monthEnd.date} />
           </section>
 
           <div className="side">
-          {/* 2. Safe to Spend: the signature number, with its own arithmetic from the engine */}
+          {/* 2. Safe to Spend: the headline amount and its status; the full arithmetic is behind "Why this number?" */}
           <section className="card sts" aria-labelledby="h-sts">
             <h2 className="overline" id="h-sts">{TERMS.safeToSpend}</h2>
             <div className={`metric fit money ${sts.cents < 0 ? 'short' : ''}`} style={fitChars((sts.cents < 0 ? `${TERMS.shortBy} ` : '') + formatCents(sts.cents < 0 ? sts.shortfallCents : sts.cents, cur))} data-testid="safe-to-spend">
@@ -100,20 +136,17 @@ export function Home() {
             <p className="t-callout muted">
               {sts.cents < 0 ? `What is scheduled is more than your cash and reserve cover through ${formatShortDate(sts.horizonEnd)}.` : <span className={sts.dependableIncome ? undefined : 'warn'} data-testid="sts-caption">{sts.caption}</span>} Your balance is lowest on {formatShortDate(sts.lowPoint.date)}.
             </p>
+            {show.stsLow && (
+              <div className="sts-low" data-testid="sts-low">
+                <span>{LOWEST_THROUGH(formatShortDate(sts.horizonEnd))} <span className="sub">· {formatShortDate(sts.lowPoint.date)}</span></span>
+                <span className={`num ${sts.lowPoint.cents < 0 ? 'neg' : ''}`}><Money cents={sts.lowPoint.cents} currency={cur} /></span>
+              </div>
+            )}
             {sts.nextAfterNote && <p className="sts-note" data-testid="sts-next">{sts.nextAfterNote}</p>}
-            <div className="eq" data-testid="sts-breakdown">
-              <div><span>{TERMS.recordedBalance}</span><span className="num"><Money cents={sts.availableCashCents} currency={cur} /></span></div>
-              {incomeBefore !== 0 && <div><span>Income before the lowest point <span className="sub">({sts.lowPoint.incomeBefore.length})</span></span><span className="num pos"><Money cents={incomeBefore} currency={cur} sign="always" /></span></div>}
-              {billsBefore !== 0 && <div><span>Bills and transfers through {formatShortDate(sts.lowPoint.date)} <span className="sub">({sts.lowPoint.obligations.length})</span></span><span className="num"><Money cents={billsBefore} currency={cur} sign="always" /></span></div>}
-              <div><span>Lowest point <span className="sub">· {formatShortDate(sts.lowPoint.date)}</span></span><span className={`num ${sts.lowPoint.cents < 0 ? 'neg' : ''}`}><Money cents={sts.lowPoint.cents} currency={cur} /></span></div>
-              <div><span>{TERMS.minReserve}</span><span className="num"><Money cents={-sts.reserveCents} currency={cur} sign={sts.reserveCents ? 'always' : 'auto'} /></span></div>
-              <div className="total"><span>{sts.cents < 0 ? TERMS.shortBy : TERMS.safeToSpend}</span><span className={`num ${sts.cents < 0 ? 'neg' : ''}`}><Money cents={sts.cents < 0 ? sts.shortfallCents : sts.cents} currency={cur} /></span></div>
-            </div>
-            {sts.afterLow.note && <p className="hint sts-after" data-testid="sts-after">{sts.afterLow.note}</p>}
-            {sts.excludedIncome.length > 0 && <p className="hint" style={{ marginBottom: 14 }}>{sts.excludedIncome.length} income item{sts.excludedIncome.length > 1 ? 's are' : ' is'} not counted because the amount is estimated, unknown or not yet recorded.</p>}
+            {sts.excludedIncome.length > 0 && <p className="hint" data-testid="sts-excluded" style={{ marginBottom: 14 }}>{sts.excludedIncome.length} income item{sts.excludedIncome.length > 1 ? 's are' : ' is'} not counted because the amount is estimated, unknown or not yet recorded.</p>}
             <div className="sts-actions">
               <button className="btn btn-secondary" onClick={() => ui.openAfford()}>{TERMS.canIAfford}</button>
-              <button className="btn-link" data-testid="why-sts" onClick={() => ui.explain(sts.explanation)}>{TERMS.whyThisNumber}</button>
+              <button className="btn-link" data-testid="why-sts" onClick={() => ui.explain(view.stsExplanation)}>{TERMS.whyThisNumber}</button>
             </div>
           </section>
           <section className="card next-income" aria-label="Next income">
@@ -135,39 +168,6 @@ export function Home() {
           </section>
           </div>
         </div>
-
-        {/* 3. Supporting figures. When two figures are the same thing, say so instead of repeating a number. */}
-        <section className="stats" aria-label="Key balances">
-          <div className="stat">
-            <div className="k">{TERMS.recordedBalance} <Why ex={d.recordedBalanceExplanation} label={TERMS.recordedBalance} /></div>
-            <div className="v money" data-testid="available-cash"><Money cents={d.balances.availableCashCents} currency={cur} animate /></div>
-            <div className="s">{d.balances.cardOwedCents > 0 ? <><Money cents={d.balances.cardOwedCents} currency={cur} /> {TERMS.cardOwed.toLowerCase()}</> : 'Across spendable accounts'}</div>
-          </div>
-          <div className="stat">
-            <div className="k">{TERMS.lowestBalance} <Why ex={d.lowestThroughMonthEnd.explanation} label={TERMS.lowestBalance} /></div>
-            <div className={`v money ${d.lowestThroughMonthEnd.cents < 0 ? 'neg' : ''}`} data-testid="lowest"><Money cents={d.lowestThroughMonthEnd.cents} currency={cur} animate /></div>
-            <div className="s">{formatShortDate(d.lowestThroughMonthEnd.date)} · through month-end</div>
-          </div>
-          <div className="stat">
-            <div className="k">{TERMS.lowestBeforeIncome} {d.lowestBeforeNextIncome && <Why ex={d.lowestBeforeNextIncome.explanation} label={TERMS.lowestBeforeIncome} />}</div>
-            {d.lowestBeforeNextIncome ? (
-              <>
-                <div className={`v money ${d.lowestBeforeNextIncome.cents < 0 ? 'neg' : ''} ${sameLow ? 'repeat' : ''}`}><Money cents={d.lowestBeforeNextIncome.cents} currency={cur} animate /></div>
-                <div className="s">{sameLow ? `Same low point (${formatShortDate(d.lowestBeforeNextIncome.date)}), before your ${formatShortDate(d.lowestBeforeNextIncome.nextIncome.date)} income` : `${formatShortDate(d.lowestBeforeNextIncome.date)} · next income ${formatShortDate(d.lowestBeforeNextIncome.nextIncome.date)}`}</div>
-              </>
-            ) : (
-              <>
-                <div className="v faint">—</div>
-                <div className="s">No income with a known amount is scheduled</div>
-              </>
-            )}
-          </div>
-          <div className="stat">
-            <div className="k">{TERMS.endOfDay} <Why ex={d.endOfDay.explanation} label={TERMS.endOfDay} /></div>
-            <div className={`v money ${d.endOfDay.cents < 0 ? 'neg' : ''} ${quietToday ? 'repeat' : ''}`}><Money cents={d.endOfDay.cents} currency={cur} animate /></div>
-            <div className="s">{quietToday ? 'Nothing else is scheduled today' : 'After what is scheduled today'}</div>
-          </div>
-        </section>
 
         <div className="grid cols-2">
           {/* 4. What is coming */}

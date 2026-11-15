@@ -170,15 +170,21 @@ test.describe('web Home shows the cross-platform sample figures (Nov 13, 2026)',
       await page.getByRole('button', { name: 'Explore sample data' }).click();
       await expect(page.getByTestId('month-end')).toHaveText(X.monthEnd);
       await expect(page.locator('.outlook .delta')).toContainText(X.monthEndDelta);
+      // Phase 4B.2 hierarchy: recorded balance (hero), Safe to Spend beside it (desktop) or right after it (narrow), then month-end
+      const y = async (id: string) => (await page.getByTestId(id).boundingBox())!.y;
+      if (w < 1080) expect((await y('available-cash')) < (await y('safe-to-spend')) && (await y('safe-to-spend')) < (await y('month-end'))).toBe(true);
+      else expect((await y('available-cash')) < (await y('month-end'))).toBe(true);
       await expect(page.getByTestId('safe-to-spend')).toHaveText(X.safeToSpend);
       await expect(page.locator('.card.sts')).toContainText(X.safeToSpendLine);
-      await expect(page.getByTestId('sts-after')).toHaveText(X.safeToSpendAfterLow);
+      await expect(page.getByTestId('sts-after')).toHaveCount(0); // in "Why this number?" since Phase 4B.2
       await expect(page.getByTestId('sts-next')).toHaveText(X.safeToSpendNext);
-      const stats = page.getByRole('region', { name: 'Key balances' });
       await expect(page.getByTestId('available-cash')).toHaveText(X.recordedBalance);
-      await expect(stats).toContainText(`${X.lowest}${X.lowestSub}`);
-      await expect(stats).toContainText(`${X.lowestBeforeIncome}${X.lowestBeforeIncomeSub}`);
-      await expect(stats).toContainText(`${X.endOfDay}${X.endOfDaySub}`);
+      // the two low points, each named by its span
+      await expect(page.getByTestId('lowest-month')).toContainText(`${X.lowest}${X.lowestSub}`);
+      await expect(page.getByTestId('sts-low')).toHaveText(`${X.stsLow}${X.stsLowAmount}`);
+      // repeats are hidden: the lowest before next income is this month's low; end of today is the recorded balance
+      await expect(page.getByTestId('lowest-before-income')).toHaveCount(0);
+      await expect(page.getByTestId('end-of-day')).toHaveCount(0);
       await expect(page.locator('#h-up')).toHaveText(`Upcoming · through ${X.upcomingUntil}`);
       const rows = page.getByTestId('upcoming').locator('.up-row');
       await expect(rows).toHaveCount(X.upcoming.length);

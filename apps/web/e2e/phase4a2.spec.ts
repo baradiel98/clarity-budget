@@ -90,7 +90,10 @@ test('no regular income: the card, Can I afford this?, Planning and the overview
   await expect(page.getByTestId('sts-caption')).toHaveText('No regular income is scheduled, so this only covers bills through Dec 31.');
   await expect(page.getByTestId('sts-caption')).toHaveClass(/warn/);
   await expect(page.getByTestId('sts-next')).toHaveText('Next after Dec 31: Rent $1,400.00 on Jan 1 — not included.');
-  await expect(page.getByRole('region', { name: 'Key balances' })).toContainText('Lowest balance this month');
+  // Phase 4B.2: this month's low is today's $2,000 (the recorded balance) and Safe to Spend's low is the $600 itself: not repeated
+  await expect(page.getByTestId('available-cash')).toHaveText('$2,000.00');
+  await expect(page.getByTestId('lowest-month')).toHaveCount(0);
+  await expect(page.getByTestId('sts-low')).toHaveCount(0);
   await page.getByRole('button', { name: 'Can I afford this?' }).first().click();
   await page.getByRole('dialog').locator('input').first().fill('600');
   const r = page.getByTestId('afford-result');
