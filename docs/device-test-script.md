@@ -81,6 +81,27 @@ This needs a Mac with Xcode. Alternatively, `eas build --profile development` ne
 | M11 | Restore a backup made on the **web** app; make a backup on the phone and restore it on the **web** | Identical numbers both ways |
 | M12 | Import a CSV from Files / Drive / Downloads | Picker opens; review screen works |
 
+## 2b. Phase 4B journeys (iPhone and Android; not yet run on a simulator or device)
+Phase 4B.5 checked these only in the mobile app rendered through React Native for Web (Chromium at 360×640, 375×667, 390×844 and 393×851) and in component tests. Native keyboards, safe areas, modals, haptics, storage and screen readers were not available there.
+
+Start with **Sample data** for M13–M20 (nothing is saved). Use a new test workspace for M21. Never use real data for these steps.
+
+| # | Step | Expected |
+|---|---|---|
+| M13 | Home on a small (iPhone SE / 360dp Android) and a large phone | Order: recorded balance, Safe to Spend, projected month-end. No clipped amounts; nothing hidden behind the tab bar or home indicator |
+| M14 | Home → Why this number? on each figure; close with Done | Explanation scrolls to the end; Done returns to Home |
+| M15 | Change the phone date ~8 weeks ahead (or wait for bills to pass), reopen | Home shows one "Past due" line ("N items since … need a decision"); Upcoming lists only future items; Review opens Planning |
+| M16 | Planning → Catch up: Mark paid on one item, choose an existing payment if offered, Save; Skip another; Undo the skip | Only those occurrences leave the list; the next month's occurrence stays; Undo restores the skipped one; no new transaction is created by linking |
+| M17 | Mark paid → "Notes or pending" → tick Pending → Save | The Notes field and Pending checkbox scroll into view above the keypad; Paid this month shows the item as Pending |
+| M18 | Type in the Notes field and in Merchant | The system keyboard does not cover the field being typed in or the Save button; tapping outside dismisses it |
+| M19 | Planning → Paid this month: expand, collapse; tap a row | Expands and collapses; the row opens Edit transaction with "Records the scheduled payment …" and Unlink |
+| M20 | Capture: type three purchases, Prepare | Three drafts; one "No account was mentioned in these 3 drafts" note; keyboard dismisses; drafts scroll; nothing saved until Approve |
+| M21 | New workspace: Get started → passphrase → recovery key → balance (open "More about this balance") → payday → Skip bill → first overview | Each step fits the screen with the keyboard open; Skip works; the overview shows the entered numbers |
+| M22 | Transactions on a 360dp-wide phone | "This month · Last month · 90 days · All" all readable (none cut short) |
+| M23 | VoiceOver / TalkBack: Home past-due line, Catch up buttons, Paid this month header | Reads "Past due… Review in Planning"; "Mark paid: Rent, due Jan 1"; the header announces collapsed/expanded |
+| M24 | Largest system text size: Home, Catch up, Add | Text scales (capped); buttons stay tappable; no overlapping text |
+| M25 | Welcome screen on a 375–390pt phone | "Restore backup" may wrap onto two lines inside its button (seen in the web rendering); note whether it does on the device |
+
 ## 3. Desktop web only
 | # | Step | Expected |
 |---|---|---|

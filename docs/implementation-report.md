@@ -847,6 +847,29 @@ Tests:
   - 390px, plus the empty state.
 - **Updated on purpose:** `phase4a11.spec.ts` now reaches the overdue rent through the catch-up review.
 
+## 7af. Phase 4B.5: native mobile usability verification (incomplete)
+
+Checkpoint `phase4b5-checkpoint-before` (8c59819).
+
+**Environment:** no iOS Simulator, Android emulator, KVM, or connected device or computer. The mobile app was rendered through React Native for Web (already installed) in Chromium at four phone sizes. That's a layout approximation, not native testing.
+
+**Journeys run in that rendering (sample data, nothing saved):**
+- Welcome; Home (hierarchy, past-due line, Why this number?).
+- Planning: Paid this month, opening a paid transaction, the catch-up review.
+- Mark paid linking an existing payment. Safe to Spend: Short by $1,536.89 → $2,986.89 after recording $1,450 unlinked, then back to $1,536.89 after linking; one transaction only.
+- Skip (only Dec 9 Streaming; Jan 9 stays).
+- A pending Mark paid (shown as Pending in Paid this month).
+- Capture with 3 drafts (one batch note; approval off in demo; Discard all).
+- Transactions.
+
+**Not run there:** onboarding beyond the passphrase step, because `expo-sqlite`'s transaction API isn't supported on web. Its component tests are unchanged.
+
+**Fixed:**
+- `Segmented` labels cut short at 360pt.
+- "Notes or pending" fields left under the keypad.
+
+Regression tests: `apps/mobile/test/phase4b5.test.tsx` (2, mutation-checked). Manual device steps still needed: `docs/device-test-script.md` §2b.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

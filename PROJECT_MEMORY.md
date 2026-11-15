@@ -701,3 +701,27 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Data model]** No change. Reviewing changes no data and no figure (tested).
 - **[Kept on purpose]** Planning's schedule still lists past-due items under today, because they explain today's projected balance.
 - **[Lesson]** Mobile component tests with a mocked `useData` don't re-render on data changes; mount the screen again after an action.
+
+## Phase 4B.5 (2026-11-15): native mobile usability verification (incomplete: no simulator or device)
+- **[Environment]** The dev container has none of the following:
+  - Xcode / iOS Simulator;
+  - Android SDK, emulator or `adb`;
+  - `/dev/kvm`;
+  - a connected computer or physical device.
+  Native iOS/Android testing, VoiceOver/TalkBack and native keyboard behaviour were **not** performed.
+- **[What was possible]** The real mobile app rendered through React Native for Web (`expo export -p web` into the scratchpad; `react-native-web` was already installed), driven in Chromium at 360×640, 375×667, 390×844 and 393×851. That's a layout approximation, not native.
+  - **Limitations of this rendering:**
+    - `expo-sqlite`'s `withExclusiveTransactionAsync` isn't supported on web, so a real workspace (onboarding beyond the passphrase) can't be created there; sample data works.
+    - RN-web 0.21 doesn't map `accessibilityState` (expanded, checked) to `aria-*` or apply `hitSlop`.
+- **[Fixed]**
+  1. `Segmented` (mobile) gave each option an equal quarter, so "This month" showed as "This mo…" on Transactions at 360pt. Options are now at least as wide as their label (`flexGrow 1, flexShrink 0, flexBasis auto`).
+  2. Add/Mark paid: "Notes or pending" opened fields below the visible area, under the fixed keypad. Opening it now scrolls the form to its end.
+  Both have regression tests in `apps/mobile/test/phase4b5.test.tsx`, mutation-checked.
+- **[Open, unverified on device]**
+  - At 360×640 the fixed keypad takes about 45% of the Add screen, so the account, date and notes need scrolling in a small area. Needs a design decision; not a quick fix.
+  - The draft-remove icon's touch area is about 38pt (18pt + hitSlop 10), below the 44pt/48dp guidance.
+  - "Restore backup" wraps to two lines on the Welcome screen at 375–390pt (web rendering).
+  - The demo banner overlaps list content above the tab bar (sample data only).
+  - A toast raised on one screen stays over the next.
+- **[Manual tests]** `docs/device-test-script.md` §2b (M13–M25).
+- **[Decision, mine]** Not tagged `phase4b5-complete`: the phase's objective (native verification) can't be met in this environment.

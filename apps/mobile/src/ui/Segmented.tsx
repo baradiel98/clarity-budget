@@ -18,7 +18,8 @@ export function Segmented<V extends string>({ value, options, onChange, label }:
               void Haptics.selectionAsync();
               onChange(o.value);
             }}
-            style={{ flex: 1, minHeight: 36, borderRadius: 9, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6, backgroundColor: on ? c.surface : 'transparent', borderWidth: on ? 1 : 0, borderColor: c.border }}
+            // Phase 4B.5: each option is at least as wide as its label ("This month" was cut to "This mo…" at 360pt); spare width is shared
+            style={{ flexGrow: 1, flexShrink: 0, flexBasis: 'auto', minHeight: 36, borderRadius: 9, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6, backgroundColor: on ? c.surface : 'transparent', borderWidth: on ? 1 : 0, borderColor: c.border }}
           >
             <T variant="footnote" color={on ? 'text' : 'textSecondary'} style={{ fontFamily: FONT.semibold }} numberOfLines={1}>{o.label}</T>
           </Pressable>

@@ -1,7 +1,7 @@
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, View } from 'react-native';
+import { useMemo, useRef, useState } from 'react';
+import { Alert, Pressable, ScrollView, View, type ScrollViewInstance } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { addTransaction, deleteProblem, deleteTransaction, linkCandidateLabel, linkCandidatesForOccurrence, linkedOccurrenceState, linkTransactionToOccurrence, markPostedBeforeOpening, unlinkTransactionFromOccurrence, matchOptionView, recordPaymentReturn, returnOptionsForEntry, updateTransaction, type TxInput } from '@clarity/data';
 import { addDays, ALREADY_INCLUDED_HINT, LINK_INVALID, LINK_ITEM_MISSING, LINK_OCCURRENCE_MISSING, LINKED_TO_OCCURRENCE, MARK_PAID_NO_OLDER, MARK_PAID_NOT_LISTED, MARK_PAID_OLDER_HINT, MARK_PAID_SHOW_OLDER, MARK_PAID_CHOOSE, MARK_PAID_EXISTING_TITLE, MARK_PAID_LINK_NOTE, MARK_PAID_NEW, MARK_PAID_SCHEDULED, OCCURRENCE_WEAK_HINT, ALREADY_INCLUDED_LABEL, OPENING_POSTED_HINT, OPENING_POSTED_LABEL, RETURN_ASK_LINK, RETURN_CHECK_TITLE, RETURN_DECIDE_HINT, RETURN_NEEDS_DECISION, RETURN_SEPARATE_LABEL, centsToDecimalString, formatCents, formatShortDate, legsPendingOf, parseAmountInput, TERMS, transferChoiceOf, TRANSFER_STATUS_HINT, TRANSFER_STATUS_LABEL, transferStatusOptions } from '@clarity/shared';
@@ -67,6 +67,9 @@ export default function AddScreen() {
   const [included, setIncluded] = useState<boolean | null>(src ? !!src.includedInBalance : null);
   const [toIncluded, setToIncluded] = useState<boolean | null>(src ? !!existing?.find((t) => t.id !== src.id)?.includedInBalance : null);
   const [more, setMore] = useState(false);
+  // Phase 4B.5: the form scrolls above a fixed keypad; opening "Notes or pending" adds fields at its end, so bring them into view
+  const form = useRef<ScrollViewInstance>(null);
+  const openMore = () => { setMore(true); setTimeout(() => form.current?.scrollToEnd({ animated: true }), 50); };
   const [dupConfirmed, setDupConfirmed] = useState(false);
   // Phase 4A.9: null = not chosen → ticked only for a strong suggestion (evidence beyond amount and date)
   const [linkOccChoice, setLinkOcc] = useState<boolean | null>(null);
@@ -206,7 +209,7 @@ export default function AddScreen() {
           <LinkButton title="Delete" color="negative" onPress={() => { const why = deleteProblem(data, src!.id); if (why) { fail(why); return; } Alert.alert('Delete this transaction?', undefined, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: async () => { const r = await run((ctx) => deleteTransaction(ctx, src!.id), { undoLabel: 'Delete' }); if (r.ok) { toast({ message: 'Transaction deleted', action: { label: 'Undo', run: () => void store.undo() } }); router.back(); } else fail(r.errors.map((e) => e.message).join(' ')); } }]); }} />
         ) : <View style={{ width: 52 }} />}
       </View>
-      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 16, gap: 14, paddingBottom: 16 }}>
+      <ScrollView ref={form} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 16, gap: 14, paddingBottom: 16 }}>
         {markPaid?.occurrence && (() => { const o = markPaid.occurrence; return (
           <View testID="mark-paid" style={{ gap: 8, backgroundColor: c.surface, borderRadius: 12, padding: 12 }}>
             <T variant="footnote" color="textSecondary" testID="mark-paid-scheduled">{MARK_PAID_SCHEDULED(o.name, formatShortDate(o.date), o.amountCents ? formatCents(o.amountCents, cur) : 'amount not set', data.accounts.find((a) => a.id === o.accountId)?.name ?? '')}</T>
@@ -305,7 +308,7 @@ export default function AddScreen() {
             {kind !== 'transfer' && <Check label="Pending (not yet cleared)" value={pending} onChange={setPending} />}
           </View>
         ) : (
-          kind !== 'transfer' && <LinkButton title="Notes or pending" onPress={() => setMore(true)} />
+          kind !== 'transfer' && <LinkButton title="Notes or pending" onPress={openMore} />
         )}
         </>}
         {error && <T color="negative" accessibilityRole="alert">{error}</T>}
