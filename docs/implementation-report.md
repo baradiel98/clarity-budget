@@ -802,6 +802,29 @@ Tests:
   - `apps/web/e2e/phase4b2.spec.ts` (5).
 - **Updated on purpose** (behaviour changed): the shared fixture `home-sample-nov13.ts`, `home-view.test.ts`, mobile `home.test.tsx`, and the e2e specs `phase2`, `phase3`, `phase3a`, `phase3c`, `phase4a2`, `phase4a11`, `phase4b1` and `redesign`.
 
+## 7ad. Phase 4B.3: Paid history in Planning
+
+A collapsible "Paid this month" section on web and mobile Planning. Checkpoint `phase4b3-checkpoint-before` (62766e9).
+
+- **Source:** `paidThisMonth` (shared) reads the engine's own "confirmed" occurrences and their linked transactions. Nothing is recorded or calculated.
+- **Each row shows:** item, paid or received date (the transaction's), due date when different, amount, account (→ other account), and status ("Posted", "Pending", or the existing transfer wording). Selecting a row opens the normal Edit form.
+- **Sample data (Nov 13):** Rent (paid Nov 1), Paycheck (received Nov 5), Streaming (paid Nov 9, Visa Card).
+- **Hand-checked test case** (Checking $2,000 on Nov 29; the rows below, oldest first):
+  - Rent (Oct 15), paid late on Nov 3;
+  - Cleaner (Nov 9), paid on its due date;
+  - Rent (Nov 15), paid early on Nov 12;
+  - Cleaner (Nov 16), pending;
+  - Paycheck received Nov 20;
+  - Savings transfer on Nov 25;
+  - Visa payment (Nov 27), sent Nov 26, "Sent · awaiting posting by Visa".
+  - Not listed: the Nov 2 Cleaner (paid Oct 30), and the unpaid Nov 23 and Nov 30 Cleaners.
+  - Unlink, delete, skip and undoing an import each remove the entry; balances and Safe to Spend are unchanged.
+
+Tests:
+- `packages/data/test/paid-history.test.ts` (5). Mutation checks: removing the skip rule or the month rule each fails a test.
+- `apps/mobile/test/paid-history.test.tsx` (2).
+- `apps/web/e2e/phase4b3.spec.ts` (3). The unlink case checks that Safe to Spend stays $2,267.17: after the early card payment the low point moves to Nov 18, before the Nov 19 paycheck, so the Phone bill due Nov 22 doesn't lower it.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

@@ -1,7 +1,7 @@
-import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, CalendarPlus, MoreHorizontal, Pause, Pencil, Play, Plus, Trash2 } from 'lucide-react';
+import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, CalendarPlus, ChevronDown, MoreHorizontal, Pause, Pencil, Play, Plus, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
-  clearOccurrenceException, createRecurring, deleteRecurring, engineInput, estimateNote, recurringAmountView, setOccurrenceException, setRecurringPaused, updateRecurring,
+  clearOccurrenceException, createRecurring, deleteRecurring, engineInput, estimateNote, paidThisMonth, recurringAmountView, setOccurrenceException, setRecurringPaused, updateRecurring,
   type RecurringAmountView,
   type RecurringInput,
 } from '@clarity/data';
@@ -9,7 +9,7 @@ import {
   annualEquivalentCents, applyWeekendRule, balanceOnDate, buildDashboard, buildForecast, computeSafeToSpend, describeSchedule, monthlyEquivalentCents, nextScheduleDate, planningWindowEnd, type Occurrence,
 } from '@clarity/engine';
 import {
-  addDays, centsToDecimalString, endOfMonth, formatCents, formatShortDate, formatWeekdayDate, parseAmountInput, parseISO, TERMS, type RecurringAmount,
+  addDays, centsToDecimalString, endOfMonth, formatCents, formatShortDate, formatWeekdayDate, monthNameLong, PAID_DUE, PAID_EMPTY, PAID_HINT, PAID_TITLE, parseAmountInput, parseISO, TERMS, type RecurringAmount,
   type RecurringItem, type RecurringKind, type Schedule, type WeekendRule,
 } from '@clarity/shared';
 import { useData, useRun, useSession, useStore } from '../state/session';
@@ -39,6 +39,7 @@ export function Planning() {
   const [edit, setEdit] = useState<{ item?: RecurringItem; kind: RecurringKind; once?: boolean } | null>(null);
   const [occAction, setOccAction] = useState<{ occ: Occurrence; action: 'move' | 'override' } | null>(null);
   const [menu, setMenu] = useState<string | null>(null);
+  const [paidOpen, setPaidOpen] = useState(false);
   // Actions menu (menu button pattern): focus moves into it, arrows move between items, Escape closes
   // and returns focus to the ··· button, Tab or a click outside closes it.
   const menuTrigger = useRef<HTMLButtonElement | null>(null);
@@ -197,6 +198,7 @@ export function Planning() {
             <div className="t-footnote muted">Projected available cash at the end of {formatShortDate(onDate.date)}.</div>
             <button className="btn-link" style={{ marginTop: 8 }} onClick={() => ui.explain(onDate.explanation)}>{TERMS.whyThisNumber}</button>
           </section>
+          <PaidSection />
           {(['income', 'bills', 'transfers'] as Group[]).map((g) => (
             <section key={g} className="card" aria-labelledby={`g-${g}`}>
               <div className="card-head">
@@ -227,6 +229,60 @@ export function Planning() {
       {occAction && <OccurrenceDialog occ={occAction.occ} action={occAction.action} onClose={() => setOccAction(null)} />}
     </div>
   );
+
+  /**
+   * Phase 4B.3: scheduled items a linked transaction settled this month (shared `paidThisMonth`: the engine's own
+   * "confirmed" occurrences, once each). Collapsed by default so it never crowds the schedule; each row opens its
+   * transaction in the normal Edit form.
+   */
+  function PaidSection() {
+    const paid = paidThisMonth(data, today);
+    const month = monthNameLong(parseISO(today).m);
+    return (
+      <section className="card paid" aria-labelledby="h-paid" data-testid="paid-history">
+        <h2 className="card-title paid-head" id="h-paid">
+          <button type="button" className="paid-toggle" aria-expanded={paidOpen} aria-controls="paid-list" onClick={() => setPaidOpen((v) => !v)} data-testid="paid-toggle">
+            <span>{PAID_TITLE}</span>
+            <span className="muted t-footnote" data-testid="paid-count">{paid.entries.length === 0 ? 'None yet' : `${paid.entries.length} item${paid.entries.length === 1 ? '' : 's'}`}</span>
+            <ChevronDown size={16} className={`chev ${paidOpen ? 'open' : ''}`} aria-hidden />
+          </button>
+        </h2>
+        {paidOpen && (
+          <div id="paid-list">
+            {paid.entries.length === 0 ? (
+              <p className="t-callout muted" data-testid="paid-empty" style={{ margin: '10px 0 0' }}>{PAID_EMPTY(month)}</p>
+            ) : (
+              <>
+                <p className="hint" style={{ margin: '8px 0 4px' }}>{PAID_HINT(month, 'Select')}</p>
+                <ul className="paid-list" aria-label={PAID_TITLE}>
+                  {paid.entries.map((e) => {
+                    const verb = e.kind === 'income' ? 'Received' : 'Paid';
+                    const where = e.toAccountName ? `${e.accountName} → ${e.toAccountName}` : e.accountName;
+                    const due = e.dueDate !== e.paidDate ? PAID_DUE(formatShortDate(e.dueDate)) : null;
+                    const amount = formatCents(e.amountCents, e.currency, { sign: 'always' });
+                    return (
+                      <li key={e.key}>
+                        <button type="button" className="paid-row" data-testid="paid-row" onClick={() => ui.openAdd({ editId: e.tx.id })}
+                          aria-label={`${e.name}. ${verb} ${formatShortDate(e.paidDate)}${due ? `, ${due}` : ''}. ${amount}, ${where}. ${e.statusLabel}. Open the transaction.`}>
+                          <span className={`cat-icon paid-icon ${e.kind === 'income' ? 'inflow' : ''}`} aria-hidden>{e.kind === 'income' ? <ArrowDownLeft size={14} /> : e.toAccountName ? <ArrowLeftRight size={14} /> : <ArrowUpRight size={14} />}</span>
+                          <span className="paid-main">
+                            <span className="title">{e.name}</span>
+                            <span className="meta">{verb} {formatShortDate(e.paidDate)}{due ? ` · ${due}` : ''} · {where}</span>
+                            <span className={`badge ${e.pending ? 'warn' : ''}`} data-testid="paid-status">{e.statusLabel}</span>
+                          </span>
+                          <span className={`paid-amt num ${e.amountCents > 0 ? 'pos' : ''}`}>{amount}</span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            )}
+          </div>
+        )}
+      </section>
+    );
+  }
 
   function ItemRow({ r }: { r: RecurringItem }) {
     const next = nextScheduleDate(r.schedule, today);

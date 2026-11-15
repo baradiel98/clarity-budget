@@ -1,10 +1,10 @@
 import { router } from 'expo-router';
-import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, Plus } from 'lucide-react-native';
+import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, ChevronDown, ChevronUp, Plus } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
 import { ActionSheetIOS, Alert, Platform, Pressable, View } from 'react-native';
-import { clearOccurrenceException, deleteRecurring, engineInput, estimateNote, recurringAmountView, setOccurrenceException, setRecurringPaused } from '@clarity/data';
+import { clearOccurrenceException, deleteRecurring, engineInput, estimateNote, paidThisMonth, recurringAmountView, setOccurrenceException, setRecurringPaused } from '@clarity/data';
 import { annualEquivalentCents, applyWeekendRule, balanceOnDate, buildDashboard, buildForecast, computeSafeToSpend, describeSchedule, monthlyEquivalentCents, nextScheduleDate, planningWindowEnd, type Occurrence } from '@clarity/engine';
-import { addDays, endOfMonth, formatCents, formatShortDate, formatWeekdayDate, TERMS, type RecurringItem } from '@clarity/shared';
+import { addDays, endOfMonth, formatCents, formatShortDate, formatWeekdayDate, monthNameLong, PAID_DUE, PAID_EMPTY, PAID_HINT, PAID_TITLE, parseISO, TERMS, type RecurringItem } from '@clarity/shared';
 import { setAddPrefill, setExplain } from '../../src/state/nav';
 import { useData, useRun, useSession, useStore } from '../../src/state/session';
 import { LinkButton } from '../../src/ui/Button';
@@ -41,6 +41,9 @@ export default function Planning() {
   const { c } = useTheme();
   const cur = data.settings.baseCurrency;
   const [target, setTarget] = useState(endOfMonth(today));
+  const [paidOpen, setPaidOpen] = useState(false);
+  const paid = useMemo(() => paidThisMonth(data, today), [data, today]);
+  const paidMonth = monthNameLong(parseISO(today).m);
   const windowEnd = useMemo(() => planningWindowEnd(engineInput(data, today)), [data, today]);
   const stsScope = useMemo(() => computeSafeToSpend(engineInput(data, today)), [data, today]);
   // The complete warning list (Phase 4A.4.2): Home shows the first five and links here; it is first on the screen.
@@ -148,6 +151,43 @@ export default function Planning() {
         ))}
       </Card>
 
+      {/* Phase 4B.3: scheduled items a linked transaction settled this month (shared paidThisMonth); collapsed by default */}
+      <Card>
+        <Pressable testID="paid-toggle" accessibilityRole="button" accessibilityState={{ expanded: paidOpen }} accessibilityLabel={`${PAID_TITLE}, ${paid.entries.length === 0 ? 'none yet' : `${paid.entries.length} item${paid.entries.length === 1 ? '' : 's'}`}`}
+          onPress={() => setPaidOpen((v) => !v)} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 32 }}>
+          <T variant="headline" accessibilityRole="header" style={{ flex: 1 }}>{PAID_TITLE}</T>
+          <T variant="footnote" color="textSecondary" testID="paid-count">{paid.entries.length === 0 ? 'None yet' : `${paid.entries.length} item${paid.entries.length === 1 ? '' : 's'}`}</T>
+          {paidOpen ? <ChevronUp size={18} color={c.textTertiary} /> : <ChevronDown size={18} color={c.textTertiary} />}
+        </Pressable>
+        {paidOpen && (paid.entries.length === 0 ? (
+          <T color="textSecondary" testID="paid-empty" style={{ marginTop: 8 }}>{PAID_EMPTY(paidMonth)}</T>
+        ) : (
+          <View testID="paid-history" style={{ marginTop: 4 }}>
+            <T variant="footnote" color="textTertiary" style={{ marginBottom: 2 }}>{PAID_HINT(paidMonth, 'Tap')}</T>
+            {paid.entries.map((e, i) => {
+              const verb = e.kind === 'income' ? 'Received' : 'Paid';
+              const where = e.toAccountName ? `${e.accountName} → ${e.toAccountName}` : e.accountName;
+              const due = e.dueDate !== e.paidDate ? PAID_DUE(formatShortDate(e.dueDate)) : null;
+              const amount = formatCents(e.amountCents, e.currency, { sign: 'always' });
+              return (
+                <ListRow key={e.key} testID="paid-row" last={i === paid.entries.length - 1} titleLines={0}
+                  onPress={() => { setAddPrefill({ editId: e.tx.id }); router.push('/add'); }}
+                  accessibilityLabel={`${e.name}. ${verb} ${formatShortDate(e.paidDate)}${due ? `, ${due}` : ''}. ${amount}, ${where}. ${e.statusLabel}. Opens the transaction.`}
+                  icon={<IconBubble tone={e.kind === 'income' ? 'inflow' : 'neutral'}>{e.kind === 'income' ? <ArrowDownLeft size={16} color={c.positive} /> : e.toAccountName ? <ArrowLeftRight size={16} color={c.textSecondary} /> : <ArrowUpRight size={16} color={c.textSecondary} />}</IconBubble>}
+                  title={e.name}
+                  subtitle={`${verb} ${formatShortDate(e.paidDate)}${due ? ` · ${due}` : ''} · ${where}`}
+                  right={
+                    <View style={{ alignItems: 'flex-end', gap: 4, maxWidth: 170 }}>
+                      <Money cents={e.amountCents} currency={e.currency} sign="always" color={e.amountCents > 0 ? 'positive' : 'text'} style={{ fontFamily: 'Inter_600SemiBold' }} />
+                      <View testID="paid-status"><Badge label={e.statusLabel} tone={e.pending ? 'warn' : 'neutral'} /></View>
+                    </View>
+                  }
+                />
+              );
+            })}
+          </View>
+        ))}
+      </Card>
       <Section title="Income" kinds={['income']} addKind="income" />
       <Section title="Bills & subscriptions" kinds={['bill', 'subscription']} addKind="bill" />
       <Section title="Transfers & savings" kinds={['transfer', 'savings']} addKind="savings" />

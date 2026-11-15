@@ -77,6 +77,11 @@ export const BALANCE_ENTRY_HINT =
  */
 export const LOWEST_THROUGH = (date: string) => `Lowest through ${date}`;
 export const LOWEST_MONTH_SUB = (date: string, monthEnd: string) => `${date} · through ${monthEnd}`;
+/** Phase 4B.3: Planning's history of scheduled items a linked transaction settled this month (by the transaction's date). */
+export const PAID_TITLE = 'Paid this month';
+export const PAID_HINT = (month: string, open: 'Select' | 'Tap') => `Scheduled items recorded as paid or received in ${month}, by the date of the transaction. ${open} one to open it.`;
+export const PAID_EMPTY = (month: string) => `Nothing scheduled has been recorded as paid in ${month} yet. When you use Mark paid (or link a payment), it appears here.`;
+export const PAID_DUE = (date: string) => `due ${date}`;
 /** Phase 4B.1: the onboarding balance question keeps only this line visible; the full BALANCE_ENTRY_HINT is one tap away. */
 export const BALANCE_ENTRY_SHORT = 'The posted balance your bank shows right now.';
 export const BALANCE_ENTRY_MORE = 'More about this balance';

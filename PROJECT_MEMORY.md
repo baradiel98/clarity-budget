@@ -662,3 +662,22 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Kept]** The user-approved blue glow, now on the two headline cards (balance and Safe to Spend). No new gradients.
 - **[Lesson]** Full-page Playwright screenshots can show the forecast chart empty (the viewport is resized during capture); viewport screenshots show it. Not an app defect.
 - **[Lesson]** Keyboard shortcuts are ignored while a dialog is still closing (`anyOpen`), so a test that presses a shortcut right after Escape must wait or click instead.
+
+## Phase 4B.3 (2026-11-15): Paid history in Planning
+- **[Verified implementation]**
+  - **Shared:** `paidThisMonth(data, today)` (`packages/data/src/paidHistory.ts`). It returns the occurrences the engine already treats as paid ("confirmed", with `matchedTxId`) whose transaction is dated in today's month, oldest first. No new record and no new calculation.
+  - **Fields shown:** item name; paid or received date (the transaction's date); due date when different; signed amount in the account's currency; account (→ other account for a transfer); status.
+  - **Status wording:**
+    - "Posted" or "Pending" from the transaction;
+    - for transfers, the existing `transferSettlement` wording (e.g. "Sent · awaiting posting by Visa Card").
+  - **Web:** Planning's right column, above "Balance on a date"; after the schedule on one column. A heading-with-button disclosure, collapsed by default, showing a count. Each row is a button that opens the normal Edit form (`openAdd({ editId })`).
+  - **Mobile:** a card after the schedule, with an expandable header (`accessibilityState.expanded`). Rows open `/add` with `editId`.
+  - **Terms:** `PAID_TITLE`, `PAID_HINT`, `PAID_EMPTY`, `PAID_DUE`.
+- **[Rules]** Every item is listed with its outcome:
+  - Each occurrence is shown once. A transfer is shown by its sending side; both legs carry the link.
+  - A legacy duplicate link shows once, with the engine's chosen transaction.
+  - The month is that of the transaction's date: an overdue bill paid this month is listed; a bill due this month but paid last month is not.
+  - A skipped occurrence is never listed, even with a link left in the data.
+  - Deleted or unlinked transactions, and an undone import, drop out.
+  - **[Limitation]** An occurrence the schedule no longer has (item deleted or paused, schedule changed) isn't listed. Its transaction's Edit form explains the link (4A.11).
+- **[Data model]** No change. Viewing the history changes no data and no figure (tested).
