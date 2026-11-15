@@ -155,10 +155,33 @@ describe('Phase 4A.5.17 on mobile: returned card payments and card wording', () 
     const label = "It's the return of this card payment: Nov 12 · Transfer · −$100.00 · Everyday Checking · posted · transfer · card payment";
     await act(async () => { fireEvent.press(ui.getByRole('checkbox', { name: label })); });
     expect([ui.getByTestId('match-note-2').props.children].flat().join('')).toMatch(/payment as returned: it no longer counts as paying Store card/);
-    await act(async () => { fireEvent.press(ui.getByText('Import 1 transaction')); });
+    await act(async () => { fireEvent.press(ui.getByText('Record 1 returned payment')); }); // Phase 4A.5.18: the button says what it does
     await wait();
     expect(ui.getByTestId('import-result').props.children).toBe('0 new transactions imported · 1 returned card payment recorded');
     const ret = mockData.transactions.filter((t) => t.returnOf === 'tg_c');
     expect(ret.map((t) => [t.accountId === 'store' ? 'card' : 'checking', t.amountCents, t.kind, t.status])).toEqual([['checking', 10000, 'transfer', 'confirmed'], ['card', -10000, 'transfer', 'pending']]);
+  });
+});
+
+describe('Phase 4A.5.18 on mobile: a returned card payment typed in by hand', () => {
+  it('$100 income offered as the return of the card payment; a decision is required; choosing it records a return (not income)', async () => {
+    const d = demo();
+    const chk = acct(d, 'Everyday Checking');
+    const card = { id: 'store', name: 'Store card', type: 'credit_card', currency: 'USD', openingBalanceCents: -25000, openingDate: '2026-11-01', spendable: false, archived: false, createdAt: SAMPLE_NOW, updatedAt: SAMPLE_NOW };
+    const base = { date: '2026-11-12', kind: 'transfer', merchant: 'Transfer', categoryId: null, notes: '', transferGroupId: 'tg_m', provenance: { source: 'manual' }, createdAt: SAMPLE_NOW, updatedAt: SAMPLE_NOW, status: 'pending' };
+    mockData = { ...d, settings: { ...d.settings, defaultAccountId: chk }, accounts: [...d.accounts, card], transactions: [...d.transactions, { ...base, id: 'mout', accountId: chk, amountCents: -10000 }, { ...base, id: 'min', accountId: 'store', amountCents: 10000 }] } as WorkspaceData;
+    const before = mockData.transactions.length;
+    const ui = await render(<AddScreen />);
+    await act(async () => { fireEvent.press(ui.getByRole('radio', { name: 'Income' })); });
+    for (const k of ['1', '0', '0']) await act(async () => { fireEvent.press(ui.getByLabelText(k)); });
+    expect(ui.getByTestId('return-check')).toBeTruthy();
+    await act(async () => { fireEvent.press(ui.getByText('Save')); });
+    expect(ui.getByText('Choose whether this is a returned card payment, or close to decide later.')).toBeTruthy();
+    expect(mockData.transactions.length).toBe(before);
+    await act(async () => { fireEvent.press(ui.getByRole('checkbox', { name: "It's the return of this card payment: Nov 12 · Transfer · −$100.00 · Everyday Checking · pending · transfer · card payment" })); });
+    expect(ui.queryByText('Choose whether this is a returned card payment, or close to decide later.')).toBeNull();
+    await act(async () => { fireEvent.press(ui.getByText('Save')); });
+    const added = mockData.transactions.slice(before);
+    expect(added.map((t) => [t.accountId === 'store' ? 'card' : 'checking', t.amountCents, t.kind, t.returnOf])).toEqual([['checking', 10000, 'transfer', 'tg_m'], ['card', -10000, 'transfer', 'tg_m']]);
   });
 });

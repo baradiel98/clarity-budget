@@ -1,10 +1,10 @@
 import { AlertTriangle, CheckCircle2, CopyCheck, FileUp, Link2, ListChecks, ShieldCheck, Upload } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { commitImport, describeImportResult, describeImportUndo, markTransactionPosted, isLinkChoice, matchDecision, matchOptionView, postedByMatchOf, undoImportBatch as undoImport, type ImportDecision } from '@clarity/data';
+import { commitImport, describeImportResult, describeImportUndo, markTransactionPosted, isLinkChoice, matchDecision, matchOptionView, postedByMatchOf, returnRowText, undoImportBatch as undoImport, type ImportDecision } from '@clarity/data';
 import {
   checkImportFile, dataRowCount, DATE_FORMATS, findMatchCandidates, headerSignature, MATCH_WINDOWS, NO_DATA_ROWS_MESSAGE, reconcilePreview, type ImportCandidate, type ImportPreview, type ImportSettings,
 } from '@clarity/import';
-import { formatShortDate, IMPORT_BUTTON, MATCH_CHOICE_TITLE, MATCH_NONE_LABEL, MATCH_SKIP_LABEL, MATCH_STALE_TITLE, MATCH_TAKEN, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, TERMS, type ColumnMapping, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
+import { formatShortDate, IMPORT_BUTTON, RETURN_ROW_BADGE, MATCH_CHOICE_TITLE, MATCH_NONE_LABEL, MATCH_SKIP_LABEL, MATCH_STALE_TITLE, MATCH_TAKEN, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, TERMS, type ColumnMapping, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
 import { useRouter } from '../lib/router';
 import { sha256Hex } from '../platform/files';
 import { useData, useRun, useSession } from '../state/session';
@@ -130,6 +130,8 @@ export function ImportPage() {
   const liveOf = (r: Row) => (account ? findMatchCandidates(r, account, data.transactions, { alsoIds: r.matchCandidates.map((m) => m.txId), accounts: data.accounts }) : []);
   // Phase 4A.5.17: a confirmed return adds the returned money, so it counts as a new row, not a link
   const linked = (r: Row) => isLinkChoice(r.matchChoice, liveOf(r));
+  // Phase 4A.5.18: what a row confirmed as a returned card payment records (shown instead of type and category)
+  const returnOf = (r: Row) => { const m = r.matchChoice ? liveOf(r).find((x) => x.txId === r.matchChoice && x.basis === 'return') : undefined; return m ? returnRowText(m, data) : null; };
   // Phase 4A.5.14: per leg; a confirmed transfer fee makes the linked leg's effect the statement amount
   const sameIds = included.filter(linked).map((r) => postedByMatchOf(r.matchChoice!, liveOf(r), r.amountCents));
   const recon = useMemo(() => (preview && account ? reconcilePreview(preview, included.filter((r) => !linked(r)), { account, transactions: data.transactions, postedByMatch: sameIds }) : null), [preview, included, account, data.transactions, JSON.stringify(sameIds)]);
@@ -327,6 +329,13 @@ export function ImportPage() {
                         <div style={{ fontWeight: 500 }}>{r.merchant || <span className="faint">No description</span>}</div>
                         {r.rawDescription !== r.merchant && <div className="hint">{r.rawDescription}</div>}
                       </td>
+                      {/* Phase 4A.5.18: a row confirmed as a returned card payment has no type or category to choose */}
+                      {returnOf(r) ? (
+                        <td colSpan={2} data-testid={`return-kind-${r.rowNumber}`}>
+                          <span className="badge accent">{RETURN_ROW_BADGE}</span>
+                          <div className="hint" style={{ marginTop: 4 }}>{returnOf(r)}</div>
+                        </td>
+                      ) : (<>
                       <td>
                         <select className="select" style={{ height: 32, width: 120 }} value={r.editKind} aria-label="Type" onChange={(e) => setRow(i, { editKind: e.target.value as Row['editKind'] })}>
                           {r.amountCents < 0 ? <option value="expense">Expense</option> : <><option value="income">Income</option><option value="refund">Refund</option></>}
@@ -343,6 +352,7 @@ export function ImportPage() {
                           <div style={{ height: 32 }}><CategorySelect value={r.editCategory} onChange={(v) => setRow(i, { editCategory: v })} kind={r.editKind === 'income' ? 'income' : 'expense'} /></div>
                         )}
                       </td>
+                      </>)}
                       <td style={{ maxWidth: 260 }}>
                         <div className="row wrap" style={{ gap: 4 }}>
                           {r.duplicate && <span className={`badge ${r.duplicate.level === 'exact' ? 'neg' : 'warn'}`} title={r.duplicate.reason}>{r.duplicate.level === 'exact' ? 'Already imported' : 'Possible duplicate'}</span>}
@@ -443,7 +453,7 @@ export function ImportPage() {
           <div className="row" style={{ justifyContent: 'flex-end' }}>
             {blocking.length > 0 && <span className="t-footnote warn">Choose the other account for {blocking.length} transfer{blocking.length > 1 ? 's' : ''}.</span>}
             <button className="btn btn-primary btn-lg" disabled={busy || included.length === 0 || blocking.length > 0} onClick={() => void commit()} data-testid="commit-import" aria-busy={busy}>
-              {busy && <Spinner />}{IMPORT_BUTTON(included.filter((r) => !linked(r)).length, included.filter(linked).length)}
+              {busy && <Spinner />}{IMPORT_BUTTON(included.filter((r) => !linked(r) && !returnOf(r)).length, included.filter(linked).length, included.filter((r) => !!returnOf(r)).length)}
             </button>
           </div>
         </div>

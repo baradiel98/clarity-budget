@@ -1,8 +1,8 @@
 import { AlertTriangle, Plus, Trash2, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { addTransaction, deleteTransaction, updateTransaction, type TxInput } from '@clarity/data';
+import { addTransaction, deleteTransaction, markPostedBeforeOpening, matchOptionView, recordPaymentReturn, returnOptionsForEntry, updateTransaction, type TxInput } from '@clarity/data';
 import { balanceAsOfDate, buildMerchantMemory, inclusionProblem, expandOccurrences, findPossibleDuplicates, merchantKey, suggestOccurrenceMatch } from '@clarity/engine';
-import { addDays, ALREADY_INCLUDED_HINT, ALREADY_INCLUDED_LABEL, centsToDecimalString, formatCents, formatShortDate, legsPendingOf, parseAmountInput, TERMS, transferChoiceOf, TRANSFER_STATUS_HINT, TRANSFER_STATUS_LABEL, transferStatusOptions, type Transaction, type TransferSettlementChoice } from '@clarity/shared';
+import { addDays, ALREADY_INCLUDED_HINT, ALREADY_INCLUDED_LABEL, OPENING_POSTED_HINT, OPENING_POSTED_LABEL, RETURN_ASK_LINK, RETURN_CHECK_TITLE, RETURN_DECIDE_HINT, RETURN_NEEDS_DECISION, RETURN_SEPARATE_LABEL, centsToDecimalString, formatCents, formatShortDate, legsPendingOf, parseAmountInput, TERMS, transferChoiceOf, TRANSFER_STATUS_HINT, TRANSFER_STATUS_LABEL, transferStatusOptions, type Transaction, type TransferSettlementChoice } from '@clarity/shared';
 import { useData, useRun, useSession, useStore } from '../state/session';
 import type { AddPrefill } from '../state/ui';
 import { AmountInput } from '../ui/AmountInput';
@@ -182,6 +182,18 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
     return suggestOccurrenceMatch({ accountId, date, amountCents: kind === 'income' ? Math.abs(signed) : -Math.abs(signed), merchant }, occ);
   }, [prefill, isEdit, signed, kind, data, date, accountId, merchant, today]);
 
+  // Phase 4A.5.18: money coming in that could be a returned card payment needs an explicit decision (never automatic)
+  const [returnChoice, setReturnChoice] = useState<string | null>(null); // a payment leg id, 'separate', or null
+  const [askReturn, setAskReturn] = useState(false);
+  const retEntry = { kind, accountId, amountCents: cents, date, merchant };
+  const editingPlain = !isEdit || (existing!.length === 1 && !existing![0]!.transferGroupId);
+  const suggestedReturns = editingPlain ? returnOptionsForEntry(data, retEntry) : [];
+  const returnOptions = askReturn ? returnOptionsForEntry(data, retEntry, true) : suggestedReturns;
+  const anyReturnPossible = editingPlain && !askReturn && suggestedReturns.length === 0 && returnOptionsForEntry(data, retEntry, true).length > 0;
+  const chosenReturn = returnOptions.find((m) => m.txId === returnChoice) ?? null;
+  const needsReturnDecision = suggestedReturns.length > 0 && returnChoice === null;
+  const isPreOpeningPending = isEdit && existing!.length === 1 && existing![0]!.status === 'pending' && (data.accounts.find((a) => a.id === existing![0]!.accountId)?.openingDate ?? '') > existing![0]!.date;
+
   const splitTotal = splits.reduce((s, x) => s + (parseAmountInput(x.amount, cur) ?? 0), 0);
 
   const save = async () => {
@@ -193,6 +205,16 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
     if (splits.some((s) => !s.categoryId || (parseAmountInput(s.amount, cur) ?? 0) <= 0)) e.splits = 'Each split part needs a category and an amount.';
     setErrors(e);
     if (Object.keys(e).length) return;
+    if (needsReturnDecision) { setErrors({ form: RETURN_NEEDS_DECISION }); return; }
+    if (chosenReturn) {
+      setBusy(true);
+      const r = await run((ctx) => recordPaymentReturn(ctx, { paymentLegId: chosenReturn.txId, accountId, amountCents: cents!, date, status: pending ? 'pending' : 'confirmed', merchant, ...(isEdit ? { replaceTxId: existing![0]!.id } : {}) }), { undoLabel: 'Recorded returned payment' });
+      setBusy(false);
+      if (!r.ok) { setErrors(Object.fromEntries(r.errors.map((x) => [x.field === 'form' ? 'form' : x.field, x.message]))); return; }
+      toast({ message: `Recorded a returned card payment of ${formatCents(cents!, cur)}`, action: { label: 'Undo', run: () => void store.undo() } });
+      onClose();
+      return;
+    }
     if (duplicates.length && !dupConfirmed) {
       setDupConfirmed(true);
       return;
@@ -212,6 +234,8 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
       ...(kind === 'transfer' ? { toIncludedInBalance: !!toInc?.checked } : {}),
       ...(splits.length ? { splits: splits.map((s) => ({ categoryId: s.categoryId, amountCents: parseAmountInput(s.amount, cur)! })) } : {}),
       ...(prefill?.occurrenceRef ? { occurrenceRef: prefill.occurrenceRef } : occurrence && linkOcc ? { occurrenceRef: { recurringId: occurrence.recurringId, originalDate: occurrence.originalDate } } : {}),
+      // Phase 4A.5.18: the user said it's separate income: the payments it could have been are kept on record
+      ...(!isEdit && returnChoice === 'separate' && suggestedReturns.length ? { provenance: { source: 'manual' as const, separateFrom: suggestedReturns.map((m) => m.txId) } } : {}),
     };
     setBusy(true);
     const label = `${merchant.trim() || (kind === 'transfer' ? 'Transfer' : 'Income')} ${formatCents(signed!, cur, { sign: kind === 'transfer' ? 'never' : 'always' })}`;
@@ -295,7 +319,7 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
               )}
             </Field>
           )}
-          {kind !== 'transfer' && splits.length === 0 && (
+          {kind !== 'transfer' && splits.length === 0 && !chosenReturn && (
             <Field label="Category" hint={!categoryTouched && categoryId ? 'Suggested from your history' : undefined}>
               {(id) => <CategorySelect id={id} value={categoryId} onChange={(v) => { setCategoryId(v); setCategoryTouched(true); }} kind={kind === 'income' ? 'income' : 'expense'} />}
             </Field>
@@ -312,6 +336,23 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
             </Field>
           )}
           <Field label="Date">{(id) => <input id={id} className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />}</Field>
+          {returnOptions.length > 0 && (
+            <div className="callout full" role="radiogroup" aria-label={RETURN_CHECK_TITLE} data-testid="return-check">
+              <strong>{RETURN_CHECK_TITLE}</strong>
+              {returnOptions.map((m) => { const v = matchOptionView(m, cents ?? 0, data, cur); return (
+                <label key={m.txId} className="check"><input type="radio" name="return-choice" checked={returnChoice === m.txId} onChange={() => { setReturnChoice(m.txId); setErrors({}); }} /><span>{v.label}</span></label>
+              ); })}
+              <label className="check"><input type="radio" name="return-choice" checked={returnChoice === 'separate'} onChange={() => { setReturnChoice('separate'); setErrors({}); }} /><span>{RETURN_SEPARATE_LABEL}</span></label>
+              {chosenReturn ? <div className="hint" data-testid="return-note">{matchOptionView(chosenReturn, cents ?? 0, data, cur).note}</div> : <div className="hint">{RETURN_DECIDE_HINT}</div>}
+            </div>
+          )}
+          {anyReturnPossible && <button type="button" className="btn-link full" onClick={() => setAskReturn(true)} data-testid="return-ask">{RETURN_ASK_LINK}</button>}
+          {isPreOpeningPending && (() => { const a = data.accounts.find((x) => x.id === existing![0]!.accountId)!; return (
+            <div className="callout full" data-testid="opening-posted">
+              <div className="hint">{OPENING_POSTED_HINT(a.name, formatShortDate(a.openingDate))}</div>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={async () => { const r = await run((ctx) => markPostedBeforeOpening(ctx, existing![0]!.id), { undoLabel: 'Marked as already in the opening balance' }); if (r.ok) { toast({ message: `Marked as already in ${a.name}'s opening balance`, action: { label: 'Undo', run: () => void store.undo() } }); onClose(); } }}>{OPENING_POSTED_LABEL(a.name)}</button>
+            </div>
+          ); })()}
           {kind === 'transfer' && (
             <Field label={TRANSFER_STATUS_LABEL} hint={TRANSFER_STATUS_HINT}>
               {(id) => (

@@ -3,8 +3,8 @@ import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { addTransaction, deleteTransaction, updateTransaction, type TxInput } from '@clarity/data';
-import { addDays, ALREADY_INCLUDED_HINT, ALREADY_INCLUDED_LABEL, centsToDecimalString, formatCents, formatShortDate, legsPendingOf, parseAmountInput, TERMS, transferChoiceOf, TRANSFER_STATUS_HINT, TRANSFER_STATUS_LABEL, transferStatusOptions } from '@clarity/shared';
+import { addTransaction, deleteTransaction, markPostedBeforeOpening, matchOptionView, recordPaymentReturn, returnOptionsForEntry, updateTransaction, type TxInput } from '@clarity/data';
+import { addDays, ALREADY_INCLUDED_HINT, ALREADY_INCLUDED_LABEL, OPENING_POSTED_HINT, OPENING_POSTED_LABEL, RETURN_ASK_LINK, RETURN_CHECK_TITLE, RETURN_DECIDE_HINT, RETURN_NEEDS_DECISION, RETURN_SEPARATE_LABEL, centsToDecimalString, formatCents, formatShortDate, legsPendingOf, parseAmountInput, TERMS, transferChoiceOf, TRANSFER_STATUS_HINT, TRANSFER_STATUS_LABEL, transferStatusOptions } from '@clarity/shared';
 import { balanceAsOfDate, buildMerchantMemory, inclusionProblem, expandOccurrences, findPossibleDuplicates, merchantKey, suggestOccurrenceMatch } from '@clarity/engine';
 import { Check } from '../src/features/Welcome';
 import { takeAddPrefill } from '../src/state/nav';
@@ -119,8 +119,29 @@ export default function AddScreen() {
     return suggestOccurrenceMatch({ accountId, date, amountCents: signed, merchant }, occ);
   }, [prefill, isEdit, cents, kind, data, date, accountId, merchant, today, signed]);
 
+  // Phase 4A.5.18: money coming in that could be a returned card payment needs an explicit decision (never automatic)
+  const [returnChoice, setReturnChoice] = useState<string | null>(null);
+  const [askReturn, setAskReturn] = useState(false);
+  const retEntry = { kind, accountId, amountCents: cents, date, merchant };
+  const editingPlain = !isEdit || (existing!.length === 1 && !existing![0]!.transferGroupId);
+  const suggestedReturns = editingPlain ? returnOptionsForEntry(data, retEntry) : [];
+  const returnOptions = askReturn ? returnOptionsForEntry(data, retEntry, true) : suggestedReturns;
+  const anyReturnPossible = editingPlain && !askReturn && suggestedReturns.length === 0 && returnOptionsForEntry(data, retEntry, true).length > 0;
+  const chosenReturn = returnOptions.find((m) => m.txId === returnChoice) ?? null;
+  const preOpening = isEdit && existing!.length === 1 && existing![0]!.status === 'pending' ? data.accounts.find((a) => a.id === existing![0]!.accountId && a.openingDate > existing![0]!.date) : undefined;
+
   const save = async () => {
     if (cents <= 0) return fail('Enter an amount greater than zero.');
+    if (suggestedReturns.length && returnChoice === null) return fail(RETURN_NEEDS_DECISION);
+    if (chosenReturn) {
+      setBusy(true);
+      const rr = await run((ctx) => recordPaymentReturn(ctx, { paymentLegId: chosenReturn.txId, accountId, amountCents: cents, date, status: pending ? 'pending' : 'confirmed', merchant, ...(isEdit ? { replaceTxId: src!.id } : {}) }), { undoLabel: 'Recorded returned payment' });
+      setBusy(false);
+      if (!rr.ok) return fail(rr.errors.map((e) => e.message).join(' '));
+      toast({ message: `Recorded a returned card payment of ${formatCents(cents, cur)}`, action: { label: 'Undo', run: () => void store.undo() } });
+      router.back();
+      return;
+    }
     if (kind !== 'income' && kind !== 'transfer' && !merchant.trim()) return fail('Add a merchant or description.');
     if (kind === 'transfer' && !toAccountId) return fail('Choose where the money goes.');
     if (duplicates.length && !dupConfirmed) {
@@ -137,6 +158,7 @@ export default function AddScreen() {
       // Splits are edited on the web app in Phase 1; keep them intact when editing here.
       ...(src?.splits?.length ? { splits: src.splits.map((x) => ({ categoryId: x.categoryId, amountCents: Math.abs(x.amountCents) })) } : {}),
       ...(prefill.occurrenceRef ? { occurrenceRef: prefill.occurrenceRef } : occurrence && linkOcc ? { occurrenceRef: { recurringId: occurrence.recurringId, originalDate: occurrence.originalDate } } : {}),
+      ...(!isEdit && returnChoice === 'separate' && suggestedReturns.length ? { provenance: { source: 'manual' as const, separateFrom: suggestedReturns.map((m) => m.txId) } } : {}),
     };
     setBusy(true);
     const label = `${merchant.trim() || (kind === 'transfer' ? 'Transfer' : 'Income')} ${formatCents(signed, cur, { sign: kind === 'transfer' ? 'never' : 'always' })}`;
@@ -172,9 +194,9 @@ export default function AddScreen() {
                 {recent.map((m) => <Chip key={m} label={m} on={m === merchant} onPress={() => pickMerchant(m)} />)}
               </ScrollView>
             )}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }} accessibilityLabel="Category">
+            {!chosenReturn && <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }} accessibilityLabel="Category">
               {categories.map((x) => <Chip key={x.id} label={x.name} on={x.id === categoryId} onPress={() => setCategoryId(x.id === categoryId ? null : x.id)} />)}
-            </ScrollView>
+            </ScrollView>}
           </>
         )}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }} accessibilityLabel={kind === 'transfer' ? 'From account' : 'Account'}>
@@ -186,6 +208,21 @@ export default function AddScreen() {
           </ScrollView>
         )}
         <DateField label="Date" value={date} onChange={setDate} />
+        {returnOptions.length > 0 && (
+          <View accessibilityRole="radiogroup" testID="return-check" style={{ gap: 6 }}>
+            <T variant="footnote" style={{ fontFamily: 'Inter_600SemiBold' }}>{RETURN_CHECK_TITLE}</T>
+            {returnOptions.map((m) => <Check key={m.txId} label={matchOptionView(m, cents, data, cur).label} value={returnChoice === m.txId} onChange={() => { setReturnChoice(m.txId); setError(null); }} />)}
+            <Check label={RETURN_SEPARATE_LABEL} value={returnChoice === 'separate'} onChange={() => { setReturnChoice('separate'); setError(null); }} />
+            <T variant="footnote" color="textSecondary" testID="return-note">{chosenReturn ? matchOptionView(chosenReturn, cents, data, cur).note : RETURN_DECIDE_HINT}</T>
+          </View>
+        )}
+        {anyReturnPossible && <LinkButton title={RETURN_ASK_LINK} onPress={() => setAskReturn(true)} />}
+        {preOpening && (
+          <View testID="opening-posted" style={{ gap: 6 }}>
+            <T variant="footnote" color="textSecondary">{OPENING_POSTED_HINT(preOpening.name, formatShortDate(preOpening.openingDate))}</T>
+            <Button title={OPENING_POSTED_LABEL(preOpening.name)} kind="secondary" small onPress={async () => { const r = await run((ctx) => markPostedBeforeOpening(ctx, existing![0]!.id), { undoLabel: 'Marked as already in the opening balance' }); if (r.ok) { toast({ message: `Marked as already in ${preOpening.name}'s opening balance`, action: { label: 'Undo', run: () => void store.undo() } }); router.back(); } }} />
+          </View>
+        )}
         {kind === 'transfer' && (
           <View style={{ gap: 6 }} testID="transfer-status">
             <T variant="footnote" color="textSecondary">{TRANSFER_STATUS_LABEL}</T>

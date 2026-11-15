@@ -115,12 +115,28 @@ export const MATCH_FEE_NOTE = (fee: string, principal: string, account: string) 
 /** Phase 4A.5.17: a statement row that may be the return of a card payment recorded in Clarity. */
 export const MATCH_RETURN_LABEL = "It's the return of this card payment";
 export const MATCH_RETURN_NOTE = (paying: string, card: string) =>
-  `Clarity records the money coming back to ${paying} and the payment as returned: it no longer counts as paying ${card}, so ${card}'s debt is counted in full again. It isn't counted as income. The payment itself is kept (with its history); undoing this import removes the return.`;
+  `Clarity records the money coming back to ${paying} and the payment as returned: it no longer counts as paying ${card}, so ${card}'s debt is counted in full again. It isn't counted as income. The payment itself is kept (with its history); undo removes the return.`;
+/** Phase 4A.5.18: a partial return. */
+export const MATCH_PARTIAL_RETURN_LABEL = "It's a partial return of this card payment";
+export const MATCH_PARTIAL_RETURN_NOTE = (returned: string, payment: string, left: string, card: string) =>
+  `Only ${returned} of the ${payment} payment came back; the other ${left} still counts as paying ${card}.`;
+/** Phase 4A.5.18: a review row confirmed as a return (in place of its type and category). */
+export const RETURN_ROW_BADGE = 'Returned card payment';
+export const RETURN_ROW_TEXT = (amount: string, payment: string, date: string, card: string) =>
+  `Linked as the return of ${amount} of the ${payment} payment to ${card} on ${date}, not imported as income.`;
+/** Phase 4A.5.18: the manual-entry decision (Add/Edit form). */
+export const RETURN_CHECK_TITLE = 'Is this money a returned card payment?';
+export const RETURN_SEPARATE_LABEL = "No, it's separate income";
+export const RETURN_DECIDE_HINT = 'Not sure yet? Close without saving and decide later; nothing is recorded until you choose.';
+export const RETURN_ASK_LINK = 'This is a returned card payment…';
+export const RETURN_NEEDS_DECISION = 'Choose whether this is a returned card payment, or close to decide later.';
+export const OPENING_POSTED_LABEL = (account: string) => `It had already posted when I added ${account}`;
+export const OPENING_POSTED_HINT = (account: string, date: string) => `Pending items dated before ${account} was added (${date}) count, because the balance you entered was the posted balance. If this one had already posted by then, it's already in that balance: mark it so and it stops counting.`;
 export const MATCH_NOT_FEE = (difference: string) =>
   `Can't be linked: the statement differs from this transfer by ${difference}, which can't be a transfer fee (more arrived, or less left, than was transferred). Leave the row out and check the transfer.`;
 /** Phase 4A.5.12: the import button says what it will do (rows linked to existing transactions add nothing). */
-export const IMPORT_BUTTON = (added: number, linked: number) =>
-  [added || !linked ? `Import ${added} transaction${added === 1 ? '' : 's'}` : '', linked ? `${added ? 'link' : 'Link'} ${linked} to existing` : ''].filter(Boolean).join(' and ');
+export const IMPORT_BUTTON = (added: number, linked: number, returns = 0) =>
+  [added || (!linked && !returns) ? `Import ${added} transaction${added === 1 ? '' : 's'}` : '', linked ? `${added ? 'link' : 'Link'} ${linked} to existing` : '', returns ? `${added || linked ? 'record' : 'Record'} ${returns} returned payment${returns === 1 ? '' : 's'}` : ''].filter(Boolean).join(', ').replace(/, ([^,]*)$/, ' and $1');
 export const PENDING_MATCH_UNRELATED = "The difference isn't related to these pending items; record the adjustment and keep them pending";
 export const RECONCILED_MESSAGE = (account: string, date: string) => `${account} matches your bank's posted balance as of ${date}. No adjustment needed.`;
 

@@ -1,5 +1,5 @@
 import { addDays, diffDays, formatCents, formatShortDate, type Account, type Cents, type ID, type ISODate, type Transaction, type TxStatus } from '@clarity/shared';
-import { inOpeningBalance, isReturnedPayment, isVoidedReturnLeg, similarity } from '@clarity/engine';
+import { inOpeningBalance, isVoidedReturnLeg, paymentReturnStatus, similarity } from '@clarity/engine';
 
 /**
  * Phase 4A.5.12: which existing transactions a statement row could be. One place for the rules, used by the import
@@ -55,6 +55,11 @@ export interface MatchCandidate {
   ageDays: number;
   /** Phase 4A.5.14: the transaction's version when listed (its updatedAt); a commit is refused if it changed since. */
   version: number;
+  /**
+   * Phase 4A.5.18: for a 'return' candidate: the payment, what was returned before, this return, and what is left
+   * afterwards (0 = fully returned); `older`: more than 30 days after the payment.
+   */
+  returnInfo?: { paymentCents: Cents; returnedBeforeCents: Cents; returnCents: Cents; remainingAfterCents: Cents; older: boolean };
   /** Phase 4A.5.14: part of amountCents that is an existing fee on this transfer leg. */
   feeCents?: Cents;
   /**
@@ -147,22 +152,40 @@ export function findMatchCandidates(row: MatchRow, account: Account, transaction
 }
 
 /**
- * Phase 4A.5.17: is this row possibly the return of the card payment `t` belongs to? Evidence required together: `t` is
- * one leg of a transfer between a credit card and a non-card account, it is in this row's account, the row is exactly
- * the opposite amount, dated from the payment's date to 30 days after, and the payment has no recorded return yet.
- * The description ("RETURNED PAYMENT") only ranks it. Never chosen automatically; any settlement status.
+ * Phase 4A.5.17/4A.5.18: is this row (a statement row, or an amount the user is entering) possibly a return of the card
+ * payment `t` belongs to? Required together: `t` is one leg of a transfer between a credit card and a non-card account,
+ * in this account, in the opposite direction; dated on or after the payment; the payment still has something left to
+ * return (returns never exceed it). Then:
+ * - the whole remaining amount (or the whole payment) within 30 days: suggested;
+ * - a smaller amount (a partial return), or a payment more than 30 days old: only with evidence in the description
+ *   ("RETURNED", "REVERSAL", …), or when the caller asks for every possibility (`all`, the manual "it's a returned
+ *   payment" choice). Never chosen automatically.
  */
-function returnCandidate(row: MatchRow, account: Account, t: Transaction, transactions: readonly Transaction[], accounts: readonly Account[]): MatchCandidate | null {
-  if (t.accountId !== account.id || !t.transferGroupId || t.returnOf || t.amountCents !== -row.amountCents || t.kind !== 'transfer') return null;
+export function returnCandidate(row: MatchRow, account: Account, t: Transaction, transactions: readonly Transaction[], accounts: readonly Account[], opts: { all?: boolean } = {}): MatchCandidate | null {
+  if (t.accountId !== account.id || !t.transferGroupId || t.returnOf || t.kind !== 'transfer' || Math.sign(t.amountCents) !== -Math.sign(row.amountCents) || row.amountCents === 0) return null;
   const age = diffDays(row.date, t.date);
-  if (age < 0 || age > MATCH_WINDOWS.returned.daysAfter || isReturnedPayment(t.transferGroupId, transactions)) return null;
+  if (age < 0) return null;
   const partner = transactions.find((x) => x.transferGroupId === t.transferGroupId && x.id !== t.id);
   const other = partner && accounts.find((a) => a.id === partner.accountId);
   if (!other || (account.type === 'credit_card') === (other.type === 'credit_card')) return null;
+  const st = paymentReturnStatus(t.transferGroupId, transactions);
+  const amt = Math.abs(row.amountCents);
+  if (st.remainingCents === 0 || amt > st.remainingCents) return null;
+  const full = amt === st.remainingCents;
+  const older = age > MATCH_WINDOWS.returned.daysAfter;
+  const evidence = RETURN_RE.test(row.merchant || row.rawDescription);
+  if (!opts.all && ((!full || older) && !evidence)) return null;
   return {
     txId: t.id, basis: 'return', date: t.date, merchant: t.merchant, kind: t.kind, accountId: t.accountId, status: t.status, amountCents: t.amountCents,
     differenceCents: 0, daysApart: age, ageDays: age, version: t.updatedAt,
+    returnInfo: { paymentCents: st.paymentCents, returnedBeforeCents: st.returnedCents, returnCents: amt, remainingAfterCents: st.remainingCents - amt, older },
   };
+}
+
+/** Phase 4A.5.18: every card payment an amount coming into (or charged back to) `account` could be a return of. */
+export function findReturnCandidates(row: MatchRow, account: Account, transactions: readonly Transaction[], accounts: readonly Account[], opts: { all?: boolean } = {}): MatchCandidate[] {
+  return transactions.flatMap((t) => { const c = returnCandidate(row, account, t, transactions, accounts, opts); return c ? [c] : []; })
+    .sort((a, b) => Number(a.returnInfo!.remainingAfterCents !== 0) - Number(b.returnInfo!.remainingAfterCents !== 0) || a.daysApart - b.daysApart || (a.txId < b.txId ? -1 : 1));
 }
 
 /**
@@ -192,6 +215,9 @@ export function candidateLabel(m: MatchCandidate, accountName: string, currency:
   if (m.kind === 'transfer') parts.push('transfer');
   if (m.feeCents) parts.push(`includes ${formatCents(-m.feeCents, currency)} fee`);
   if (m.basis === 'return') parts.push('card payment');
+  const ri = m.returnInfo;
+  if (ri && (ri.remainingAfterCents > 0 || ri.returnedBeforeCents > 0)) parts.push(`returns ${formatCents(ri.returnCents, currency)} of ${formatCents(ri.paymentCents, currency)}${ri.returnedBeforeCents ? ` (${formatCents(ri.returnedBeforeCents, currency)} returned before)` : ''}, ${formatCents(ri.remainingAfterCents, currency)} left paid`);
+  if (ri?.older) parts.push('more than 30 days after the payment');
   if (m.basis === 'stale') parts.push(`entered ${m.ageDays} days before this row, outside the normal ${MATCH_WINDOWS.pending.daysAfter}-day matching window`);
   if (m.differenceCents !== 0) parts.push(`statement differs by ${formatCents(m.differenceCents, currency, { sign: 'always' })}`);
   return parts.join(' · ');

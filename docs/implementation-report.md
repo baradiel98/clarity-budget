@@ -576,6 +576,31 @@ Owner policy: each transfer leg settles on its own; money in transit isn't spend
   - The return row still shows the Type/Category pickers, which are ignored for a return.
   - Not verified on simulators, devices, Safari or with a screen reader.
 
+## 7v. Phase 4A.5.18: returned-payment safeguards (manual entry, partial and older returns; opening correction)
+
+| Case (checking $1,000, Visa owes $500, $200 payment pending at both; truth by hand) | Truth | Before | After |
+|---|---:|---:|---:|
+| The returned $200 typed in by hand as income | $500 | $700 (separate income) | **$500** (the form asks; return recorded) |
+| $80 of the $200 returned (statement or by hand) | $500 | not offered (exact amounts only) | **$500** (checking $880, Visa $380, $120 still on its way) |
+| $80 + $70 + $50 returned; then another $60 | $500; refused | n/a | **$500**; the fourth is refused ("only $50.00 … left to return" before the last) |
+| Payment of Sep 1 returned Oct 12 ("DEPOSIT") | $500 | treated as income | **$500** once the user picks it (not suggested without evidence) |
+| Pending $200 dated before checking was added, already posted then | $1,000 | $800 | **$1,000** after "It had already posted when I added Checking" |
+
+- **Representation:** the 4A.5.17 transfer back (`returnOf`) carries partial returns too. Engine: `returnedWhileUnposted` and `effectiveAmount`; returns are capped by `paymentReturnStatus`.
+- **Manual entry:** `returnOptionsForEntry` and `recordPaymentReturn` (also corrects an existing income transaction, keeping its statement identity). Web and mobile Add/Edit require a decision when a return is plausible.
+- **Review rows:** a confirmed return hides type and category and says what is recorded; the button reads "Record N returned payment(s)".
+- **Deletion:** deleting a payment deletes its returns.
+- **Tests (all after the final code change):**
+  - **Unit:** vitest 667 passed, 1 skipped. New: `packages/data/test/return-safeguards.test.ts` (20 tests, including a 300-run randomized model of full and partial, manual and imported returns with undo). One 4A.5.17 test updated: with "RETURNED" in the description, partial and older returns are now offered.
+  - **Mobile:** jest 55 passed (new: the Add form's return decision; one older test updated for the new button text).
+  - **Browser:** Playwright 176 passed, 10 skipped (Chromium; new `e2e/phase4a518.spec.ts`, 3 tests with screenshots).
+  - **Checks:** typecheck and lint clean; mobile `tsc` clean; iOS and Android bundles exported.
+  - **Earlier audit:** the 4A.5.16 randomized model (scratchpad) still shows 0 mismatches over 4,194 actions.
+- **Limitations:**
+  - Returns entered through Clarity Capture or recurring confirmation aren't checked.
+  - The opening correction is for non-transfer items only (a transfer leg uses the statement-link route).
+  - Not verified on simulators, devices, Safari or with a screen reader.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

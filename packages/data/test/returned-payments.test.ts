@@ -203,15 +203,21 @@ describe('F1: a returned card payment', () => {
     b.commit(b.review(c, [['2026-09-12', 'VISA PMT', -20000, 80000], ['2026-09-12', 'VISA PMT RETURN', 20000, 100000]]), { 'VISA PMT': t.out.id, 'VISA PMT RETURN': t.out.id });
     expect(b.sts()).toBe(50000);
   });
-  it('not a return candidate: a deposit of a different amount, before the payment, more than 30 days later, or for a transfer between two bank accounts', () => {
+  it('not a return candidate without evidence: a deposit of a different amount, before the payment, more than 30 days later; never for a transfer between two bank accounts', () => {
     const { b, c, v } = setup();
     const s = b.acct('Savings', 'savings', 50000);
     b.transfer(c, v, '2026-09-10', 20000);
     b.transfer(c, s, '2026-09-10', 15000);
     for (const [d, a] of [['2026-09-12', 19000], ['2026-09-09', 20000], [addDays('2026-09-10', 31), 20000], ['2026-09-12', 15000]] as const) {
       b.at(d > '2026-09-12' ? d : '2026-09-12');
+      const rv = b.review(c, [[d, 'DEPOSIT 4471', a, 100000]]);
+      expect(row(rv, 'DEPOSIT 4471').matchCandidates.filter((m) => m.basis === 'return'), `${d} ${a}`).toEqual([]);
+    }
+    // Phase 4A.5.18: with evidence in the description, a partial amount or a payment more than 30 days old IS offered
+    for (const [d, a] of [['2026-09-12', 19000], [addDays('2026-09-10', 31), 20000]] as const) {
+      b.at(d > '2026-09-12' ? d : '2026-09-12');
       const rv = b.review(c, [[d, 'RETURNED PAYMENT', a, 100000]]);
-      expect(row(rv, 'RETURNED PAYMENT').matchCandidates.filter((m) => m.basis === 'return'), `${d} ${a}`).toEqual([]);
+      expect(row(rv, 'RETURNED PAYMENT').matchCandidates.filter((m) => m.basis === 'return').length, `${d} ${a} with evidence`).toBe(1);
     }
   });
   it('a stale commit is refused: the payment returned in another review first', () => {

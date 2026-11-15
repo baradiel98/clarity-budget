@@ -451,3 +451,24 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
   - A partial return (a different amount) isn't offered.
   - The review still shows the Type/Category pickers on a return row, although they are ignored for a return.
   - A pending item from before an account was added that later turns out to have been in the entered balance must be marked posted with a statement row dated before the opening date (or deleted).
+
+## Phase 4A.5.18 (2026-11-15): returned-payment safeguards (manual entry, partial, older; opening correction)
+- **[Data model, verified safe]** Partial returns use the existing transfer-back representation (`returnOf`); no new state.
+  - Engine: while the issuer has posted neither side, the returned part leaves the in-transit amount and the card's recorded/pending totals (`returnedWhileUnposted`, `effectiveAmount`). Afterwards each return's card side is a pending debit.
+  - The 4A.5.17 full-return behaviour is unchanged (same numbers).
+- **[Fixed / added]**
+  - Manual-entry detection (`returnOptionsForEntry`, web and mobile Add/Edit). An explicit decision is required: return, separate income, or close to decide later.
+  - `recordPaymentReturn`, including correcting an existing income transaction (`replaceTxId`).
+  - Partial and multiple returns, capped at the payment total (`paymentReturnStatus`).
+  - Older-than-30-day returns: suggested with description evidence, and always selectable by the user.
+  - Review rows confirmed as returns hide type/category and say what is recorded. The button reads "Record N returned payment(s)".
+  - Deleting a payment deletes its returns.
+  - Opening correction `markPostedBeforeOpening`, with a button in the Edit form.
+- **[Decisions, mine; documented]**
+  - Partial amounts and older payments are suggested only with description evidence; otherwise the user picks them via "This is a returned card payment…".
+  - "Decide later" means closing the form without saving.
+- **[Lesson]** The first engine generalisation kept the returned share in the card's recorded balance (−$300 instead of −$500); Safe to Spend was right but the account figure misleading. `effectiveAmount` fixes it.
+- **[Known limitations]**
+  - A return typed in as income through other paths (Clarity Capture, recurring confirmation) isn't checked.
+  - Partial returns of transfer fees aren't modelled.
+  - The opening correction is offered for non-transfer items only; a transfer leg uses the statement-link route.

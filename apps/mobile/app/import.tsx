@@ -2,12 +2,12 @@ import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native';
 import * as ExpoCrypto from 'expo-crypto';
-import { commitImport, describeImportResult, describeImportUndo, markTransactionPosted, isLinkChoice, matchDecision, matchOptionView, postedByMatchOf, undoImportBatch, type ImportDecision } from '@clarity/data';
+import { commitImport, describeImportResult, describeImportUndo, markTransactionPosted, isLinkChoice, matchDecision, matchOptionView, postedByMatchOf, returnRowText, undoImportBatch, type ImportDecision } from '@clarity/data';
 import {
   buildPreview, checkImportFile, findMatchCandidates, csvParser, MATCH_WINDOWS, dataRowCount, guessMapping, headerSignature, NO_DATA_ROWS_MESSAGE, nonBlankRowCount, reconcilePreview, suggestSignConvention, type ImportCandidate, type ImportPreview,
   type MappingGuess, type RawTable,
 } from '@clarity/import';
-import { formatCents, formatShortDate, IMPORT_BUTTON, MATCH_CHOICE_TITLE, MATCH_NONE_LABEL, MATCH_SKIP_LABEL, MATCH_STALE_TITLE, MATCH_TAKEN, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, TERMS, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
+import { formatCents, formatShortDate, IMPORT_BUTTON, RETURN_ROW_BADGE, MATCH_CHOICE_TITLE, MATCH_NONE_LABEL, MATCH_SKIP_LABEL, MATCH_STALE_TITLE, MATCH_TAKEN, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, TERMS, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
 import { Check } from '../src/features/Welcome';
 import { pickTextFile } from '../src/platform/files';
 import { useData, useRun, useSession } from '../src/state/session';
@@ -118,6 +118,7 @@ export default function ImportScreen() {
   const liveOf = (r: Row) => (account ? findMatchCandidates(r, account, data.transactions, { alsoIds: r.matchCandidates.map((m) => m.txId), accounts: data.accounts }) : []);
   // Phase 4A.5.17: a confirmed return adds the returned money, so it counts as a new row, not a link
   const linked = (r: Row) => isLinkChoice(r.matchChoice, liveOf(r));
+  const returnOf = (r: Row) => { const m = r.matchChoice ? liveOf(r).find((x) => x.txId === r.matchChoice && x.basis === 'return') : undefined; return m ? returnRowText(m, data) : null; };
   // Phase 4A.5.14: per leg; a confirmed transfer fee makes the linked leg's effect the statement amount
   const sameIds = included.filter(linked).map((r) => postedByMatchOf(r.matchChoice!, liveOf(r), r.amountCents));
   const recon = useMemo(() => (preview && account ? reconcilePreview(preview, included.filter((r) => !linked(r)), { account, transactions: data.transactions, postedByMatch: sameIds }) : null), [preview, included, account, data.transactions, JSON.stringify(sameIds)]);
@@ -239,8 +240,9 @@ export default function ImportScreen() {
                     })()}
                   </View>
                 )}
-                <Pressable onPress={() => setRow(i, { expanded: !r.expanded })} accessibilityRole="button" style={{ marginLeft: 32, marginTop: 4 }}><T variant="caption" color="accent">{r.expanded ? 'Done' : 'Change type or category'}</T></Pressable>
-                {r.expanded && (
+                {/* Phase 4A.5.18: a row confirmed as a returned card payment has no type or category to choose */}
+                {returnOf(r) ? <T variant="caption" color="textSecondary" testID={`return-kind-${r.rowNumber}`} style={{ marginLeft: 32, marginTop: 4 }}>{RETURN_ROW_BADGE}: {returnOf(r)}</T> : <Pressable onPress={() => setRow(i, { expanded: !r.expanded })} accessibilityRole="button" style={{ marginLeft: 32, marginTop: 4 }}><T variant="caption" color="accent">{r.expanded ? 'Done' : 'Change type or category'}</T></Pressable>}
+                {r.expanded && !returnOf(r) && (
                   <View style={{ marginLeft: 32, marginTop: 8, gap: 8 }}>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
                       {(r.amountCents < 0 ? (['expense', 'transfer'] as const) : (['income', 'refund', 'transfer'] as const)).map((k) => <Chip key={k} label={k} on={r.editKind === k} onPress={() => setRow(i, { editKind: k })} />)}
@@ -288,7 +290,7 @@ export default function ImportScreen() {
             </Card>
           )}
           {blocking > 0 && <T color="warning">Choose the other account for {blocking} transfer{blocking > 1 ? 's' : ''}.</T>}
-          <Button title={IMPORT_BUTTON(included.filter((r) => !linked(r)).length, included.filter(linked).length)} disabled={busy || included.length === 0 || blocking > 0} busy={busy} onPress={() => void commit()} />
+          <Button title={IMPORT_BUTTON(included.filter((r) => !linked(r) && !returnOf(r)).length, included.filter(linked).length, included.filter((r) => !!returnOf(r)).length)} disabled={busy || included.length === 0 || blocking > 0} busy={busy} onPress={() => void commit()} />
         </>
       )}
 

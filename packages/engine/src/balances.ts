@@ -23,21 +23,47 @@ export function inOpeningBalance(account: Account, tx: Transaction): boolean {
 }
 
 /**
- * Phase 4A.5.17: the card side of a RETURNED card payment that the card issuer never posted. The payment (group G) has
- * a recorded return (a transfer back with returnOf = G); while BOTH card-side legs are still pending, the card never saw
- * either, so they cancel and neither counts on the card. Once the issuer posts either, both count normally.
+ * Phase 4A.5.17/4A.5.18: the card side of a RETURN (a transfer back, returnOf = the payment's group) while the card
+ * issuer has posted neither the payment nor this return: the card never saw either, so the return's card leg doesn't
+ * count; instead that much of the payment stops counting as on its way (see returnedWhileUnposted). Full and partial
+ * returns alike. Once the issuer posts the payment, the return's card leg counts normally (a pending debit).
  */
 export function isVoidedReturnLeg(account: Account, tx: Transaction, transactions: readonly Transaction[]): boolean {
-  if (account.type !== 'credit_card' || tx.status !== 'pending' || !tx.transferGroupId || tx.accountId !== account.id) return false;
-  // the return's card leg, while the original payment's card leg is still pending
-  if (tx.returnOf) return transactions.some((t) => t.transferGroupId === tx.returnOf && t.accountId === account.id && t.status === 'pending');
-  // the original payment's card leg, while the return's card leg is still pending
-  return transactions.some((t) => t.returnOf === tx.transferGroupId && t.accountId === account.id && t.status === 'pending');
+  if (account.type !== 'credit_card' || tx.status !== 'pending' || !tx.returnOf || tx.accountId !== account.id) return false;
+  return transactions.some((t) => t.transferGroupId === tx.returnOf && t.accountId === account.id && t.status === 'pending' && t.amountCents > 0);
 }
 
-/** Phase 4A.5.17: the card payment (transfer group) has a recorded return. */
+/** Phase 4A.5.18: how much of a pending card payment leg has been returned while neither side was posted by the issuer. */
+export function returnedWhileUnposted(account: Account, cardLeg: Transaction, transactions: readonly Transaction[]): Cents {
+  let total = 0;
+  for (const t of transactions) if (t.returnOf === cardLeg.transferGroupId && isVoidedReturnLeg(account, t, transactions)) total += -t.amountCents;
+  return Math.min(total, cardLeg.amountCents);
+}
+
+/**
+ * Phase 4A.5.18: what a transaction adds to its account. The same as its amount, except the card leg of a payment the
+ * issuer hasn't posted: the part returned meanwhile (whose return leg doesn't count, see isVoidedReturnLeg) is left
+ * out, so the card shows only what is still on its way ($200 paid, $80 returned → $120).
+ */
+export function effectiveAmount(account: Account, tx: Transaction, transactions: readonly Transaction[] | undefined): Cents {
+  if (!transactions || account.type !== 'credit_card' || tx.status !== 'pending' || tx.amountCents <= 0 || !tx.transferGroupId || tx.returnOf) return tx.amountCents;
+  return tx.amountCents - returnedWhileUnposted(account, tx, transactions);
+}
+
+/** Phase 4A.5.17: the card payment (transfer group) has a recorded return (full or partial). */
 export const isReturnedPayment = (groupId: string | undefined, transactions: readonly Transaction[]): boolean =>
   !!groupId && transactions.some((t) => t.returnOf === groupId);
+
+/**
+ * Phase 4A.5.18: a card payment's returns: the amount paid, how much was returned (every recorded return, posted or
+ * not), and what is left that can still be returned. Never negative.
+ */
+export function paymentReturnStatus(groupId: string, transactions: readonly Transaction[]): { paymentCents: Cents; returnedCents: Cents; remainingCents: Cents } {
+  const paid = transactions.find((t) => t.transferGroupId === groupId && t.amountCents > 0)?.amountCents ?? 0;
+  let returned = 0;
+  for (const t of transactions) if (t.returnOf === groupId && t.amountCents > 0) returned += t.amountCents;
+  return { paymentCents: paid, returnedCents: returned, remainingCents: Math.max(0, paid - returned) };
+}
 
 /**
  * A transaction changes an account's balance only if it isn't history only: not already in the opening balance
@@ -77,9 +103,10 @@ export function isCardPaymentInTransit(account: Account | undefined, tx: Transac
   // Phase 4A.5.17: a returned payment is no longer on its way (see isVoidedReturnLeg / the return's own legs). After
   // the opening-date rule above, a recorded paying debit always counts against its account: as a pending debit, as a
   // posted one, or inside that account's opening or confirmed balance; so the card offset never outruns the cash side.
+  // Phase 4A.5.18: only the part not returned is on its way (a full return leaves nothing in transit)
   return !!account && account.type === 'credit_card' && tx.accountId === account.id && tx.status === 'pending' && tx.amountCents > 0 && !!tx.transferGroupId && !tx.returnOf &&
-    !isReturnedPayment(tx.transferGroupId, transactions) &&
-    transactions.some((x) => x.transferGroupId === tx.transferGroupId && x.id !== tx.id && x.amountCents < 0);
+    transactions.some((x) => x.transferGroupId === tx.transferGroupId && x.id !== tx.id && x.amountCents < 0) &&
+    returnedWhileUnposted(account, tx, transactions) < tx.amountCents;
 }
 
 /**
@@ -90,7 +117,11 @@ export function isCardPaymentInTransit(account: Account | undefined, tx: Transac
 export function pendingCreditTotal(account: Account, transactions: readonly Transaction[], asOf: ISODate): Cents {
   const bd = balanceAsOfDate(account, transactions);
   let total = 0;
-  for (const t of transactions) if (affectsBalance(account, t, bd, transactions) && t.date <= asOf && isPendingCredit(t) && !isCardPaymentInTransit(account, t, transactions)) total += t.amountCents;
+  for (const t of transactions) {
+    if (!affectsBalance(account, t, bd, transactions) || t.date > asOf || !isPendingCredit(t)) continue;
+    // Phase 4A.5.15/18: a card payment on its way (what isn't returned) lowers the debt; anything else is held back
+    if (!isCardPaymentInTransit(account, t, transactions)) total += effectiveAmount(account, t, transactions);
+  }
   return total;
 }
 
@@ -103,7 +134,7 @@ export function cardPaymentsInTransit(accounts: readonly Account[], transactions
     for (const t of transactions) {
       if (!affectsBalance(a, t, bd, transactions) || t.date > asOf || !isCardPaymentInTransit(a, t, transactions)) continue;
       const from = transactions.find((x) => x.transferGroupId === t.transferGroupId && x.id !== t.id);
-      out.push({ cardId: a.id, fromAccountId: from?.accountId ?? null, cents: t.amountCents, txId: t.id });
+      out.push({ cardId: a.id, fromAccountId: from?.accountId ?? null, cents: t.amountCents - returnedWhileUnposted(a, t, transactions), txId: t.id }); // Phase 4A.5.18: the part still on its way
     }
   }
   return out;
@@ -157,7 +188,7 @@ export function historyStatus(account: Account | undefined, tx: Transaction, bal
 /** Pending items in the account (dated on or before `asOf`), as Update balance lists them. */
 export function pendingItems(account: Account, transactions: readonly Transaction[], asOf: ISODate): Transaction[] {
   const bd = balanceAsOfDate(account, transactions);
-  return transactions.filter((t) => affectsBalance(account, t, bd, transactions) && t.date <= asOf && t.status === 'pending');
+  return transactions.filter((t) => affectsBalance(account, t, bd, transactions) && t.date <= asOf && t.status === 'pending' && effectiveAmount(account, t, transactions) !== 0);
 }
 
 /**
@@ -209,7 +240,7 @@ export function accountBalance(account: Account, transactions: readonly Transact
   const bd = balanceAsOfDate(account, transactions);
   let total = account.openingBalanceCents;
   for (const t of transactions) {
-    if (affectsBalance(account, t, bd, transactions) && t.date <= asOf) total += t.amountCents;
+    if (affectsBalance(account, t, bd, transactions) && t.date <= asOf) total += effectiveAmount(account, t, transactions);
   }
   return total;
 }
@@ -218,7 +249,7 @@ export function pendingTotal(account: Account, transactions: readonly Transactio
   const bd = balanceAsOfDate(account, transactions);
   let total = 0;
   for (const t of transactions) {
-    if (affectsBalance(account, t, bd, transactions) && t.date <= asOf && isUnpostedAsOf(t, asOf)) total += t.amountCents;
+    if (affectsBalance(account, t, bd, transactions) && t.date <= asOf && isUnpostedAsOf(t, asOf)) total += effectiveAmount(account, t, transactions);
   }
   return total;
 }
