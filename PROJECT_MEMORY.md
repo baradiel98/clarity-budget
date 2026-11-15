@@ -523,8 +523,29 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Lesson]**
   - Excluding payment rows with any existing match candidate silently disabled pairing whenever a pending outgoing item existed. The randomized model caught it (0 pairings), and the rule was refined.
   - A new same-statement return initially double-counted earlier returns from the same import. The several-returns test caught it.
-- **[New finding, not fixed (outside N1–N4)]** The import review pre-ticks a suggested scheduled-item link (`occurrenceMatch`) by amount and date even when the row is a card payment and the item is a bill: in the sample data, "PAYMENT TO STORE CARD −$100" was matched to the Electricity bill, overstating Safe to Spend by $91.40. This existed before 4A.8 (the row was then an expense, with the same pre-ticked link). Recommended next.
+- **[New finding, fixed in 4A.9]** The import review pre-ticked a suggested scheduled-item link (`occurrenceMatch`) by amount and date even when the row is a card payment and the item is a bill: in the sample data, "PAYMENT TO STORE CARD −$100" was matched to the Electricity bill, overstating Safe to Spend by $91.40. This existed before 4A.8 (the row was then an expense, with the same pre-ticked link). Recommended next.
 - **[Known limitations]**
   - Same-statement pairing covers non-card statements. On a card statement, a payment row and its reversal row aren't paired: that remains the existing matching against payments already in Clarity.
   - Re-importing only the return's statement after the user deleted both the payment and the return (the two in separate files) still offers the row as new money. Pairing needs both rows in one review, and no row-level deletion history is kept (deliberately not added: it would need a stored schema change).
+
+## Phase 4A.9 (2026-11-15): scheduled-item matching integrity
+- **[Root cause, verified]** `suggestOccurrenceMatch` accepted any unpaid occurrence in the same account and direction within ±7 days whose amount fit (25% for estimates). The description only ranked candidates. The import review (web and mobile) and the Add form (web and mobile) ticked the link by default. A link marks the occurrence confirmed and drops it from the forecast: sample-data Electricity ($91.40 estimate) linked to "PAYMENT TO STORE CARD −$100" gave Safe to Spend $2,268.57 instead of $2,177.17.
+- **[Confirmed policy, from the phase brief]**
+  - Amount and date alone never link: weak or ambiguous suggestions are shown unticked; the user can reject any suggestion.
+  - The import commit validates every link against current data.
+  - No forced selection.
+- **[Verified implementation]**
+  - **Engine (`packages/engine/src/matching.ts`):** `occurrenceEligible` (adds kind fit), `occurrenceEvidence` (name or history), `suggestOccurrenceLink` (strong / ambiguous); `suggestOccurrenceMatch` kept as a wrapper.
+  - **Import:** the pipeline passes the row's likely kind and card. `occurrenceMatch` gains `strong`, `evidence`, `ambiguous` and `date`.
+  - **Data:** the `commitImport` link checks and `occurrenceRefProblem` (in `addTransaction` / `updateTransaction`).
+  - **UI:** the review (web and mobile) and the Add form (web and mobile) tick only strong suggestions and explain weak ones.
+- **[Data model]** No schema change and no migration. The new candidate fields are optional (reviews built before 4A.9 lack them and so default to unticked).
+- **[Decisions, mine; documented]**
+  - Evidence means: all distinctive name words appear in the description; or token similarity ≥ 0.5; or the same payee was linked to the item before.
+  - A link chosen in the Add form or by Mark paid may have a different amount or date (it records what was paid).
+  - A data-command caller sending `linkOccurrence: true` for a row with no suggestion is ignored, as before.
+- **[Lesson]** The engine only generates occurrences from the day an item was added (`trackFrom`): tests needing past occurrences must create the item earlier.
+- **[Known limitations]**
+  - "Mark paid" on an occurrence that an independently imported transaction already paid creates a second transaction: there is no "link this existing transaction" button yet. The data layer refuses only when the occurrence is already linked.
+  - Evidence is word-based: a payee whose statement name shares no word with the item's name ("OAKWOOD MGMT" for "Rent") is strong only after the user links it once (history).
 

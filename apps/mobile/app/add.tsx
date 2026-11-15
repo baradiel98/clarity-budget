@@ -4,8 +4,8 @@ import { useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { addTransaction, deleteProblem, deleteTransaction, markPostedBeforeOpening, matchOptionView, recordPaymentReturn, returnOptionsForEntry, updateTransaction, type TxInput } from '@clarity/data';
-import { addDays, ALREADY_INCLUDED_HINT, ALREADY_INCLUDED_LABEL, OPENING_POSTED_HINT, OPENING_POSTED_LABEL, RETURN_ASK_LINK, RETURN_CHECK_TITLE, RETURN_DECIDE_HINT, RETURN_NEEDS_DECISION, RETURN_SEPARATE_LABEL, centsToDecimalString, formatCents, formatShortDate, legsPendingOf, parseAmountInput, TERMS, transferChoiceOf, TRANSFER_STATUS_HINT, TRANSFER_STATUS_LABEL, transferStatusOptions } from '@clarity/shared';
-import { balanceAsOfDate, buildMerchantMemory, inclusionProblem, expandOccurrences, findPossibleDuplicates, merchantKey, suggestOccurrenceMatch } from '@clarity/engine';
+import { addDays, ALREADY_INCLUDED_HINT, OCCURRENCE_WEAK_HINT, ALREADY_INCLUDED_LABEL, OPENING_POSTED_HINT, OPENING_POSTED_LABEL, RETURN_ASK_LINK, RETURN_CHECK_TITLE, RETURN_DECIDE_HINT, RETURN_NEEDS_DECISION, RETURN_SEPARATE_LABEL, centsToDecimalString, formatCents, formatShortDate, legsPendingOf, parseAmountInput, TERMS, transferChoiceOf, TRANSFER_STATUS_HINT, TRANSFER_STATUS_LABEL, transferStatusOptions } from '@clarity/shared';
+import { balanceAsOfDate, buildMerchantMemory, inclusionProblem, expandOccurrences, findPossibleDuplicates, merchantKey, suggestOccurrenceLink } from '@clarity/engine';
 import { Check } from '../src/features/Welcome';
 import { takeAddPrefill } from '../src/state/nav';
 import { useData, useRun, useSession, useStore } from '../src/state/session';
@@ -68,7 +68,8 @@ export default function AddScreen() {
   const [toIncluded, setToIncluded] = useState<boolean | null>(src ? !!existing?.find((t) => t.id !== src.id)?.includedInBalance : null);
   const [more, setMore] = useState(false);
   const [dupConfirmed, setDupConfirmed] = useState(false);
-  const [linkOcc, setLinkOcc] = useState(true);
+  // Phase 4A.9: null = not chosen → ticked only for a strong suggestion (evidence beyond amount and date)
+  const [linkOccChoice, setLinkOcc] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const isEdit = !!existing;
@@ -113,11 +114,13 @@ export default function AddScreen() {
 
   const signed = kind === 'expense' || kind === 'transfer' ? -cents : cents;
   const duplicates = !isEdit && cents > 0 && kind !== 'transfer' ? findPossibleDuplicates({ accountId, date, amountCents: signed, merchant }, data.transactions) : [];
-  const occurrence = useMemo(() => {
+  const occurrenceSuggestion = useMemo(() => {
     if (prefill.occurrenceRef || isEdit || cents <= 0 || kind === 'refund') return null;
     const occ = expandOccurrences(data.recurring, data.exceptions, data.transactions, { from: addDays(date, -40), to: addDays(date, 10), today });
-    return suggestOccurrenceMatch({ accountId, date, amountCents: signed, merchant }, occ);
-  }, [prefill, isEdit, cents, kind, data, date, accountId, merchant, today, signed]);
+    return suggestOccurrenceLink({ accountId, date, amountCents: signed, merchant, kind, toAccountId: kind === 'transfer' ? toAccountId || null : null }, occ, data.transactions);
+  }, [prefill, isEdit, cents, kind, data, date, accountId, merchant, today, signed, toAccountId]);
+  const occurrence = occurrenceSuggestion?.occurrence ?? null;
+  const linkOcc = linkOccChoice ?? !!occurrenceSuggestion?.strong;
 
   // Phase 4A.5.18: money coming in that could be a returned card payment needs an explicit decision (never automatic)
   const [returnChoice, setReturnChoice] = useState<string | null>(null);
@@ -243,7 +246,7 @@ export default function AddScreen() {
             <Check label={ALREADY_INCLUDED_LABEL(formatShortDate(toInc.date), toInc.account.name)} value={toInc.checked} onChange={setToIncluded} />
           </View>
         )}
-        {occurrence && <Check label={`This ${occurrence.kind === 'income' ? 'is' : 'pays'} ${occurrence.name} ${occurrence.kind === 'income' ? 'expected' : 'due'} ${formatShortDate(occurrence.date)}`} hint="So it isn't counted again in your forecast." value={linkOcc} onChange={setLinkOcc} />}
+        {occurrence && <Check label={`This ${occurrence.kind === 'income' ? 'is' : 'pays'} ${occurrence.name} ${occurrence.kind === 'income' ? 'expected' : 'due'} ${formatShortDate(occurrence.date)}`} hint={occurrenceSuggestion!.strong ? "So it isn't counted again in your forecast." : `So it isn't counted again in your forecast. ${OCCURRENCE_WEAK_HINT}`} value={linkOcc} onChange={setLinkOcc} />}
         {duplicates.length > 0 && <T color="warning" accessibilityRole="alert">A {formatCents(Math.abs(duplicates[0]!.amountCents), cur)} transaction at {duplicates[0]!.merchant} on this date already exists. {dupConfirmed ? 'Tap Save again to add it anyway.' : ''}</T>}
         {src?.splits?.length ? <T variant="footnote" color="textSecondary">This transaction is split across {src.splits.length} categories. Its split stays as is; change the split on the web app. If you change the amount, the parts must still add up.</T> : null}
         {date > today && <T variant="footnote" color="textSecondary">Dated in the future: shown as planned until {formatShortDate(date)}.</T>}

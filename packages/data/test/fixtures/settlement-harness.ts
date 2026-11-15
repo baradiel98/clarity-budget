@@ -41,13 +41,13 @@ export class Book {
   sts() { return computeSafeToSpend(engineInput(this.data, this.today)).cents; }
   transfers() { return new Set(this.data.transactions.filter((t) => t.transferGroupId).map((t) => t.transferGroupId)).size; }
 
-  review(accountId: ID, lines: Line[], convention?: 'as_is' | 'invert') {
+  review(accountId: ID, lines: Line[], convention?: 'as_is' | 'invert', opts: { schedules?: boolean } = {}) {
     const csv = csvOf(lines);
     const table = csvParser.parse(csv);
     const g = guessMapping(table);
     const base = { hasHeader: g.hasHeader, columns: g.columns!, dateFormat: g.dateFormats[0]!, decimalSeparator: g.decimalSeparator };
     const settings = { ...base, signConvention: convention ?? suggestSignConvention(table, base, this.a(accountId)).convention };
-    const preview = buildPreview(table, settings, { account: this.a(accountId), accounts: this.data.accounts, transactions: this.data.transactions, recurring: [], exceptions: [], importBatches: this.data.importBatches, fileHash: csv, today: this.today });
+    const preview = buildPreview(table, settings, { account: this.a(accountId), accounts: this.data.accounts, transactions: this.data.transactions, recurring: opts.schedules ? this.data.recurring : [], exceptions: opts.schedules ? this.data.exceptions : [], importBatches: this.data.importBatches, fileHash: csv, today: this.today });
     return { accountId, preview, settings };
   }
   /** Live candidates of a row, as the review screens show them. */

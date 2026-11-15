@@ -1,9 +1,9 @@
 import {
-  defaultCategories, formatCents, formatShortDate, localISODate, MATCH_AMOUNT_NOTE, MATCH_PARTIAL_RETURN_LABEL, MATCH_PARTIAL_RETURN_NOTE, RETURN_ROW_TEXT, MATCH_RETURN_LABEL, MATCH_RETURN_NOTE, MATCH_FEE_LABEL, MATCH_FEE_NOTE, MATCH_NOT_FEE, MATCH_PENDING_NOTE, MATCH_POSTED_NOTE, MATCH_TRANSFER_NOTE, STATEMENT_RETURN_ROW_TEXT, FEE_BLOCKED_BY_RETURNS, type Account, type AccountType, type Cents, type Category, type ID, type ISODate, type ImportBatch,
+  addDays, defaultCategories, formatCents, formatShortDate, localISODate, MATCH_AMOUNT_NOTE, MATCH_PARTIAL_RETURN_LABEL, MATCH_PARTIAL_RETURN_NOTE, RETURN_ROW_TEXT, MATCH_RETURN_LABEL, MATCH_RETURN_NOTE, MATCH_FEE_LABEL, MATCH_FEE_NOTE, MATCH_NOT_FEE, MATCH_PENDING_NOTE, MATCH_POSTED_NOTE, MATCH_TRANSFER_NOTE, STATEMENT_RETURN_ROW_TEXT, FEE_BLOCKED_BY_RETURNS, type Account, type AccountType, type Cents, type Category, type ID, type ISODate, type ImportBatch,
   type MappingProfile, type OccurrenceException, type Provenance, type RecurringAmount, type RecurringItem, type RecurringKind, type Schedule, type Settings,
   type Split, type Transaction, type TxKind, type TxStatus, type WeekendRule, type WorkspaceData,
 } from '@clarity/shared';
-import { accountBalance, balanceAsOfDate, inclusionProblem, paymentReturnStatus, pendingMatches, pendingPartialMatches, postedBalance, validateTransaction, validateTransferPair, type InclusionProblem, type Occurrence, type ValidationIssue } from '@clarity/engine';
+import { accountBalance, balanceAsOfDate, expandOccurrences, inclusionProblem, occurrenceEligible, paymentReturnStatus, pendingMatches, pendingPartialMatches, postedBalance, validateTransaction, validateTransferPair, type InclusionProblem, type Occurrence, type ValidationIssue } from '@clarity/engine';
 import { candidateLabel, feeOfLeg, findExactDuplicate, findMatchCandidates, findReturnCandidates, returnedBlocksFee, sameSnapshot, snapshotOf, statementReturnOptions, type CandidateSnapshot, type ImportCandidate, type ImportSettings, type MatchCandidate, type ReconciliationPreview, type StatementReturnOption } from '@clarity/import';
 import { applyOps as applyLocal, type Op } from './ops';
 
@@ -440,7 +440,26 @@ function buildTxs(ctx: Ctx, input: TxInput, ids: { id?: ID; pairId?: ID; groupId
   return [tx];
 }
 
+/**
+ * Phase 4A.9: a link to a scheduled occurrence (Mark paid, the Add/Edit form's "This pays …", or a later manual link)
+ * must name an occurrence that exists and isn't already recorded by another transaction (one transaction settles one
+ * occurrence; no double counting), in the account the item is scheduled from. Amount and date may differ (the user
+ * records what was actually paid); the link itself is always the user's explicit choice in these forms.
+ */
+function occurrenceRefProblem(ctx: Ctx, input: TxInput, ownIds: readonly ID[] = []): string | null {
+  const ref = input.occurrenceRef;
+  if (!ref) return null;
+  const item = ctx.data.recurring.find((r) => r.id === ref.recurringId);
+  if (!item) return 'That scheduled item no longer exists.';
+  const other = ctx.data.transactions.find((t) => !ownIds.includes(t.id) && t.occurrenceRef?.recurringId === ref.recurringId && t.occurrenceRef.originalDate === ref.originalDate);
+  if (other) return `${item.name} due ${formatShortDate(ref.originalDate)} is already recorded by ${txLabel(other, ctx.data.settings.baseCurrency)}. A scheduled payment is settled by one transaction.`;
+  if (item.accountId !== input.accountId) return `${item.name} is scheduled from ${ctx.data.accounts.find((a) => a.id === item.accountId)?.name ?? 'another account'}, not this account.`;
+  return null;
+}
+
 export function addTransaction(ctx: Ctx, input: TxInput): { ops: Op[]; txs: Transaction[]; warnings: string[] } {
+  const occProblem = occurrenceRefProblem(ctx, input);
+  if (occProblem) fail(occProblem, 'occurrence');
   const txs = buildTxs(ctx, input, {});
   const warnings: string[] = [];
   if (input.refundOfId) {
@@ -529,6 +548,12 @@ export function updateTransaction(ctx: Ctx, id: ID, input: TxInput): { ops: Op[]
   const legs = existing.transferGroupId ? ctx.data.transactions.filter((t) => t.transferGroupId === existing.transferGroupId) : [existing];
   const source = legs.find((l) => l.amountCents < 0) ?? legs[0]!;
   const pair = legs.find((l) => l.id !== source.id);
+  // Phase 4A.9: a NEW link to a scheduled occurrence is checked (an unchanged one is kept as it is)
+  const prevRef = existing.occurrenceRef;
+  if (input.occurrenceRef && !(prevRef && prevRef.recurringId === input.occurrenceRef.recurringId && prevRef.originalDate === input.occurrenceRef.originalDate)) {
+    const occProblem = occurrenceRefProblem(ctx, input, legs.map((l) => l.id));
+    if (occProblem) fail(occProblem, 'occurrence');
+  }
   const ops: Op[] = legs.map((l): Op => ({ t: 'del', table: 'transactions', id: l.id }));
   const txs = buildTxs(ctx, { ...input, ...(existing.occurrenceRef && !input.occurrenceRef ? { occurrenceRef: existing.occurrenceRef } : {}) }, {
     id: source.id,
@@ -902,6 +927,7 @@ export function commitImport(ctx: Ctx, input: CommitImportInput): { ops: Op[]; b
   const pairs = statementReturnOptions(input.decisions.map((d) => d.candidate), account, ctx.data.accounts);
   const createdByRow = new Map<number, { out: Transaction; other: Transaction }>();
   const pairedReturns: { d: ImportDecision; paymentRow: number }[] = [];
+  const linkedOccurrences = new Set<string>(); // Phase 4A.9: scheduled occurrences linked by this import
   for (const d of input.decisions) {
     const c = d.candidate;
     if (d.pairing && 'paymentRow' in d.pairing && d.match && 'txId' in d.match) fail(`Row ${c.rowNumber}: choose either an existing transaction or the payment in row ${d.pairing.paymentRow}, not both.`, 'match');
@@ -1028,7 +1054,23 @@ export function commitImport(ctx: Ctx, input: CommitImportInput): { ops: Op[]; b
       rowAmountCents: c.amountCents,
       ...(c.externalId ? { externalId: c.externalId } : {}),
     };
+    // Phase 4A.9: a link to a scheduled item is checked against the CURRENT schedule and data, never trusted from the
+    // review: the occurrence must still exist, be unpaid (not recorded by another transaction, not skipped), not be
+    // linked by another row of this import, and this row must still fit it with the kind and account chosen.
     const occurrenceRef = d.linkOccurrence && c.occurrenceMatch ? { occurrenceRef: { recurringId: c.occurrenceMatch.recurringId, originalDate: c.occurrenceMatch.originalDate } } : {};
+    if (d.linkOccurrence && c.occurrenceMatch) {
+      const m = c.occurrenceMatch;
+      const item = ctx.data.recurring.find((r) => r.id === m.recurringId);
+      if (!item) fail(`Row ${c.rowNumber}: the scheduled item “${m.name}” no longer exists. Review the statement again.`, 'stale');
+      const occ = expandOccurrences(ctx.data.recurring, ctx.data.exceptions, ctx.data.transactions, { from: addDays(c.date, -45), to: addDays(c.date, 45), today: ctx.today }).find((o) => o.key === m.key);
+      if (!occ) fail(`Row ${c.rowNumber}: “${m.name}” due ${formatShortDate(m.originalDate)} is no longer scheduled (it was changed, paused or ended). Review the statement again.`, 'stale');
+      if (occ!.status === 'confirmed') fail(`Row ${c.rowNumber}: “${m.name}” due ${formatShortDate(m.originalDate)} is already recorded by another transaction. Leave this row unlinked, or review it again.`, 'stale');
+      if (occ!.status === 'skipped') fail(`Row ${c.rowNumber}: “${m.name}” due ${formatShortDate(m.originalDate)} was skipped. Leave this row unlinked, or review it again.`, 'stale');
+      if (linkedOccurrences.has(m.key)) fail(`Row ${c.rowNumber}: “${m.name}” due ${formatShortDate(m.originalDate)} is already linked to another row of this statement. A scheduled payment is settled by one transaction.`, 'occurrence');
+      const asTx = { accountId: account.id, date: c.date, amountCents: c.amountCents, merchant: d.merchant || c.merchant || c.rawDescription, kind: d.kind, toAccountId: d.otherAccountId ?? null };
+      if (!occurrenceEligible(asTx, occ!)) fail(`Row ${c.rowNumber}: this row (${formatCents(c.amountCents, cur, { sign: 'always' })} on ${formatShortDate(c.date)}, ${d.kind}) can't be the payment of “${m.name}” due ${formatShortDate(occ!.date)}: the amount, date, direction, type or account don't fit. Leave it unlinked.`, 'occurrence');
+      linkedOccurrences.add(m.key);
+    }
     created++;
     if (d.kind === 'transfer') {
       if (!d.otherAccountId) fail(`Row ${c.rowNumber}: choose the other account for this transfer.`);

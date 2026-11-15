@@ -4,7 +4,7 @@ import { commitImport, describeImportResult, describeImportUndo, markTransaction
 import {
   checkImportFile, dataRowCount, DATE_FORMATS, findMatchCandidates, headerSignature, MATCH_WINDOWS, NO_DATA_ROWS_MESSAGE, reconcilePreview, type ImportCandidate, type ImportPreview, type ImportSettings,
 } from '@clarity/import';
-import { formatCents, formatShortDate, IMPORT_BUTTON, RETURN_ROW_BADGE, STATEMENT_RETURN_LABEL, STATEMENT_RETURN_NEEDS_PAYMENT, STATEMENT_RETURN_NONE_LABEL, STATEMENT_RETURN_NOTE, STATEMENT_RETURN_TITLE, MATCH_CHOICE_TITLE, MATCH_NONE_LABEL, MATCH_SKIP_LABEL, MATCH_STALE_TITLE, MATCH_TAKEN, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, TERMS, type ColumnMapping, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
+import { formatCents, formatShortDate, IMPORT_BUTTON, OCCURRENCE_WEAK_BADGE, OCCURRENCE_WEAK_HINT, OCCURRENCE_WEAK_ROW, RETURN_ROW_BADGE, STATEMENT_RETURN_LABEL, STATEMENT_RETURN_NEEDS_PAYMENT, STATEMENT_RETURN_NONE_LABEL, STATEMENT_RETURN_NOTE, STATEMENT_RETURN_TITLE, MATCH_CHOICE_TITLE, MATCH_NONE_LABEL, MATCH_SKIP_LABEL, MATCH_STALE_TITLE, MATCH_TAKEN, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, TERMS, type ColumnMapping, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
 import { useRouter } from '../lib/router';
 import { sha256Hex } from '../platform/files';
 import { useData, useRun, useSession } from '../state/session';
@@ -114,7 +114,7 @@ export function ImportPage() {
         importBatches: data.importBatches, fileHash: file.hash, today,
       });
       setPreview(p);
-      setRows(p.candidates.map((c) => ({ ...c, editKind: c.looksLikeTransfer ? 'transfer' : c.kind, editCategory: c.categoryId, otherAccountId: c.suggestedOtherAccountId ?? '', linkOccurrence: !!c.occurrenceMatch, matchChoice: null })));
+      setRows(p.candidates.map((c) => ({ ...c, editKind: c.looksLikeTransfer ? 'transfer' : c.kind, editCategory: c.categoryId, otherAccountId: c.suggestedOtherAccountId ?? '', linkOccurrence: !!c.occurrenceMatch?.strong, matchChoice: null })));
       setStage('review');
     } catch (e) {
       setError((e as Error).message);
@@ -375,13 +375,15 @@ export function ImportPage() {
                           {r.confidence === 'low' && <span className="badge neg">Check</span>}
                           {r.repeatInFile && <span className="badge" title="The same amount, date and description appears more than once in this file. Both are kept.">Repeated</span>}
                           {r.occurrenceMatch && (
-                            <label className="badge accent" style={{ cursor: 'pointer' }} title="Links this row to the scheduled item so it isn't counted twice in your forecast">
-                              <input type="checkbox" checked={r.linkOccurrence} onChange={(e) => setRow(i, { linkOccurrence: e.target.checked })} style={{ width: 12, height: 12, margin: 0 }} />
-                              <Link2 size={11} /> {r.occurrenceMatch.name}
+                            <label className={`badge ${r.occurrenceMatch.strong ? 'accent' : ''}`} style={{ cursor: 'pointer' }} data-testid={`occurrence-${r.rowNumber}`} title={r.occurrenceMatch.strong ? "Links this row to the scheduled item so it isn't counted twice in your forecast" : OCCURRENCE_WEAK_HINT}>
+                              <input type="checkbox" checked={r.linkOccurrence} onChange={(e) => setRow(i, { linkOccurrence: e.target.checked })} style={{ width: 12, height: 12, margin: 0 }} aria-label={`Row ${r.rowNumber} pays ${r.occurrenceMatch.name}`} />
+                              <Link2 size={11} /> {r.occurrenceMatch.strong ? r.occurrenceMatch.name : OCCURRENCE_WEAK_BADGE(r.occurrenceMatch.name)}
                             </label>
                           )}
                         </div>
                         {(r.duplicate || r.reasons.length > 0) && <div className="hint" style={{ marginTop: 4 }}>{[r.duplicate?.reason, ...r.reasons].filter(Boolean).join(' ')}</div>}
+                        {/* Phase 4A.9: an amount-and-date-only suggestion is explained, never pre-selected */}
+                        {r.occurrenceMatch && !r.occurrenceMatch.strong && <div className="hint" style={{ marginTop: 4 }} data-testid={`occurrence-weak-${r.rowNumber}`}>{OCCURRENCE_WEAK_ROW(r.occurrenceMatch.name, formatShortDate(r.occurrenceMatch.date ?? r.occurrenceMatch.originalDate))}</div>}
                         {hasChoice(r) && (() => {
                           const live = liveOf(r);
                           const pairs = r.statementReturnOf ?? [];

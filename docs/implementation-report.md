@@ -675,6 +675,40 @@ Owner policy: each transfer leg settles on its own; money in transit isn't spend
   - A return statement re-imported alone, after deleting a payment that was in a separate file, still offers the row as new money.
   - Not verified on simulators, devices, Safari or with a screen reader.
 
+## 7y. Phase 4A.9: scheduled-item import matching integrity
+
+| Case (sample data, Nov 13; Electricity: variable, estimated $91.40, due Nov 18) | Truth | Before (7a95975) | After |
+|---|---:|---:|---:|
+| "PAYMENT TO STORE CARD −$100" and its return (Store card owes $250) | $2,177.17 | $2,268.57: linked to Electricity by default, the bill dropped from the forecast | **$2,177.17**: a card payment can't settle a bill; no suggestion |
+| "ONLINE PMT 7781 −$100" (no payee) | $2,327.17 | $2,418.57 (linked by default) | **$2,327.17**: suggested as "Electricity?", not ticked |
+| "CITY ELECTRICITY CO −$91.40" | $2,427.17 (bill paid) | $2,427.17 | **$2,427.17**: strong (the name is in the description), ticked |
+| Rent $300 due Sep 15; unrelated "TARGET 0912 −$300" (checking $1,000) | $100 | $400 (linked, overstated by $300) | **$100** |
+
+- **Root cause:** `suggestOccurrenceMatch` used amount and date only, and the review and the Add form ticked the link. A link marks the occurrence confirmed and removes it from the forecast.
+- **Policy:**
+  - Eligibility now also requires the kind to fit.
+  - Only strong suggestions are ticked: evidence (the item's name in the description, or the same payee linked before) and no equally good alternative.
+  - Weak ones are explained and stay unticked.
+  - `commitImport` re-validates every link against the current schedule: the item still exists, the occurrence is unpaid and not skipped, it is linked by only one row, and it still fits the row.
+  - `addTransaction` / `updateTransaction` refuse links to missing, other-account or already-recorded occurrences.
+- **Data model:** no schema change and no migration.
+- **Tests (all after the final code change):**
+  - **Unit (vitest):** 759 passed, 1 skipped. New: `packages/data/test/scheduled-matching.test.ts`, 21 tests covering:
+    - unrelated payee; far date; different amount; no match;
+    - two items with the same amount; similar names; equally close occurrences; one-time items; history evidence; kind fit;
+    - the original sample discrepancy;
+    - already paid, changed, skipped or deleted items;
+    - a forged ineligible link; two rows on one occurrence; two tabs;
+    - undo and re-import; linking later; Mark paid on a recorded occurrence; the 4A.8 pairing alongside a link.
+  - **Mobile (jest):** 66 passed. New: `test/scheduled-matching.test.tsx` (3 tests: review weak and strong; Add form).
+  - **Browser:** Playwright 186 passed, 10 skipped (Chromium). New: `e2e/phase4a9.spec.ts` (3 tests with screenshots).
+  - **Checks:** root, web and mobile typechecks clean; lint clean; iOS and Android bundles exported.
+  - **Mutation check:** making every suggestion strong, or removing the commit check, makes 7 and 3 tests fail.
+- **Limitations:**
+  - There is no "link this existing transaction to that occurrence" button. "Mark paid" on an occurrence already paid by an unlinked import still adds a second transaction.
+  - Name evidence is word-based.
+  - Not verified on simulators, devices, Safari or with a screen reader.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

@@ -135,6 +135,10 @@ export const STATEMENT_RETURN_ROW_TEXT = (amount: string, payment: string, row: 
   `Linked as the return of ${amount} of the ${payment} card payment in row ${row} (${date}) of this statement, not imported as income.`;
 export const FEE_BLOCKED_BY_RETURNS = (returned: string, statement: string) =>
   `Can't be linked: ${returned} of this payment was already returned, so it can't become ${statement} with a transfer fee (returns can't exceed the payment). Remove the return first, or leave the row out.`;
+/** Phase 4A.9: a scheduled-item suggestion based only on the amount and date (not selected; the user decides). */
+export const OCCURRENCE_WEAK_HINT = "Only the amount and date are close; the description doesn't mention it. Tick only if this is that payment.";
+export const OCCURRENCE_WEAK_ROW = (name: string, date: string) => `Could be ${name} (due ${date}): only the amount and date are close. Not linked unless you tick it.`;
+export const OCCURRENCE_WEAK_BADGE = (name: string) => `${name}?`;
 /** Phase 4A.5.18: the manual-entry decision (Add/Edit form). */
 export const RETURN_CHECK_TITLE = 'Is this money a returned card payment?';
 export const RETURN_SEPARATE_LABEL = "No, it's separate income";

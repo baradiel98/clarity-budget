@@ -4,7 +4,7 @@ import {
 } from '@clarity/shared';
 import {
   balanceAsOfDate, buildMerchantMemory, pendingMatches, pendingPartialMatches, postedBalance, cleanMerchant, expandOccurrences, merchantKey, normalizeDescription, similarity,
-  suggestOccurrenceMatch, type Occurrence,
+  suggestOccurrenceLink, type Occurrence,
 } from '@clarity/engine';
 import { CARD_PAYMENT_RE, REFUND_RE, TRANSFER_RE, cardPaymentEvidence, suggestCategory, type CategorySource } from './categorize';
 import { statementReturnOptions, type StatementReturnOption } from './statementReturns';
@@ -39,7 +39,12 @@ export interface ImportCandidate {
    */
   matchCandidates: MatchCandidate[];
   repeatInFile: boolean;
-  occurrenceMatch: { key: string; recurringId: ID; originalDate: ISODate; name: string } | null;
+  /**
+   * A scheduled item this row may pay. Phase 4A.9: `strong` (selected by default) only with evidence beyond amount and
+   * date (`evidence`: the item's name in the description, or the same payee linked to it before) and no equally good
+   * alternative; otherwise a suggestion the user must tick. (Optional fields: reviews built before 4A.9 lack them.)
+   */
+  occurrenceMatch: { key: string; recurringId: ID; originalDate: ISODate; name: string; date?: ISODate; strong?: boolean; evidence?: 'name' | 'history' | null; ambiguous?: boolean } | null;
   /** Default decision for the review screen. The user can change it. */
   include: boolean;
   /**
@@ -316,8 +321,13 @@ export function buildPreview(table: RawTable, s: ImportSettings, ctx: PreviewCon
     const k = `${p.date}|${p.amountCents}|${norm}`;
     const repeatInFile = (fileKeyCount.get(k) ?? 0) > 1;
 
-    const occ = suggestOccurrenceMatch({ accountId: account.id, date: p.date, amountCents: p.amountCents, merchant: p.merchant }, occurrences.filter((o) => !usedOcc.has(o.key)));
-    if (occ) usedOcc.add(occ.key);
+    // Phase 4A.9: the row's likely kind narrows which scheduled items it could pay; amount and date alone are only a
+    // suggestion (not selected); evidence (the item's name in the description, or the same payee linked to it before)
+    // and no equally good alternative make it strong (selected by default).
+    const rowKind = looksLikeTransfer ? 'transfer' as const : kind;
+    const sugg = suggestOccurrenceLink({ accountId: account.id, date: p.date, amountCents: p.amountCents, merchant: p.merchant || p.rawDescription, kind: rowKind, toAccountId: suggestedCard }, occurrences.filter((o) => !usedOcc.has(o.key)), ctx.transactions);
+    const occ = sugg?.occurrence ?? null;
+    if (occ && sugg!.strong) usedOcc.add(occ.key);
 
     // Phase 4A.5.12: a row with possible matches is never selected until the user decides
     const include = !duplicate && !matchCandidates.length && confidence !== 'low' && !looksLikeTransfer;
@@ -333,7 +343,7 @@ export function buildPreview(table: RawTable, s: ImportSettings, ctx: PreviewCon
       duplicate,
       matchCandidates,
       repeatInFile,
-      occurrenceMatch: occ ? { key: occ.key, recurringId: occ.recurringId, originalDate: occ.originalDate, name: occ.name } : null,
+      occurrenceMatch: occ ? { key: occ.key, recurringId: occ.recurringId, originalDate: occ.originalDate, name: occ.name, date: occ.date, strong: sugg!.strong, evidence: sugg!.evidence, ambiguous: sugg!.ambiguous } : null,
       include,
       ...(suggestedCard && suggestedCard !== account.id ? { suggestedOtherAccountId: suggestedCard } : {}),
     };

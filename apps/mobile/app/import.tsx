@@ -7,7 +7,7 @@ import {
   buildPreview, checkImportFile, findMatchCandidates, csvParser, MATCH_WINDOWS, dataRowCount, guessMapping, headerSignature, NO_DATA_ROWS_MESSAGE, nonBlankRowCount, reconcilePreview, suggestSignConvention, type ImportCandidate, type ImportPreview,
   type MappingGuess, type RawTable,
 } from '@clarity/import';
-import { formatCents, formatShortDate, IMPORT_BUTTON, RETURN_ROW_BADGE, STATEMENT_RETURN_LABEL, STATEMENT_RETURN_NEEDS_PAYMENT, STATEMENT_RETURN_NONE_LABEL, STATEMENT_RETURN_NOTE, STATEMENT_RETURN_TITLE, MATCH_CHOICE_TITLE, MATCH_NONE_LABEL, MATCH_SKIP_LABEL, MATCH_STALE_TITLE, MATCH_TAKEN, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, TERMS, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
+import { formatCents, formatShortDate, IMPORT_BUTTON, OCCURRENCE_WEAK_ROW, RETURN_ROW_BADGE, STATEMENT_RETURN_LABEL, STATEMENT_RETURN_NEEDS_PAYMENT, STATEMENT_RETURN_NONE_LABEL, STATEMENT_RETURN_NOTE, STATEMENT_RETURN_TITLE, MATCH_CHOICE_TITLE, MATCH_NONE_LABEL, MATCH_SKIP_LABEL, MATCH_STALE_TITLE, MATCH_TAKEN, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, TERMS, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
 import { Check } from '../src/features/Welcome';
 import { pickTextFile } from '../src/platform/files';
 import { useData, useRun, useSession } from '../src/state/session';
@@ -102,7 +102,7 @@ export default function ImportScreen() {
           account, accounts: data.accounts, transactions: data.transactions, recurring: data.recurring, exceptions: data.exceptions, importBatches: data.importBatches, fileHash: file.hash, today,
         });
         setPreview(p);
-        setRows(p.candidates.map((x) => ({ ...x, editKind: x.looksLikeTransfer ? 'transfer' : x.kind, editCategory: x.categoryId, otherAccountId: x.suggestedOtherAccountId ?? '', linkOccurrence: !!x.occurrenceMatch, expanded: false, matchChoice: null })));
+        setRows(p.candidates.map((x) => ({ ...x, editKind: x.looksLikeTransfer ? 'transfer' : x.kind, editCategory: x.categoryId, otherAccountId: x.suggestedOtherAccountId ?? '', linkOccurrence: !!x.occurrenceMatch?.strong, expanded: false, matchChoice: null })));
         setStage('review');
       } catch (e) {
         setError((e as Error).message);
@@ -224,7 +224,8 @@ export default function ImportScreen() {
                 {(r.duplicate || r.reasons.length > 0 || r.occurrenceMatch || hasChoice(r)) && (
                   <View style={{ marginLeft: 32, marginTop: 4, gap: 4 }}>
                     {r.duplicate && <Badge label={r.duplicate.level === 'exact' ? 'Already imported' : 'Possible duplicate'} tone={r.duplicate.level === 'exact' ? 'neg' : 'warn'} />}
-                    {r.occurrenceMatch && <Check label={`Pays ${r.occurrenceMatch.name}`} value={r.linkOccurrence} onChange={(v) => setRow(i, { linkOccurrence: v })} />}
+                    {r.occurrenceMatch && <Check label={`Pays ${r.occurrenceMatch.name}${r.occurrenceMatch.strong ? '' : '?'}`} value={r.linkOccurrence} onChange={(v) => setRow(i, { linkOccurrence: v })} />}
+                    {r.occurrenceMatch && !r.occurrenceMatch.strong && <T variant="caption" color="textSecondary" testID={`occurrence-weak-${r.rowNumber}`}>{OCCURRENCE_WEAK_ROW(r.occurrenceMatch.name, formatShortDate(r.occurrenceMatch.date ?? r.occurrenceMatch.originalDate))}</T>}
                     <T variant="caption" color="textSecondary">{[r.duplicate?.reason, ...r.reasons].filter(Boolean).join(' ')}</T>
                     {hasChoice(r) && (() => {
                       const live = liveOf(r);

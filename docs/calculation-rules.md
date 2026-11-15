@@ -165,6 +165,29 @@ A card owing $500 has balance **−$500**, displayed as "Owed $500".
 | skipped | user skipped it | no |
 | overdue | date passed, nothing recorded (within 62 days, after `trackFrom`) | **bills:** yes, counted *today*. **income:** no, flagged "not recorded" |
 
+
+### Linking a transaction to a scheduled item (Phase 4A.9)
+A link (`occurrenceRef`) marks that occurrence **confirmed**, so it leaves the forecast: a wrong link removes a real upcoming bill from Safe to Spend. The rules:
+
+- **Eligible** (`occurrenceEligible`), all of:
+  - not already recorded or skipped;
+  - the same account and direction;
+  - dated within ±7 days of the occurrence (overdue: up to 20 days after it);
+  - an amount that fits: exact for a fixed or overridden amount, within 25% of an estimate, and for an unknown amount or a card's full balance a description resembling the name;
+  - (new) the kind fits: an expense pays a bill or subscription; income is expected income; a transfer is a scheduled transfer or savings move to the same other account; a refund never settles anything.
+- **Evidence beyond amount and date** (`occurrenceEvidence`):
+  - *name*: every distinctive word of the item's name is in the description ("Rent" in "ACH RENT OAKWOOD"; words such as "bill", "payment" or "card" don't count), or the two are very similar;
+  - *history*: the user linked a transaction with the same payee to this item before.
+- **Strong**: evidence plus no equally good alternative (no other item with evidence; no other occurrence of the same item equally close). Only a strong suggestion is ticked by default, in the import review and the Add form.
+- **Anything else is a suggestion only**: shown as "Electricity?" with "Could be Electricity (due Nov 18): only the amount and date are close. Not linked unless you tick it." The row imports normally and unlinked unless the user ticks it.
+- **`commitImport` checks every link against the current data.** The import is refused, with nothing changed, if any of these holds:
+  - the item no longer exists, or the occurrence was changed, paused or skipped;
+  - the occurrence is already recorded by another transaction;
+  - two rows link the same occurrence;
+  - the row no longer fits it with the kind and account chosen.
+- **`addTransaction` / `updateTransaction`** (Mark paid, the Add form, linking later) refuse a link to an item that no longer exists, to one scheduled from another account, or to an occurrence another transaction already records. Amount and date may differ: the user records what was actually paid.
+
+Example (sample data, Nov 13): Electricity, variable, estimated $91.40, due Nov 18. A "PAYMENT TO STORE CARD −$100" row on Nov 12 used to be linked to it by default, so Safe to Spend showed $2,268.57 instead of $2,177.17. Since 4A.9 a card payment can't settle a bill. "ONLINE PMT 7781 −$100" is only a suggestion, not ticked: imported unlinked, Electricity stays due, $2,327.17. "CITY ELECTRICITY CO −$91.40" is strong: linked, Electricity paid, $2,427.17.
 ## Forecast
 A day-by-day timeline of available cash from today to the horizon. On each day the **outflows are applied before inflows**: a bill due on payday must be covered by money you already have. The day's *low* (after outflows) is what "lowest balance" and Safe to Spend use.
 

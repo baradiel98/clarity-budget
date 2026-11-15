@@ -35,9 +35,8 @@ async function review(page: Page) {
   await page.getByTestId('import-file').setInputFiles({ name: 'nov.csv', mimeType: 'text/csv', buffer: Buffer.from(CSV) });
   await page.getByTestId('to-review').click();
   await expect(page.getByTestId('review-table')).toBeVisible();
-  // The sample schedules an Electricity bill (~$91) that the review suggests linking to the −$100 row and ticks by
-  // default; a card payment isn't that bill, so it is unticked here (that suggestion is a separate, earlier behaviour,
-  // reported in the Phase 4A.8 report).
+  // Before Phase 4A.9 the review ticked a link from this −$100 row to the sample's Electricity bill (~$91). Since 4A.9 a
+  // card payment isn't offered a bill at all (and amount-and-date-only suggestions are never ticked); kept as a guard.
   const occ = page.locator('tr', { has: page.getByLabel('Import row 2') }).getByRole('checkbox', { name: /Electricity/ });
   if (await occ.count()) await occ.uncheck();
 }

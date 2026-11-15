@@ -1,8 +1,8 @@
 import { AlertTriangle, Plus, Trash2, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { addTransaction, deleteTransaction, markPostedBeforeOpening, matchOptionView, recordPaymentReturn, returnOptionsForEntry, updateTransaction, type TxInput } from '@clarity/data';
-import { balanceAsOfDate, buildMerchantMemory, inclusionProblem, expandOccurrences, findPossibleDuplicates, merchantKey, suggestOccurrenceMatch } from '@clarity/engine';
-import { addDays, ALREADY_INCLUDED_HINT, ALREADY_INCLUDED_LABEL, OPENING_POSTED_HINT, OPENING_POSTED_LABEL, RETURN_ASK_LINK, RETURN_CHECK_TITLE, RETURN_DECIDE_HINT, RETURN_NEEDS_DECISION, RETURN_SEPARATE_LABEL, centsToDecimalString, formatCents, formatShortDate, legsPendingOf, parseAmountInput, TERMS, transferChoiceOf, TRANSFER_STATUS_HINT, TRANSFER_STATUS_LABEL, transferStatusOptions, type Transaction, type TransferSettlementChoice } from '@clarity/shared';
+import { balanceAsOfDate, buildMerchantMemory, inclusionProblem, expandOccurrences, findPossibleDuplicates, merchantKey, suggestOccurrenceLink } from '@clarity/engine';
+import { addDays, ALREADY_INCLUDED_HINT, OCCURRENCE_WEAK_HINT, ALREADY_INCLUDED_LABEL, OPENING_POSTED_HINT, OPENING_POSTED_LABEL, RETURN_ASK_LINK, RETURN_CHECK_TITLE, RETURN_DECIDE_HINT, RETURN_NEEDS_DECISION, RETURN_SEPARATE_LABEL, centsToDecimalString, formatCents, formatShortDate, legsPendingOf, parseAmountInput, TERMS, transferChoiceOf, TRANSFER_STATUS_HINT, TRANSFER_STATUS_LABEL, transferStatusOptions, type Transaction, type TransferSettlementChoice } from '@clarity/shared';
 import { useData, useRun, useSession, useStore } from '../state/session';
 import type { AddPrefill } from '../state/ui';
 import { AmountInput } from '../ui/AmountInput';
@@ -127,7 +127,8 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
   const [more, setMore] = useState(init.splits.length > 0 || !!init.notes || init.pending);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [dupConfirmed, setDupConfirmed] = useState(false);
-  const [linkOcc, setLinkOcc] = useState(true);
+  // Phase 4A.9: null = not chosen → ticked only for a strong suggestion (evidence beyond amount and date)
+  const [linkOccChoice, setLinkOcc] = useState<boolean | null>(null);
   const [included, setIncluded] = useState<boolean | null>(init.included);
   const [toIncluded, setToIncluded] = useState<boolean | null>(init.toIncluded);
   const [showSuggest, setShowSuggest] = useState(false);
@@ -176,11 +177,13 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
 
   const signed = cents === null ? null : kind === 'expense' ? -cents : kind === 'transfer' ? -cents : cents;
   const duplicates = !isEdit && signed !== null && kind !== 'transfer' ? findPossibleDuplicates({ accountId, date, amountCents: signed, merchant }, data.transactions) : [];
-  const occurrence = useMemo(() => {
+  const occurrenceSuggestion = useMemo(() => {
     if (prefill?.occurrenceRef || isEdit || signed === null || kind === 'refund') return null;
     const occ = expandOccurrences(data.recurring, data.exceptions, data.transactions, { from: addDays(date, -40), to: addDays(date, 10), today });
-    return suggestOccurrenceMatch({ accountId, date, amountCents: kind === 'income' ? Math.abs(signed) : -Math.abs(signed), merchant }, occ);
-  }, [prefill, isEdit, signed, kind, data, date, accountId, merchant, today]);
+    return suggestOccurrenceLink({ accountId, date, amountCents: kind === 'income' ? Math.abs(signed) : -Math.abs(signed), merchant, kind, toAccountId: kind === 'transfer' ? toAccountId || null : null }, occ, data.transactions);
+  }, [prefill, isEdit, signed, kind, data, date, accountId, merchant, today, toAccountId]);
+  const linkOcc = linkOccChoice ?? !!occurrenceSuggestion?.strong;
+  const occurrence = occurrenceSuggestion?.occurrence ?? null;
 
   // Phase 4A.5.18: money coming in that could be a returned card payment needs an explicit decision (never automatic)
   const [returnChoice, setReturnChoice] = useState<string | null>(null); // a payment leg id, 'separate', or null
@@ -365,9 +368,9 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
         </div>
 
         {occurrence && (
-          <label className="check callout">
+          <label className="check callout" data-testid="occurrence-link">
             <input type="checkbox" checked={linkOcc} onChange={(e) => setLinkOcc(e.target.checked)} />
-            <span>This {occurrence.kind === 'income' ? 'is' : 'pays'} <strong>{occurrence.name}</strong> {occurrence.kind === 'income' ? 'expected' : 'due'} {formatShortDate(occurrence.date)}, so it won't be counted again in your forecast.</span>
+            <span>This {occurrence.kind === 'income' ? 'is' : 'pays'} <strong>{occurrence.name}</strong> {occurrence.kind === 'income' ? 'expected' : 'due'} {formatShortDate(occurrence.date)}, so it won't be counted again in your forecast.{!occurrenceSuggestion!.strong && <span className="hint" data-testid="occurrence-weak"> {OCCURRENCE_WEAK_HINT}</span>}</span>
           </label>
         )}
         {fromInc && (
