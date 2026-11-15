@@ -1,8 +1,8 @@
 import { AlertTriangle, Plus, Trash2, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { addTransaction, deleteTransaction, linkCandidateLabel, linkCandidatesForOccurrence, linkTransactionToOccurrence, markPostedBeforeOpening, unlinkTransactionFromOccurrence, matchOptionView, recordPaymentReturn, returnOptionsForEntry, updateTransaction, type TxInput } from '@clarity/data';
-import { balanceAsOfDate, buildMerchantMemory, inclusionProblem, expandOccurrences, findPossibleDuplicates, merchantKey, suggestOccurrenceLink } from '@clarity/engine';
-import { addDays, ALREADY_INCLUDED_HINT, LINKED_TO_OCCURRENCE, MARK_PAID_CHOOSE, MARK_PAID_EXISTING_TITLE, MARK_PAID_LINK_NOTE, MARK_PAID_NEW, MARK_PAID_SCHEDULED, OCCURRENCE_WEAK_HINT, ALREADY_INCLUDED_LABEL, OPENING_POSTED_HINT, OPENING_POSTED_LABEL, RETURN_ASK_LINK, RETURN_CHECK_TITLE, RETURN_DECIDE_HINT, RETURN_NEEDS_DECISION, RETURN_SEPARATE_LABEL, centsToDecimalString, formatCents, formatShortDate, legsPendingOf, parseAmountInput, TERMS, transferChoiceOf, TRANSFER_STATUS_HINT, TRANSFER_STATUS_LABEL, transferStatusOptions, type Transaction, type TransferSettlementChoice } from '@clarity/shared';
+import { addTransaction, deleteTransaction, linkCandidateLabel, linkCandidatesForOccurrence, linkedOccurrenceState, linkTransactionToOccurrence, markPostedBeforeOpening, unlinkTransactionFromOccurrence, matchOptionView, recordPaymentReturn, returnOptionsForEntry, updateTransaction, type TxInput } from '@clarity/data';
+import { balanceAsOfDate, buildMerchantMemory, inclusionProblem, expandOccurrences, findPossibleDuplicates, merchantKey, OVERDUE_LINK_WINDOW_DAYS, suggestOccurrenceLink } from '@clarity/engine';
+import { addDays, ALREADY_INCLUDED_HINT, LINK_INVALID, LINK_ITEM_MISSING, LINK_OCCURRENCE_MISSING, LINKED_TO_OCCURRENCE, MARK_PAID_NO_OLDER, MARK_PAID_NOT_LISTED, MARK_PAID_OLDER_HINT, MARK_PAID_SHOW_OLDER, MARK_PAID_CHOOSE, MARK_PAID_EXISTING_TITLE, MARK_PAID_LINK_NOTE, MARK_PAID_NEW, MARK_PAID_SCHEDULED, OCCURRENCE_WEAK_HINT, ALREADY_INCLUDED_LABEL, OPENING_POSTED_HINT, OPENING_POSTED_LABEL, RETURN_ASK_LINK, RETURN_CHECK_TITLE, RETURN_DECIDE_HINT, RETURN_NEEDS_DECISION, RETURN_SEPARATE_LABEL, centsToDecimalString, formatCents, formatShortDate, legsPendingOf, parseAmountInput, TERMS, transferChoiceOf, TRANSFER_STATUS_HINT, TRANSFER_STATUS_LABEL, transferStatusOptions, type Transaction, type TransferSettlementChoice } from '@clarity/shared';
 import { useData, useRun, useSession, useStore } from '../state/session';
 import type { AddPrefill } from '../state/ui';
 import { AmountInput } from '../ui/AmountInput';
@@ -184,13 +184,16 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
   }, [prefill, isEdit, signed, kind, data, date, accountId, merchant, today, toAccountId]);
   const linkOcc = linkOccChoice ?? !!occurrenceSuggestion?.strong;
   // Phase 4A.10: Mark paid: an existing transaction may already be this payment (nothing is chosen for the user)
-  const markPaid = useMemo(() => (prefill?.occurrenceRef && !isEdit ? linkCandidatesForOccurrence(data, prefill.occurrenceRef, today) : null), [prefill, isEdit, data, today]);
+  // Phase 4A.11: an overdue occurrence can also list late payments, only when the user asks
+  const [showOlder, setShowOlder] = useState(false);
+  const markPaid = useMemo(() => (prefill?.occurrenceRef && !isEdit ? linkCandidatesForOccurrence(data, prefill.occurrenceRef, today, { older: showOlder }) : null), [prefill, isEdit, data, today, showOlder]);
+  const overdue = markPaid?.occurrence?.status === 'overdue';
   const [payChoice, setPayChoice] = useState<string | null>(null); // an existing transaction id, 'new', or null (not chosen)
   const linkingTx = markPaid?.candidates.find((c) => c.tx.id === payChoice)?.tx ?? null;
   const needsPayChoice = !!markPaid?.candidates.length && payChoice === null;
   // Phase 4A.10: an existing link, shown in the Edit form with a way to undo it
-  const linkedRef = isEdit ? existing!.find((t) => t.occurrenceRef)?.occurrenceRef : undefined;
-  const linkedItem = linkedRef ? data.recurring.find((r) => r.id === linkedRef.recurringId) : undefined;
+  // Phase 4A.11: the link's state (its item or occurrence may be gone); Unlink is always offered
+  const linkState = isEdit ? linkedOccurrenceState(data, existing![0]!.id, today) : null;
   const occurrence = occurrenceSuggestion?.occurrence ?? null;
 
   // Phase 4A.5.18: money coming in that could be a returned card payment needs an explicit decision (never automatic)
@@ -211,7 +214,7 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
     if (needsPayChoice) { setErrors({ paid: MARK_PAID_CHOOSE }); return; }
     if (linkingTx && prefill?.occurrenceRef) {
       setBusy(true);
-      const r = await run((ctx) => linkTransactionToOccurrence(ctx, linkingTx.id, prefill.occurrenceRef!), { undoLabel: `Linked to ${prefill.occurrenceName ?? 'the scheduled payment'}` });
+      const r = await run((ctx) => linkTransactionToOccurrence(ctx, linkingTx.id, prefill.occurrenceRef!, { older: showOlder }), { undoLabel: `Linked to ${prefill.occurrenceName ?? 'the scheduled payment'}` });
       setBusy(false);
       if (!r.ok) { setErrors({ paid: r.errors.map((x) => x.message).join(' ') }); return; }
       toast({ message: `Linked “${linkingTx.merchant || linkingTx.kind}” to ${prefill.occurrenceName ?? 'the scheduled payment'}`, action: { label: 'Undo', run: () => void store.undo() } });
@@ -310,25 +313,34 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
         {markPaid?.occurrence && (() => { const o = markPaid.occurrence; return (
           <div className="callout" data-testid="mark-paid">
             <div className="hint" data-testid="mark-paid-scheduled">{MARK_PAID_SCHEDULED(o.name, formatShortDate(o.date), o.amountCents ? formatCents(o.amountCents, cur) : 'amount not set', data.accounts.find((a) => a.id === o.accountId)?.name ?? '')}</div>
+            {overdue && showOlder && <div className="hint" data-testid="mark-paid-older-hint">{MARK_PAID_OLDER_HINT(OVERDUE_LINK_WINDOW_DAYS)}</div>}
+            {overdue && showOlder && markPaid.candidates.length === 0 && <div className="hint" data-testid="mark-paid-no-older">{MARK_PAID_NO_OLDER(OVERDUE_LINK_WINDOW_DAYS)}</div>}
             {markPaid.candidates.length > 0 && (
               <div role="radiogroup" aria-label={MARK_PAID_EXISTING_TITLE} className="stack" style={{ gap: 4, marginTop: 6 }}>
                 <strong style={{ fontSize: 13 }}>{MARK_PAID_EXISTING_TITLE}</strong>
                 {markPaid.candidates.map((c) => (
-                  <label key={c.tx.id} className="check"><input type="radio" name="mark-paid" checked={payChoice === c.tx.id} onChange={() => { setPayChoice(c.tx.id); setErrors({}); }} /><span>{linkCandidateLabel(c, data)}</span></label>
+                  <label key={c.tx.id} className="check"><input type="radio" name="mark-paid" checked={payChoice === c.tx.id} onChange={() => { setPayChoice(c.tx.id); setErrors({}); }} /><span>{linkCandidateLabel(c, data, { showDays: showOlder })}</span></label>
                 ))}
                 <label className="check"><input type="radio" name="mark-paid" checked={payChoice === 'new'} onChange={() => { setPayChoice('new'); setErrors({}); }} /><span>{MARK_PAID_NEW}</span></label>
                 {linkingTx && <div className="hint" data-testid="mark-paid-note">{MARK_PAID_LINK_NOTE}</div>}
                 {errors.paid && <div className="error-text" role="alert" data-testid="mark-paid-error">{errors.paid}</div>}
               </div>
             )}
+            {overdue && !showOlder && <button type="button" className="btn-link" onClick={() => { setShowOlder(true); setPayChoice(null); setErrors({}); }} data-testid="mark-paid-show-older">{MARK_PAID_SHOW_OLDER}</button>}
+            {overdue && !linkingTx && <div className="hint" data-testid="mark-paid-not-listed">{MARK_PAID_NOT_LISTED(o.name)}</div>}
           </div>
         ); })()}
-        {linkedItem && linkedRef && (
-          <div className="callout" data-testid="linked-occurrence">
-            <span className="grow">{LINKED_TO_OCCURRENCE(linkedItem.name, formatShortDate(linkedRef.originalDate))}</span>
-            <button type="button" className="btn btn-secondary btn-sm" onClick={async () => { const r = await run((ctx) => unlinkTransactionFromOccurrence(ctx, existing![0]!.id), { undoLabel: `Unlinked from ${linkedItem.name}` }); if (r.ok) { toast({ message: `Unlinked from ${linkedItem.name}; it counts as due again`, action: { label: 'Undo', run: () => void store.undo() } }); onClose(); } }}>Unlink</button>
-          </div>
-        )}
+        {linkState && (() => {
+          const name = linkState.name ?? 'the scheduled payment';
+          const due = formatShortDate(linkState.ref.originalDate);
+          const text = linkState.state === 'ok' ? LINKED_TO_OCCURRENCE(name, due) : linkState.state === 'item_missing' ? LINK_ITEM_MISSING : linkState.state === 'occurrence_missing' ? LINK_OCCURRENCE_MISSING(name, due) : LINK_INVALID(name, due);
+          return (
+            <div className={`callout ${linkState.state === 'ok' ? '' : 'warn'}`} data-testid="linked-occurrence" data-state={linkState.state}>
+              <span className="grow">{text}</span>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={async () => { const r = await run((ctx) => unlinkTransactionFromOccurrence(ctx, existing![0]!.id), { undoLabel: `Unlinked from ${name}` }); if (r.ok) { toast({ message: linkState.state === 'ok' ? `Unlinked from ${name}; it counts as due again` : 'Link removed', action: { label: 'Undo', run: () => void store.undo() } }); onClose(); } else setErrors({ form: r.errors.map((x) => x.message).join(' ') }); }}>Unlink</button>
+            </div>
+          );
+        })()}
         {!linkingTx && <>
         {!prefill?.occurrenceRef && !isEdit && <Segmented label="Type" value={kind} options={KINDS} onChange={(k) => { changeKind(k); if (!categoryTouched) setCategoryId(k === 'income' ? 'cat_paycheck' : null); }} block />}
         <Field label="Amount" error={errors.amount}>

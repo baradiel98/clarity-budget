@@ -215,6 +215,25 @@ Example (sample data, Nov 13): Electricity, variable, estimated $91.40, due Nov 
   - Changing its account, or its type to one that can't pay the item, is refused until it is unlinked.
   - Deleting it (single or bulk), or undoing its import, removes the link with it: the occurrence is due again, never "paid" by a transaction that no longer exists.
 - **Recording a new payment** for an occurrence (Mark paid → "No, record a new payment", the Add form) is refused when the occurrence is already recorded, or when the type doesn't fit the item.
+
+### Late payments and orphaned links (Phase 4A.11)
+- **Late payment of an overdue bill.** Mark paid on an **overdue** occurrence offers "Show older transactions". Only when the user chooses it, transactions up to **62 days after** the due date are listed: the same 62 days for which an unpaid bill is shown as overdue (`OVERDUE_LINK_WINDOW_DAYS`).
+  - Each one shows its date, description, amount, account, posted/pending status, and "N days after the due date". Nothing is selected.
+  - Every other rule is unchanged: type, account, direction, an amount that fits or the item's name, and one transaction ↔ one occurrence.
+  - Before the due date the 31-day limit stays.
+  - `linkTransactionToOccurrence(…, { older: true })` re-checks against the current data that the occurrence is still overdue. Without the option, a 32–62-day-late payment is refused with "Use “Show older transactions” to link a late payment."
+  - While no existing transaction is selected, Mark paid on an overdue bill explains: "Not listed? If {name} was already paid some other way, Skip this occurrence in Planning instead of recording it again. Record a new payment only if you are paying it now." Nothing is skipped or created automatically, and the hint disappears once a transaction is chosen.
+  - Example (the 4A.10 audit): Rent $300 set up Jul 1; today Sep 20; checking $1,000. A $300 payment on Sep 18 paid the Aug 15 rent (34 days late).
+    - **Not linked:** 700 − Aug 15 − Sep 15 − Oct 15 = **−$200**.
+    - **Linked via Show older transactions:** checking still $700, no new transaction, Sep 15 and Oct 15 due = **$100**. Skipping Aug 15 gives $100 too.
+    - **A new payment instead:** checking $400, −$200 (the duplicate).
+- **Orphaned links** (`linkedOccurrenceState`). The Edit form always shows a transaction's link with an **Unlink** button (web and mobile), and says what happened:
+  - `ok`: "Records the scheduled payment …";
+  - `item_missing`: the scheduled item was deleted;
+  - `occurrence_missing`: the item no longer has that date (its schedule was changed, it was paused or ended);
+  - `invalid`: the transaction no longer fits it (account or type).
+
+  A link is never moved to another occurrence or to a re-created bill: a new bill's occurrences start unpaid. Unlinking changes only the link (amount, date, account, type, status and statement identity stay), and the forecast follows the current schedule. Example: Rent moved from the 15th to the 20th after its Sep 11 payment was linked to Sep 15. The link shows as stale; Safe to Spend 700 − Sep 20 − Oct 20 = $100; Unlink, then Mark paid on Sep 20 links it → $400.
 ## Forecast
 A day-by-day timeline of available cash from today to the horizon. On each day the **outflows are applied before inflows**: a bill due on payday must be covered by money you already have. The day's *low* (after outflows) is what "lowest balance" and Safe to Spend use.
 

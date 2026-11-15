@@ -574,5 +574,28 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Data model]** No schema change and no migration: the existing `occurrenceRef` field.
 - **[Known limitations]**
   - There is no "link to a scheduled item" action starting from a transaction: linking starts from the scheduled item (Mark paid). The Edit form only unlinks.
-  - A payment more than 31 days from its due date can't be linked: "No, record a new payment" is still possible, but money would then be counted twice. Use Skip on the occurrence instead.
+  - ~~A payment more than 31 days from its due date can't be linked.~~ **Fixed in 4A.11** for overdue occurrences (up to 62 days after, on request).
+
+## Phase 4A.11 (2026-11-15): overdue payment linking and orphaned-link recovery (audit of 4A.10, D1 and D2)
+- **[Confirmed policy, from the phase brief]**
+  - The 31-day list stays the default. For an overdue occurrence only, a deliberate "Show older transactions" lists payments up to 62 days after the due date, with days shown and nothing selected.
+  - When no transaction is selected, the dialog explains Skip vs a new payment; nothing is automatic.
+  - The Edit form always offers Unlink and explains a missing or changed item. Links are never moved silently.
+- **[Verified implementation]**
+  - **Engine:** `OVERDUE_LINK_WINDOW_DAYS`, and the `older` option of `occurrenceLinkProblem` (overdue occurrences only, re-checked on the current data).
+  - **Data:**
+    - `linkCandidatesForOccurrence(…, { older })`, with candidates gaining a `daysAfterDue` field;
+    - `linkCandidateLabel(…, { showDays })`;
+    - `linkTransactionToOccurrence(…, { older })`;
+    - `linkedOccurrenceState` (ok / item_missing / occurrence_missing / invalid).
+  - **UI:** web `AddTransaction`, mobile `app/add.tsx`.
+- **[Data model]** No schema change and no migration.
+- **[Decisions, mine; documented]**
+  - The early side (before the due date) keeps the 31-day limit.
+  - "invalid" checks type, account and direction only; a kept link's date may have been edited on purpose.
+  - The Skip explanation points to Planning rather than adding a Skip button to the dialog (not requested).
+- **[Lesson]** In demo (sample-data) mode the idle lock is off, so browser tests can move the clock forward (plus a focus event) to make sample bills overdue.
+- **[Known limitations]**
+  - An overdue occurrence is shown only up to 62 days back, so a payment for an older bill can't be linked. Its occurrence no longer counts either.
+  - An "invalid" link (the bill moved to another account) is reported but still counts as paid until the user unlinks it.
 

@@ -1,5 +1,5 @@
 import { act, fireEvent, render } from '@testing-library/react-native';
-import { addTransaction, applyOps, buildDemoWorkspace, linkTransactionToOccurrence, type Ctx } from '@clarity/data';
+import { addTransaction, applyOps, buildDemoWorkspace, createRecurring, deleteRecurring, linkTransactionToOccurrence, type Ctx } from '@clarity/data';
 import { engineInput } from '@clarity/data';
 import { computeSafeToSpend } from '@clarity/engine';
 import type { WorkspaceData } from '@clarity/shared';
@@ -117,6 +117,47 @@ describe('Phase 4A.9 on mobile: scheduled-item suggestions', () => {
     expect(ui.getByText('Records the scheduled payment Phone due Nov 22.')).toBeTruthy();
     await act(async () => { fireEvent.press(ui.getByText('Unlink')); });
     expect([mockData.transactions.find((x) => x.id === t.id)!.occurrenceRef, sts()]).toEqual([undefined, before]);
+  });
+
+  // Phase 4A.11: an overdue bill's late payment (Show older transactions) and links whose item is gone
+  const gym = () => {
+    const chk = mockData.accounts.find((a) => a.name === 'Everyday Checking')!.id;
+    const r = createRecurring({ ...ctx(), today: '2026-09-01' }, { name: 'Gym', kind: 'bill', accountId: chk, categoryId: null, schedule: { freq: 'monthly', interval: 1, day: 15 as never, anchor: '2026-01-01' }, amount: { type: 'fixed', cents: 5000 } });
+    mockData = applyOps(mockData, r.ops);
+    const p = addTransaction(ctx(), { kind: 'expense', accountId: chk, date: '2026-10-20', amountCents: 5000, merchant: 'GYM CLUB', categoryId: null });
+    mockData = applyOps(mockData, p.ops);
+    return { rid: r.item.id, tx: p.txs[0]! };
+  };
+  it('Mark paid on the overdue Sep 15 gym bill: not listed by default; "Show older transactions" lists the Oct 20 payment (35 days after), unselected; linking adds nothing (+$50 Safe to Spend)', async () => {
+    mockData = buildDemoWorkspace(SAMPLE_TODAY, SAMPLE_NOW);
+    const g = gym();
+    const before = sts();
+    const count = mockData.transactions.length;
+    setAddPrefill({ occurrenceRef: { recurringId: g.rid, originalDate: '2026-09-15' }, occurrenceName: 'Gym', amountCents: 5000 });
+    const ui = await render(<AddScreen />);
+    expect(ui.queryByRole('radiogroup')).toBeNull();
+    expect([ui.getByTestId('mark-paid-not-listed').props.children].flat().join('')).toBe('Not listed? If Gym was already paid some other way, Skip this occurrence in Planning instead of recording it again. Record a new payment only if you are paying it now.');
+    await act(async () => { fireEvent.press(ui.getByText('Show older transactions')); });
+    const label = 'Oct 20 · GYM CLUB · −$50.00 · Everyday Checking · posted · the description names it · 35 days after the due date';
+    expect(ui.getByRole('checkbox', { name: label }).props.accessibilityState.checked).toBe(false);
+    await act(async () => { fireEvent.press(ui.getByText('Save')); });
+    expect(ui.getByText('Choose the transaction that paid it, or “No, record a new payment”.')).toBeTruthy();
+    await act(async () => { fireEvent.press(ui.getByRole('checkbox', { name: label })); });
+    expect(ui.queryByTestId('mark-paid-not-listed')).toBeNull(); // no "record a new payment" nudge once one is chosen
+    await act(async () => { fireEvent.press(ui.getByText('Link transaction')); });
+    expect([mockData.transactions.length, mockData.transactions.find((x) => x.id === g.tx.id)!.occurrenceRef, mockData.transactions.find((x) => x.id === g.tx.id)!.amountCents, sts() - before]).toEqual([count, { recurringId: g.rid, originalDate: '2026-09-15' }, -5000, 5000]);
+  });
+  it('the bill was deleted after linking: the Edit form explains it and still offers Unlink; unlinking leaves the transaction as it was', async () => {
+    mockData = buildDemoWorkspace(SAMPLE_TODAY, SAMPLE_NOW);
+    const g = gym();
+    mockData = applyOps(mockData, linkTransactionToOccurrence(ctx(), g.tx.id, { recurringId: g.rid, originalDate: '2026-10-15' }));
+    mockData = applyOps(mockData, deleteRecurring(ctx(), g.rid));
+    setAddPrefill({ editId: g.tx.id });
+    const ui = await render(<AddScreen />);
+    expect([ui.getByTestId('linked-occurrence-item_missing').props.children].flat().join('')).toBe("Linked to a scheduled payment whose scheduled item was deleted. Unlink it to clear the link (it isn't moved to any other item).");
+    await act(async () => { fireEvent.press(ui.getByLabelText('Unlink from the scheduled payment')); });
+    const t = mockData.transactions.find((x) => x.id === g.tx.id)!;
+    expect([t.occurrenceRef, t.amountCents, t.date, t.status]).toEqual([undefined, -5000, '2026-10-20', 'confirmed']);
   });
 });
 

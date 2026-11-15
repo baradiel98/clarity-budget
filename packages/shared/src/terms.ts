@@ -141,6 +141,14 @@ export const MARK_PAID_NEW = 'No, record a new payment';
 export const MARK_PAID_CHOOSE = 'Choose the transaction that paid it, or “No, record a new payment”.';
 export const MARK_PAID_LINK_NOTE = 'Nothing new is added: the transaction keeps its amount, date and status, and this scheduled payment stops counting in your forecast.';
 export const MARK_PAID_SCHEDULED = (name: string, date: string, amount: string, account: string) => `${name} · due ${date} · ${amount} · ${account}`;
+/** Phase 4A.11: late payments of an overdue occurrence, and links whose occurrence is gone. */
+export const MARK_PAID_SHOW_OLDER = 'Show older transactions';
+export const MARK_PAID_OLDER_HINT = (days: number) => `This payment is overdue: transactions up to ${days} days after the due date are listed too. Nothing is selected for you.`;
+export const MARK_PAID_NO_OLDER = (days: number) => `No older transaction fits (same account and type, up to ${days} days after the due date, an amount that fits or the item's name).`;
+export const MARK_PAID_NOT_LISTED = (name: string) => `Not listed? If ${name} was already paid some other way, Skip this occurrence in Planning instead of recording it again. Record a new payment only if you are paying it now.`;
+export const LINK_ITEM_MISSING = "Linked to a scheduled payment whose scheduled item was deleted. Unlink it to clear the link (it isn't moved to any other item).";
+export const LINK_OCCURRENCE_MISSING = (name: string, date: string) => `Linked to ${name} due ${date}, which is no longer on the schedule (it was changed, paused or ended). Unlink it, then use Mark paid on the current date if this is that payment.`;
+export const LINK_INVALID = (name: string, date: string) => `Linked to ${name} due ${date}, but it no longer fits it (its account or type changed). Unlink it.`;
 export const LINKED_TO_OCCURRENCE = (name: string, date: string) => `Records the scheduled payment ${name} due ${date}.`;
 /** Phase 4A.9: a scheduled-item suggestion based only on the amount and date (not selected; the user decides). */
 export const OCCURRENCE_WEAK_HINT = "Only the amount and date are close; the description doesn't mention it. Tick only if this is that payment.";

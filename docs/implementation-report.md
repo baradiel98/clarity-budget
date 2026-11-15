@@ -736,6 +736,32 @@ Owner policy: each transfer leg settles on its own; money in transit isn't spend
   - A payment more than 31 days from its due date can't be linked.
   - Not verified on simulators, devices, Safari or with a screen reader.
 
+## 7aa. Phase 4A.11: overdue payment linking and orphaned-link recovery (audit of 4A.10, D1 and D2)
+
+| Case (hand-calculated) | Before (414ae36) | After |
+|---|---|---|
+| Rent $300 overdue (Aug 15), paid Sep 18 (34 days late); today Sep 20; checking $1,000 | Can't be linked; Mark paid shows the plain form → a new $300: checking $400, −$200 (truth $100) | **Show older transactions** lists it ("34 days after the due date", unselected) → linked: checking $700, no new transaction, **$100** |
+| Rent moved 15th → 20th after its payment was linked | Stale link, no explanation; the payment not offered for Sep 20 | Edit form: "no longer on the schedule" + Unlink → payment unchanged; Mark paid Sep 20 links it → $400 |
+| Bill deleted after linking | No Unlink in the Edit form (dead end) | "scheduled item was deleted" + Unlink; a re-created bill doesn't inherit the link |
+| Sample, Jan 10 2027: Rent $1,450 due Dec 1 paid Jan 8 (38 days) | Couldn't be linked | Linked: recorded balance unchanged ($1,421.23); "Short by" $2,986.89 → $1,536.89 (+$1,450) |
+
+- **Rules:** `docs/calculation-rules.md` ("Late payments and orphaned links").
+- **Data model:** no schema change and no migration.
+- **Tests (all after the final code change):**
+  - **Unit (vitest):** 782 passed, 1 skipped. New: `packages/data/test/overdue-linking.test.ts`, 8 tests covering:
+    - the audit case; Skip vs a new payment; unrelated older transactions unselected;
+    - the 62-day cap and overdue-only; a pending payment stays pending;
+    - one-to-one rules; a skip after the list opened; two tabs;
+    - schedule edit; deleted bill and re-created bill; an invalid link.
+  - **Mobile (jest):** 70 passed. New: Show older transactions, and deleted-bill Unlink.
+  - **Browser:** Playwright 191 passed, 10 skipped (Chromium). New: `e2e/phase4a11.spec.ts`, 2 tests with screenshots.
+  - **Checks:** root, web and mobile typechecks clean; lint clean; iOS and Android bundles exported.
+  - **Mutation check:** allowing "older" for non-overdue occurrences, or removing the 62-day cap, makes the tests fail.
+- **Limitations:**
+  - Bills older than the 62-day overdue lookback can't be linked.
+  - An "invalid" link still counts as paid until it is unlinked.
+  - Not verified on simulators, devices, Safari or with a screen reader.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

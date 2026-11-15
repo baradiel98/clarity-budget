@@ -1,5 +1,5 @@
 import { diffDays, type Cents, type ID, type ISODate, type Transaction } from '@clarity/shared';
-import { occurrenceKey, type Occurrence } from './occurrences';
+import { OVERDUE_LOOKBACK_DAYS, occurrenceKey, type Occurrence } from './occurrences';
 import { merchantKey, normalizeDescription, similarity, tokens } from './text';
 
 export interface TxLike {
@@ -137,11 +137,19 @@ export const LINK_WINDOW_DAYS = 31;
  *   adjustments, transfer fees and returned card payments never settle anything;
  * - it is in the account the item is scheduled from, and in the right direction;
  * - it is dated within 31 days of the due date (an amount that differs is allowed and shown: the user records what
- *   was actually paid);
+ *   was actually paid); Phase 4A.11: for an OVERDUE occurrence, with `older` (the user's explicit "Show older
+ *   transactions"), up to 62 days after it;
  * - it doesn't already settle another occurrence (unlink it first, or replace explicitly).
  * `toAccountId`: the other account of a transfer. `ignoreOwnLink`: the transaction's current link is being replaced.
  */
-export function occurrenceLinkProblem(tx: LinkableTx, o: Occurrence, opts: { toAccountId?: ID | null; ignoreOwnLink?: boolean } = {}): string | null {
+/**
+ * Phase 4A.11: how far AFTER the due date an existing transaction can be linked to an OVERDUE occurrence when the user
+ * deliberately asks for older transactions ("Show older transactions"): the same 62 days for which an unpaid bill is
+ * shown as overdue (OVERDUE_LOOKBACK_DAYS). Before the due date the 31-day window still applies.
+ */
+export const OVERDUE_LINK_WINDOW_DAYS = OVERDUE_LOOKBACK_DAYS;
+
+export function occurrenceLinkProblem(tx: LinkableTx, o: Occurrence, opts: { toAccountId?: ID | null; ignoreOwnLink?: boolean; older?: boolean } = {}): string | null {
   if (o.status === 'skipped') return `${o.name} due ${o.originalDate} was skipped.`;
   const ownKey = tx.occurrenceRef ? occurrenceKey(tx.occurrenceRef.recurringId, tx.occurrenceRef.originalDate) : null;
   if (o.status === 'confirmed' && ownKey !== o.key) return `${o.name} due ${o.originalDate} is already recorded by another transaction.`;
@@ -154,6 +162,12 @@ export function occurrenceLinkProblem(tx: LinkableTx, o: Occurrence, opts: { toA
     if (tx.kind !== 'transfer') return 'Only a transfer can be this scheduled transfer.';
     if (o.toAccountId && opts.toAccountId !== o.toAccountId) return 'It is a transfer to a different account.';
   } else if (income ? tx.kind !== 'income' : tx.kind !== 'expense') return income ? 'Only income can be this expected income.' : 'Only an expense can pay this bill.';
-  if (Math.abs(diffDays(tx.date, o.date)) > LINK_WINDOW_DAYS) return `It is dated more than ${LINK_WINDOW_DAYS} days from the due date.`;
+  const after = diffDays(tx.date, o.date); // days after the due date (negative: before it)
+  if (after < -LINK_WINDOW_DAYS) return `It is dated more than ${LINK_WINDOW_DAYS} days from the due date.`;
+  if (after > LINK_WINDOW_DAYS) {
+    // Phase 4A.11: a late payment of an OVERDUE occurrence, only when the user asked for older transactions
+    if (!opts.older || o.status !== 'overdue') return `It is dated more than ${LINK_WINDOW_DAYS} days from the due date.${o.status === 'overdue' ? ' Use “Show older transactions” to link a late payment.' : ''}`;
+    if (after > OVERDUE_LINK_WINDOW_DAYS) return `It is dated more than ${OVERDUE_LINK_WINDOW_DAYS} days after the due date.`;
+  }
   return null;
 }

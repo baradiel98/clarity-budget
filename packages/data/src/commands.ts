@@ -484,6 +484,8 @@ export interface OccurrenceLinkCandidate {
   /** The transaction's amount minus the scheduled amount (0 when equal, or when the scheduled amount isn't known). */
   amountDifferenceCents: Cents;
   daysFromDue: number;
+  /** Phase 4A.11: days after the due date (negative: before it). */
+  daysAfterDue: number;
 }
 
 /**
@@ -494,23 +496,24 @@ export interface OccurrenceLinkCandidate {
  * chosen: amount and date alone never prove a transaction paid a bill. (The link command itself accepts any amount:
  * the user's explicit choice records what was actually paid.)
  */
-export function linkCandidatesForOccurrence(data: WorkspaceData, ref: { recurringId: ID; originalDate: ISODate }, today: ISODate): { occurrence: Occurrence | null; candidates: OccurrenceLinkCandidate[] } {
+export function linkCandidatesForOccurrence(data: WorkspaceData, ref: { recurringId: ID; originalDate: ISODate }, today: ISODate, opts: { older?: boolean } = {}): { occurrence: Occurrence | null; candidates: OccurrenceLinkCandidate[] } {
   const o = findOccurrence(data, ref, today);
   if (!o || o.status === 'confirmed' || o.status === 'skipped') return { occurrence: o, candidates: [] };
+  const older = !!opts.older && o.status === 'overdue'; // Phase 4A.11: only for an overdue occurrence, only when asked
   const seen = new Set<string>();
   const candidates: OccurrenceLinkCandidate[] = [];
   for (const t of data.transactions) {
     const { leg, toAccountId } = linkLeg(data, t);
     if (leg.id !== t.id || seen.has(leg.id)) continue;
     seen.add(leg.id);
-    if (occurrenceLinkProblem(leg, o, { toAccountId })) continue;
+    if (occurrenceLinkProblem(leg, o, { toAccountId, older })) continue;
     const evidence = occurrenceEvidence({ accountId: leg.accountId, date: leg.date, amountCents: leg.amountCents, merchant: leg.merchant }, o, data.transactions);
     // offered only when the amount fits the scheduled one (exact for a fixed amount, within 25% of an estimate) or
     // something names it; otherwise every purchase of the month would be listed
     const amt = Math.abs(leg.amountCents);
     const fits = o.amountBasis === 'fixed' || o.amountBasis === 'override' ? amt === o.amountCents : o.amountBasis === 'unknown' || o.amountBasis === 'card_balance' ? false : Math.abs(amt - o.amountCents) <= Math.max(100, Math.floor(o.amountCents / 4));
     if (!fits && !evidence) continue;
-    candidates.push({ tx: leg, evidence, amountDifferenceCents: o.amountCents ? amt - o.amountCents : 0, daysFromDue: Math.abs(diffDays(leg.date, o.date)) });
+    candidates.push({ tx: leg, evidence, amountDifferenceCents: o.amountCents ? amt - o.amountCents : 0, daysFromDue: Math.abs(diffDays(leg.date, o.date)), daysAfterDue: diffDays(leg.date, o.date) });
   }
   candidates.sort((a, b) => Number(!a.evidence) - Number(!b.evidence) || Number(a.amountDifferenceCents !== 0) - Number(b.amountDifferenceCents !== 0) || a.daysFromDue - b.daysFromDue || (a.tx.id < b.tx.id ? -1 : 1));
   return { occurrence: o, candidates };
@@ -524,26 +527,52 @@ export function linkCandidatesForOccurrence(data: WorkspaceData, ref: { recurrin
  * occurrenceLinkProblem says so, when the item is no longer scheduled, or when the transaction already records another
  * occurrence (unless `replace`: the user moves the link).
  */
-export function linkTransactionToOccurrence(ctx: Ctx, txId: ID, ref: { recurringId: ID; originalDate: ISODate }, opts: { replace?: boolean } = {}): Op[] {
+export function linkTransactionToOccurrence(ctx: Ctx, txId: ID, ref: { recurringId: ID; originalDate: ISODate }, opts: { replace?: boolean; older?: boolean } = {}): Op[] {
   const t = ctx.data.transactions.find((x) => x.id === txId) ?? fail('That transaction no longer exists.', 'occurrence');
   const item = ctx.data.recurring.find((r) => r.id === ref.recurringId) ?? fail('That scheduled item no longer exists.', 'occurrence');
   const o = findOccurrence(ctx.data, ref, ctx.today) ?? fail(`${item.name} due ${formatShortDate(ref.originalDate)} is no longer scheduled (it was changed, paused or ended).`, 'occurrence');
   const { leg, legs, toAccountId } = linkLeg(ctx.data, t);
   const own = leg.occurrenceRef;
   if (own && own.recurringId === ref.recurringId && own.originalDate === ref.originalDate) fail(`This transaction already records ${item.name} due ${formatShortDate(ref.originalDate)}.`, 'occurrence');
-  const problem = occurrenceLinkProblem(leg, o, { toAccountId, ignoreOwnLink: !!opts.replace });
+  // Phase 4A.11: `older` (the user asked for older transactions) allows a late payment of an OVERDUE occurrence, up to 62
+  // days after its due date; the occurrence's status is re-checked here against the current data
+  const problem = occurrenceLinkProblem(leg, o, { toAccountId, ignoreOwnLink: !!opts.replace, older: !!opts.older });
   if (problem) fail(problem.replace(/ due (\d{4}-\d{2}-\d{2})/, (_m, d: string) => ` due ${formatShortDate(d)}`), 'occurrence');
   return legs.map((l): Op => ({ t: 'put', table: 'transactions', value: { ...l, occurrenceRef: { recurringId: ref.recurringId, originalDate: ref.originalDate }, updatedAt: ctx.now } }));
 }
 
 /** Phase 4A.10: one existing transaction offered as an occurrence's payment, in words (date, description, amount, account, status, what fits). */
-export function linkCandidateLabel(c: OccurrenceLinkCandidate, data: WorkspaceData): string {
+export function linkCandidateLabel(c: OccurrenceLinkCandidate, data: WorkspaceData, opts: { showDays?: boolean } = {}): string {
   const cur = data.accounts.find((a) => a.id === c.tx.accountId)?.currency ?? data.settings.baseCurrency;
   const parts = [formatShortDate(c.tx.date), c.tx.merchant || c.tx.kind, formatCents(c.tx.amountCents, cur, { sign: 'always' }), data.accounts.find((a) => a.id === c.tx.accountId)?.name ?? '', c.tx.status === 'pending' ? 'pending' : 'posted'];
   if (c.evidence === 'name') parts.push('the description names it');
   if (c.evidence === 'history') parts.push('this payee paid it before');
   if (c.amountDifferenceCents) parts.push(`differs from the scheduled amount by ${formatCents(c.amountDifferenceCents, cur, { sign: 'always' })}`);
+  // Phase 4A.11: in the older list, how far each one is from the due date
+  if (opts.showDays) parts.push(c.daysAfterDue === 0 ? 'on the due date' : `${Math.abs(c.daysAfterDue)} day${Math.abs(c.daysAfterDue) === 1 ? '' : 's'} ${c.daysAfterDue > 0 ? 'after' : 'before'} the due date`);
   return parts.join(' · ');
+}
+
+/**
+ * Phase 4A.11: the state of a transaction's scheduled-payment link, so the Edit form can always offer Unlink and say
+ * why: 'ok' (the occurrence is on the schedule and the transaction still fits it), 'item_missing' (the scheduled item
+ * was deleted), 'occurrence_missing' (the item no longer has that occurrence: its schedule was changed, it was paused
+ * or ended), 'invalid' (the transaction no longer fits it: account, type or direction). Never moved anywhere
+ * automatically; null when the transaction has no link.
+ */
+export function linkedOccurrenceState(data: WorkspaceData, txId: ID, today: ISODate): { state: 'ok' | 'item_missing' | 'occurrence_missing' | 'invalid'; ref: { recurringId: ID; originalDate: ISODate }; name: string | null } | null {
+  const t = data.transactions.find((x) => x.id === txId);
+  if (!t) return null;
+  const { leg, legs, toAccountId } = linkLeg(data, t);
+  const ref = legs.find((l) => l.occurrenceRef)?.occurrenceRef;
+  if (!ref) return null;
+  const item = data.recurring.find((r) => r.id === ref.recurringId);
+  if (!item) return { state: 'item_missing', ref, name: null };
+  const o = findOccurrence(data, ref, today);
+  if (!o) return { state: 'occurrence_missing', ref, name: item.name };
+  // structure only (type, account, direction): the date of a kept link may have been edited on purpose
+  const structural = occurrenceLinkProblem({ ...leg, date: o.date, occurrenceRef: ref }, { ...o, status: 'confirmed' }, { toAccountId });
+  return { state: structural ? 'invalid' : 'ok', ref, name: item.name };
 }
 
 /** Phase 4A.10: remove a transaction's scheduled-payment link (the occurrence is unpaid again; nothing else changes). */
