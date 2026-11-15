@@ -3,8 +3,8 @@ import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { addTransaction, deleteProblem, deleteTransaction, markPostedBeforeOpening, matchOptionView, recordPaymentReturn, returnOptionsForEntry, updateTransaction, type TxInput } from '@clarity/data';
-import { addDays, ALREADY_INCLUDED_HINT, OCCURRENCE_WEAK_HINT, ALREADY_INCLUDED_LABEL, OPENING_POSTED_HINT, OPENING_POSTED_LABEL, RETURN_ASK_LINK, RETURN_CHECK_TITLE, RETURN_DECIDE_HINT, RETURN_NEEDS_DECISION, RETURN_SEPARATE_LABEL, centsToDecimalString, formatCents, formatShortDate, legsPendingOf, parseAmountInput, TERMS, transferChoiceOf, TRANSFER_STATUS_HINT, TRANSFER_STATUS_LABEL, transferStatusOptions } from '@clarity/shared';
+import { addTransaction, deleteProblem, deleteTransaction, linkCandidateLabel, linkCandidatesForOccurrence, linkTransactionToOccurrence, markPostedBeforeOpening, unlinkTransactionFromOccurrence, matchOptionView, recordPaymentReturn, returnOptionsForEntry, updateTransaction, type TxInput } from '@clarity/data';
+import { addDays, ALREADY_INCLUDED_HINT, LINKED_TO_OCCURRENCE, MARK_PAID_CHOOSE, MARK_PAID_EXISTING_TITLE, MARK_PAID_LINK_NOTE, MARK_PAID_NEW, MARK_PAID_SCHEDULED, OCCURRENCE_WEAK_HINT, ALREADY_INCLUDED_LABEL, OPENING_POSTED_HINT, OPENING_POSTED_LABEL, RETURN_ASK_LINK, RETURN_CHECK_TITLE, RETURN_DECIDE_HINT, RETURN_NEEDS_DECISION, RETURN_SEPARATE_LABEL, centsToDecimalString, formatCents, formatShortDate, legsPendingOf, parseAmountInput, TERMS, transferChoiceOf, TRANSFER_STATUS_HINT, TRANSFER_STATUS_LABEL, transferStatusOptions } from '@clarity/shared';
 import { balanceAsOfDate, buildMerchantMemory, inclusionProblem, expandOccurrences, findPossibleDuplicates, merchantKey, suggestOccurrenceLink } from '@clarity/engine';
 import { Check } from '../src/features/Welcome';
 import { takeAddPrefill } from '../src/state/nav';
@@ -121,6 +121,13 @@ export default function AddScreen() {
   }, [prefill, isEdit, cents, kind, data, date, accountId, merchant, today, signed, toAccountId]);
   const occurrence = occurrenceSuggestion?.occurrence ?? null;
   const linkOcc = linkOccChoice ?? !!occurrenceSuggestion?.strong;
+  // Phase 4A.10: Mark paid: an existing transaction may already be this payment (nothing is chosen for the user)
+  const markPaid = useMemo(() => (prefill.occurrenceRef && !isEdit ? linkCandidatesForOccurrence(data, prefill.occurrenceRef, today) : null), [prefill, isEdit, data, today]);
+  const [payChoice, setPayChoice] = useState<string | null>(null);
+  const linkingTx = markPaid?.candidates.find((x) => x.tx.id === payChoice)?.tx ?? null;
+  const needsPayChoice = !!markPaid?.candidates.length && payChoice === null;
+  const linkedRef = isEdit ? existing?.find((t) => t.occurrenceRef)?.occurrenceRef : undefined;
+  const linkedItem = linkedRef ? data.recurring.find((r) => r.id === linkedRef.recurringId) : undefined;
 
   // Phase 4A.5.18: money coming in that could be a returned card payment needs an explicit decision (never automatic)
   const [returnChoice, setReturnChoice] = useState<string | null>(null);
@@ -134,6 +141,16 @@ export default function AddScreen() {
   const preOpening = isEdit && existing!.length === 1 && existing![0]!.status === 'pending' ? data.accounts.find((a) => a.id === existing![0]!.accountId && a.openingDate > existing![0]!.date) : undefined;
 
   const save = async () => {
+    if (needsPayChoice) return fail(MARK_PAID_CHOOSE);
+    if (linkingTx && prefill.occurrenceRef) {
+      setBusy(true);
+      const r = await run((ctx) => linkTransactionToOccurrence(ctx, linkingTx.id, prefill.occurrenceRef!), { undoLabel: `Linked to ${prefill.occurrenceName ?? 'the scheduled payment'}` });
+      setBusy(false);
+      if (!r.ok) return fail(r.errors.map((e) => e.message).join(' '));
+      toast({ message: `Linked “${linkingTx.merchant || linkingTx.kind}” to ${prefill.occurrenceName ?? 'the scheduled payment'}`, action: { label: 'Undo', run: () => void store.undo() } });
+      router.back();
+      return;
+    }
     if (cents <= 0) return fail('Enter an amount greater than zero.');
     if (suggestedReturns.length && returnChoice === null) return fail(RETURN_NEEDS_DECISION);
     if (chosenReturn) {
@@ -187,6 +204,26 @@ export default function AddScreen() {
         ) : <View style={{ width: 52 }} />}
       </View>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 16, gap: 14, paddingBottom: 16 }}>
+        {markPaid?.occurrence && (() => { const o = markPaid.occurrence; return (
+          <View testID="mark-paid" style={{ gap: 8, backgroundColor: c.surface, borderRadius: 12, padding: 12 }}>
+            <T variant="footnote" color="textSecondary" testID="mark-paid-scheduled">{MARK_PAID_SCHEDULED(o.name, formatShortDate(o.date), o.amountCents ? formatCents(o.amountCents, cur) : 'amount not set', data.accounts.find((a) => a.id === o.accountId)?.name ?? '')}</T>
+            {markPaid.candidates.length > 0 && (
+              <View accessibilityRole="radiogroup" accessibilityLabel={MARK_PAID_EXISTING_TITLE} style={{ gap: 6 }}>
+                <T variant="footnote" style={{ fontFamily: 'Inter_600SemiBold' }}>{MARK_PAID_EXISTING_TITLE}</T>
+                {markPaid.candidates.map((x) => <Check key={x.tx.id} label={linkCandidateLabel(x, data)} value={payChoice === x.tx.id} onChange={() => { setPayChoice(x.tx.id); setError(null); }} />)}
+                <Check label={MARK_PAID_NEW} value={payChoice === 'new'} onChange={() => { setPayChoice('new'); setError(null); }} />
+                {linkingTx && <T variant="caption" color="textSecondary" testID="mark-paid-note">{MARK_PAID_LINK_NOTE}</T>}
+              </View>
+            )}
+          </View>
+        ); })()}
+        {linkedItem && linkedRef && (
+          <View testID="linked-occurrence" style={{ gap: 8, backgroundColor: c.surface, borderRadius: 12, padding: 12 }}>
+            <T variant="footnote">{LINKED_TO_OCCURRENCE(linkedItem.name, formatShortDate(linkedRef.originalDate))}</T>
+            <Button small kind="secondary" title="Unlink" onPress={async () => { const r = await run((ctx) => unlinkTransactionFromOccurrence(ctx, existing![0]!.id), { undoLabel: `Unlinked from ${linkedItem.name}` }); if (r.ok) { toast({ message: `Unlinked from ${linkedItem.name}; it counts as due again`, action: { label: 'Undo', run: () => void store.undo() } }); router.back(); } else fail(r.errors.map((e) => e.message).join(' ')); }} />
+          </View>
+        )}
+        {!linkingTx && <>
         {!prefill.occurrenceRef && !isEdit && <Segmented label="Type" value={kind} onChange={(k) => { changeKind(k); setCategoryId(k === 'income' ? 'cat_paycheck' : null); }} options={[{ value: 'expense', label: 'Expense' }, { value: 'income', label: 'Income' }, { value: 'transfer', label: 'Transfer' }, { value: 'refund', label: 'Refund' }]} />}
         <Money cents={cents} currency={cur} variant="hero" style={{ textAlign: 'center' }} accessibilityRole="text" />
         {kind !== 'transfer' && (
@@ -258,12 +295,13 @@ export default function AddScreen() {
         ) : (
           kind !== 'transfer' && <LinkButton title="Notes or pending" onPress={() => setMore(true)} />
         )}
+        </>}
         {error && <T color="negative" accessibilityRole="alert">{error}</T>}
       </ScrollView>
       <View style={{ paddingHorizontal: 12, paddingBottom: insets.bottom + 8, backgroundColor: c.bg, borderTopWidth: 1, borderTopColor: c.border }}>
-        <Keypad value={amount} onChange={setAmount} />
+        {!linkingTx && <Keypad value={amount} onChange={setAmount} />}
         {isAdjustment && <T color="warning" accessibilityRole="alert" testID="adjustment-locked">Balance adjustments can’t be edited: changing it here would turn it into an expense or income and could flip its sign. Delete it, or use Update balance again.</T>}
-        <Button title={duplicates.length && dupConfirmed ? 'Save anyway' : 'Save'} busy={busy} disabled={isAdjustment} onPress={() => void save()} />
+        <Button title={linkingTx ? 'Link transaction' : duplicates.length && dupConfirmed ? 'Save anyway' : 'Save'} busy={busy} disabled={isAdjustment} onPress={() => void save()} />
       </View>
     </View>
   );

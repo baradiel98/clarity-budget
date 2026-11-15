@@ -1,5 +1,5 @@
 import { diffDays, type Cents, type ID, type ISODate, type Transaction } from '@clarity/shared';
-import type { Occurrence } from './occurrences';
+import { occurrenceKey, type Occurrence } from './occurrences';
 import { merchantKey, normalizeDescription, similarity, tokens } from './text';
 
 export interface TxLike {
@@ -109,4 +109,51 @@ export function suggestOccurrenceLink(tx: OccurrenceMatchInput, occurrences: rea
   const best = cands[0]!;
   const ambiguous = cands.some((c) => c !== best && ((c.o.recurringId !== best.o.recurringId && (!!c.ev || !best.ev)) || (c.o.recurringId === best.o.recurringId && c.dist === best.dist)));
   return { occurrence: best.o, strong: !!best.ev && !ambiguous, evidence: best.ev, ambiguous };
+}
+
+/** Phase 4A.10: what is needed to decide whether an EXISTING transaction can be the payment of an occurrence. */
+export interface LinkableTx {
+  id: ID;
+  accountId: ID;
+  date: ISODate;
+  amountCents: Cents;
+  kind: Transaction['kind'];
+  merchant: string;
+  transferGroupId?: ID;
+  returnOf?: ID;
+  transferFeeOf?: ID;
+  occurrenceRef?: Transaction['occurrenceRef'];
+}
+
+/** Phase 4A.10: how far from its due date an existing transaction can be linked to an occurrence (explicit choice). */
+export const LINK_WINDOW_DAYS = 31;
+
+/**
+ * Phase 4A.10: why an existing transaction can't be the payment (or receipt) of this occurrence, or null. Structural
+ * rules, applied to a link the user chooses explicitly (Mark paid → "it's this transaction", or a link made later):
+ * - the occurrence is unpaid: not recorded by another transaction, not skipped;
+ * - the transaction is a real payment of that kind: an expense pays a bill or subscription; income is expected income;
+ *   a transfer (its sending side) is a scheduled transfer or savings move to the same other account. Refunds,
+ *   adjustments, transfer fees and returned card payments never settle anything;
+ * - it is in the account the item is scheduled from, and in the right direction;
+ * - it is dated within 31 days of the due date (an amount that differs is allowed and shown: the user records what
+ *   was actually paid);
+ * - it doesn't already settle another occurrence (unlink it first, or replace explicitly).
+ * `toAccountId`: the other account of a transfer. `ignoreOwnLink`: the transaction's current link is being replaced.
+ */
+export function occurrenceLinkProblem(tx: LinkableTx, o: Occurrence, opts: { toAccountId?: ID | null; ignoreOwnLink?: boolean } = {}): string | null {
+  if (o.status === 'skipped') return `${o.name} due ${o.originalDate} was skipped.`;
+  const ownKey = tx.occurrenceRef ? occurrenceKey(tx.occurrenceRef.recurringId, tx.occurrenceRef.originalDate) : null;
+  if (o.status === 'confirmed' && ownKey !== o.key) return `${o.name} due ${o.originalDate} is already recorded by another transaction.`;
+  if (ownKey && !opts.ignoreOwnLink && ownKey !== o.key) return 'This transaction already records another scheduled payment. Unlink it first.';
+  if (tx.kind === 'refund' || tx.kind === 'adjustment' || tx.returnOf || tx.transferFeeOf) return `A ${tx.returnOf ? 'returned card payment' : tx.transferFeeOf ? 'transfer fee' : tx.kind} can't be the payment of a scheduled item.`;
+  if (tx.accountId !== o.accountId) return 'It is in a different account from the one this item is scheduled from.';
+  const income = o.kind === 'income';
+  if (income !== tx.amountCents > 0) return income ? 'It is money going out; this item is money coming in.' : 'It is money coming in; this item is a payment.';
+  if (o.kind === 'transfer' || o.kind === 'savings') {
+    if (tx.kind !== 'transfer') return 'Only a transfer can be this scheduled transfer.';
+    if (o.toAccountId && opts.toAccountId !== o.toAccountId) return 'It is a transfer to a different account.';
+  } else if (income ? tx.kind !== 'income' : tx.kind !== 'expense') return income ? 'Only income can be this expected income.' : 'Only an expense can pay this bill.';
+  if (Math.abs(diffDays(tx.date, o.date)) > LINK_WINDOW_DAYS) return `It is dated more than ${LINK_WINDOW_DAYS} days from the due date.`;
+  return null;
 }

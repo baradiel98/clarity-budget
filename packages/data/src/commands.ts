@@ -1,9 +1,9 @@
 import {
-  addDays, defaultCategories, formatCents, formatShortDate, localISODate, MATCH_AMOUNT_NOTE, MATCH_PARTIAL_RETURN_LABEL, MATCH_PARTIAL_RETURN_NOTE, RETURN_ROW_TEXT, MATCH_RETURN_LABEL, MATCH_RETURN_NOTE, MATCH_FEE_LABEL, MATCH_FEE_NOTE, MATCH_NOT_FEE, MATCH_PENDING_NOTE, MATCH_POSTED_NOTE, MATCH_TRANSFER_NOTE, STATEMENT_RETURN_ROW_TEXT, FEE_BLOCKED_BY_RETURNS, type Account, type AccountType, type Cents, type Category, type ID, type ISODate, type ImportBatch,
+  addDays, defaultCategories, diffDays, formatCents, formatShortDate, localISODate, MATCH_AMOUNT_NOTE, MATCH_PARTIAL_RETURN_LABEL, MATCH_PARTIAL_RETURN_NOTE, RETURN_ROW_TEXT, MATCH_RETURN_LABEL, MATCH_RETURN_NOTE, MATCH_FEE_LABEL, MATCH_FEE_NOTE, MATCH_NOT_FEE, MATCH_PENDING_NOTE, MATCH_POSTED_NOTE, MATCH_TRANSFER_NOTE, STATEMENT_RETURN_ROW_TEXT, FEE_BLOCKED_BY_RETURNS, type Account, type AccountType, type Cents, type Category, type ID, type ISODate, type ImportBatch,
   type MappingProfile, type OccurrenceException, type Provenance, type RecurringAmount, type RecurringItem, type RecurringKind, type Schedule, type Settings,
   type Split, type Transaction, type TxKind, type TxStatus, type WeekendRule, type WorkspaceData,
 } from '@clarity/shared';
-import { accountBalance, balanceAsOfDate, expandOccurrences, inclusionProblem, occurrenceEligible, paymentReturnStatus, pendingMatches, pendingPartialMatches, postedBalance, validateTransaction, validateTransferPair, type InclusionProblem, type Occurrence, type ValidationIssue } from '@clarity/engine';
+import { accountBalance, balanceAsOfDate, expandOccurrences, inclusionProblem, occurrenceEligible, occurrenceEvidence, occurrenceLinkProblem, paymentReturnStatus, pendingMatches, pendingPartialMatches, postedBalance, validateTransaction, validateTransferPair, type InclusionProblem, type Occurrence, type ValidationIssue } from '@clarity/engine';
 import { candidateLabel, feeOfLeg, findExactDuplicate, findMatchCandidates, findReturnCandidates, returnedBlocksFee, sameSnapshot, snapshotOf, statementReturnOptions, type CandidateSnapshot, type ImportCandidate, type ImportSettings, type MatchCandidate, type ReconciliationPreview, type StatementReturnOption } from '@clarity/import';
 import { applyOps as applyLocal, type Op } from './ops';
 
@@ -454,7 +454,104 @@ function occurrenceRefProblem(ctx: Ctx, input: TxInput, ownIds: readonly ID[] = 
   const other = ctx.data.transactions.find((t) => !ownIds.includes(t.id) && t.occurrenceRef?.recurringId === ref.recurringId && t.occurrenceRef.originalDate === ref.originalDate);
   if (other) return `${item.name} due ${formatShortDate(ref.originalDate)} is already recorded by ${txLabel(other, ctx.data.settings.baseCurrency)}. A scheduled payment is settled by one transaction.`;
   if (item.accountId !== input.accountId) return `${item.name} is scheduled from ${ctx.data.accounts.find((a) => a.id === item.accountId)?.name ?? 'another account'}, not this account.`;
+  // Phase 4A.10: the type and direction must fit too (a refund never pays a bill; only a transfer is a transfer)
+  const income = item.kind === 'income';
+  const transfer = item.kind === 'transfer' || item.kind === 'savings';
+  const fits = transfer ? input.kind === 'transfer' && (!item.toAccountId || input.toAccountId === item.toAccountId) : income ? input.kind === 'income' : input.kind === 'expense';
+  if (!fits) return `${item.name} is ${transfer ? `a scheduled transfer${item.toAccountId ? ` to ${ctx.data.accounts.find((a) => a.id === item.toAccountId)?.name ?? 'another account'}` : ''}` : income ? 'expected income' : 'a bill'}; a ${input.kind} can't record it.`;
   return null;
+}
+
+/**
+ * Phase 4A.10: the occurrence a link names, as the schedule shows it now (status included), or null when it is no
+ * longer scheduled (the item was deleted, paused or ended, or the occurrence moved out of it).
+ */
+export function findOccurrence(data: WorkspaceData, ref: { recurringId: ID; originalDate: ISODate }, today: ISODate): Occurrence | null {
+  return expandOccurrences(data.recurring, data.exceptions, data.transactions, { from: addDays(ref.originalDate, -62), to: addDays(ref.originalDate, 62), today }).find((o) => o.recurringId === ref.recurringId && o.originalDate === ref.originalDate) ?? null;
+}
+
+/** The leg of a transaction that stands for it in a scheduled-payment link (a transfer's sending side). */
+const linkLeg = (data: WorkspaceData, t: Transaction): { leg: Transaction; legs: Transaction[]; toAccountId: ID | null } => {
+  const legs = t.transferGroupId ? data.transactions.filter((x) => x.transferGroupId === t.transferGroupId) : [t];
+  const leg = legs.find((l) => l.amountCents < 0) ?? legs[0]!;
+  return { leg, legs, toAccountId: legs.find((l) => l.id !== leg.id)?.accountId ?? null };
+};
+
+export interface OccurrenceLinkCandidate {
+  tx: Transaction;
+  /** Evidence beyond amount and date (the item's name in the description, or the same payee linked before); never a choice. */
+  evidence: 'name' | 'history' | null;
+  /** The transaction's amount minus the scheduled amount (0 when equal, or when the scheduled amount isn't known). */
+  amountDifferenceCents: Cents;
+  daysFromDue: number;
+}
+
+/**
+ * Phase 4A.10: existing transactions that could be the payment of this unpaid occurrence, for the user to choose from:
+ * occurrenceLinkProblem is null (type, account, direction, unpaid, within 31 days, not linked elsewhere) AND the amount
+ * fits the scheduled one (exact for a fixed amount, within 25% of an estimate) or the description names the item (or
+ * the same payee paid it before). Ordered: evidence first, then the same amount, then the closest date. Nothing is
+ * chosen: amount and date alone never prove a transaction paid a bill. (The link command itself accepts any amount:
+ * the user's explicit choice records what was actually paid.)
+ */
+export function linkCandidatesForOccurrence(data: WorkspaceData, ref: { recurringId: ID; originalDate: ISODate }, today: ISODate): { occurrence: Occurrence | null; candidates: OccurrenceLinkCandidate[] } {
+  const o = findOccurrence(data, ref, today);
+  if (!o || o.status === 'confirmed' || o.status === 'skipped') return { occurrence: o, candidates: [] };
+  const seen = new Set<string>();
+  const candidates: OccurrenceLinkCandidate[] = [];
+  for (const t of data.transactions) {
+    const { leg, toAccountId } = linkLeg(data, t);
+    if (leg.id !== t.id || seen.has(leg.id)) continue;
+    seen.add(leg.id);
+    if (occurrenceLinkProblem(leg, o, { toAccountId })) continue;
+    const evidence = occurrenceEvidence({ accountId: leg.accountId, date: leg.date, amountCents: leg.amountCents, merchant: leg.merchant }, o, data.transactions);
+    // offered only when the amount fits the scheduled one (exact for a fixed amount, within 25% of an estimate) or
+    // something names it; otherwise every purchase of the month would be listed
+    const amt = Math.abs(leg.amountCents);
+    const fits = o.amountBasis === 'fixed' || o.amountBasis === 'override' ? amt === o.amountCents : o.amountBasis === 'unknown' || o.amountBasis === 'card_balance' ? false : Math.abs(amt - o.amountCents) <= Math.max(100, Math.floor(o.amountCents / 4));
+    if (!fits && !evidence) continue;
+    candidates.push({ tx: leg, evidence, amountDifferenceCents: o.amountCents ? amt - o.amountCents : 0, daysFromDue: Math.abs(diffDays(leg.date, o.date)) });
+  }
+  candidates.sort((a, b) => Number(!a.evidence) - Number(!b.evidence) || Number(a.amountDifferenceCents !== 0) - Number(b.amountDifferenceCents !== 0) || a.daysFromDue - b.daysFromDue || (a.tx.id < b.tx.id ? -1 : 1));
+  return { occurrence: o, candidates };
+}
+
+/**
+ * Phase 4A.10: record that an EXISTING transaction is the payment (or receipt) of an unpaid occurrence: the user's
+ * explicit choice (Mark paid → "it's this transaction"). Only the link is added (to every leg of a transfer): no new
+ * transaction, and the amount, date, status, account, statement link and import identity stay exactly as they are. The
+ * occurrence then counts as recorded and leaves the forecast, once. Refused (nothing changed) when
+ * occurrenceLinkProblem says so, when the item is no longer scheduled, or when the transaction already records another
+ * occurrence (unless `replace`: the user moves the link).
+ */
+export function linkTransactionToOccurrence(ctx: Ctx, txId: ID, ref: { recurringId: ID; originalDate: ISODate }, opts: { replace?: boolean } = {}): Op[] {
+  const t = ctx.data.transactions.find((x) => x.id === txId) ?? fail('That transaction no longer exists.', 'occurrence');
+  const item = ctx.data.recurring.find((r) => r.id === ref.recurringId) ?? fail('That scheduled item no longer exists.', 'occurrence');
+  const o = findOccurrence(ctx.data, ref, ctx.today) ?? fail(`${item.name} due ${formatShortDate(ref.originalDate)} is no longer scheduled (it was changed, paused or ended).`, 'occurrence');
+  const { leg, legs, toAccountId } = linkLeg(ctx.data, t);
+  const own = leg.occurrenceRef;
+  if (own && own.recurringId === ref.recurringId && own.originalDate === ref.originalDate) fail(`This transaction already records ${item.name} due ${formatShortDate(ref.originalDate)}.`, 'occurrence');
+  const problem = occurrenceLinkProblem(leg, o, { toAccountId, ignoreOwnLink: !!opts.replace });
+  if (problem) fail(problem.replace(/ due (\d{4}-\d{2}-\d{2})/, (_m, d: string) => ` due ${formatShortDate(d)}`), 'occurrence');
+  return legs.map((l): Op => ({ t: 'put', table: 'transactions', value: { ...l, occurrenceRef: { recurringId: ref.recurringId, originalDate: ref.originalDate }, updatedAt: ctx.now } }));
+}
+
+/** Phase 4A.10: one existing transaction offered as an occurrence's payment, in words (date, description, amount, account, status, what fits). */
+export function linkCandidateLabel(c: OccurrenceLinkCandidate, data: WorkspaceData): string {
+  const cur = data.accounts.find((a) => a.id === c.tx.accountId)?.currency ?? data.settings.baseCurrency;
+  const parts = [formatShortDate(c.tx.date), c.tx.merchant || c.tx.kind, formatCents(c.tx.amountCents, cur, { sign: 'always' }), data.accounts.find((a) => a.id === c.tx.accountId)?.name ?? '', c.tx.status === 'pending' ? 'pending' : 'posted'];
+  if (c.evidence === 'name') parts.push('the description names it');
+  if (c.evidence === 'history') parts.push('this payee paid it before');
+  if (c.amountDifferenceCents) parts.push(`differs from the scheduled amount by ${formatCents(c.amountDifferenceCents, cur, { sign: 'always' })}`);
+  return parts.join(' · ');
+}
+
+/** Phase 4A.10: remove a transaction's scheduled-payment link (the occurrence is unpaid again; nothing else changes). */
+export function unlinkTransactionFromOccurrence(ctx: Ctx, txId: ID): Op[] {
+  const t = ctx.data.transactions.find((x) => x.id === txId) ?? fail('That transaction no longer exists.', 'occurrence');
+  const { legs } = linkLeg(ctx.data, t);
+  if (!legs.some((l) => l.occurrenceRef)) fail('This transaction isn\'t linked to a scheduled payment.', 'occurrence');
+  return legs.map((l): Op => { const v: Transaction = { ...l, updatedAt: ctx.now }; delete v.occurrenceRef; return { t: 'put', table: 'transactions', value: v }; });
 }
 
 export function addTransaction(ctx: Ctx, input: TxInput): { ops: Op[]; txs: Transaction[]; warnings: string[] } {
@@ -553,6 +650,11 @@ export function updateTransaction(ctx: Ctx, id: ID, input: TxInput): { ops: Op[]
   if (input.occurrenceRef && !(prevRef && prevRef.recurringId === input.occurrenceRef.recurringId && prevRef.originalDate === input.occurrenceRef.originalDate)) {
     const occProblem = occurrenceRefProblem(ctx, input, legs.map((l) => l.id));
     if (occProblem) fail(occProblem, 'occurrence');
+  } else if (prevRef && ctx.data.recurring.some((r) => r.id === prevRef.recurringId)) {
+    // Phase 4A.10: an edit that keeps the link must still fit it (account, type, direction); otherwise refused, with
+    // the way out: unlink first. (Amount and date may change: the link records what was actually paid.)
+    const kept = occurrenceRefProblem(ctx, { ...input, occurrenceRef: prevRef }, legs.map((l) => l.id));
+    if (kept) fail(`This transaction is recorded as paying a scheduled item, and this change doesn't fit it: ${kept} Unlink it first, or keep its account and type.`, 'occurrence');
   }
   const ops: Op[] = legs.map((l): Op => ({ t: 'del', table: 'transactions', id: l.id }));
   const txs = buildTxs(ctx, { ...input, ...(existing.occurrenceRef && !input.occurrenceRef ? { occurrenceRef: existing.occurrenceRef } : {}) }, {

@@ -1,8 +1,8 @@
 import { AlertTriangle, Plus, Trash2, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { addTransaction, deleteTransaction, markPostedBeforeOpening, matchOptionView, recordPaymentReturn, returnOptionsForEntry, updateTransaction, type TxInput } from '@clarity/data';
+import { addTransaction, deleteTransaction, linkCandidateLabel, linkCandidatesForOccurrence, linkTransactionToOccurrence, markPostedBeforeOpening, unlinkTransactionFromOccurrence, matchOptionView, recordPaymentReturn, returnOptionsForEntry, updateTransaction, type TxInput } from '@clarity/data';
 import { balanceAsOfDate, buildMerchantMemory, inclusionProblem, expandOccurrences, findPossibleDuplicates, merchantKey, suggestOccurrenceLink } from '@clarity/engine';
-import { addDays, ALREADY_INCLUDED_HINT, OCCURRENCE_WEAK_HINT, ALREADY_INCLUDED_LABEL, OPENING_POSTED_HINT, OPENING_POSTED_LABEL, RETURN_ASK_LINK, RETURN_CHECK_TITLE, RETURN_DECIDE_HINT, RETURN_NEEDS_DECISION, RETURN_SEPARATE_LABEL, centsToDecimalString, formatCents, formatShortDate, legsPendingOf, parseAmountInput, TERMS, transferChoiceOf, TRANSFER_STATUS_HINT, TRANSFER_STATUS_LABEL, transferStatusOptions, type Transaction, type TransferSettlementChoice } from '@clarity/shared';
+import { addDays, ALREADY_INCLUDED_HINT, LINKED_TO_OCCURRENCE, MARK_PAID_CHOOSE, MARK_PAID_EXISTING_TITLE, MARK_PAID_LINK_NOTE, MARK_PAID_NEW, MARK_PAID_SCHEDULED, OCCURRENCE_WEAK_HINT, ALREADY_INCLUDED_LABEL, OPENING_POSTED_HINT, OPENING_POSTED_LABEL, RETURN_ASK_LINK, RETURN_CHECK_TITLE, RETURN_DECIDE_HINT, RETURN_NEEDS_DECISION, RETURN_SEPARATE_LABEL, centsToDecimalString, formatCents, formatShortDate, legsPendingOf, parseAmountInput, TERMS, transferChoiceOf, TRANSFER_STATUS_HINT, TRANSFER_STATUS_LABEL, transferStatusOptions, type Transaction, type TransferSettlementChoice } from '@clarity/shared';
 import { useData, useRun, useSession, useStore } from '../state/session';
 import type { AddPrefill } from '../state/ui';
 import { AmountInput } from '../ui/AmountInput';
@@ -183,6 +183,14 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
     return suggestOccurrenceLink({ accountId, date, amountCents: kind === 'income' ? Math.abs(signed) : -Math.abs(signed), merchant, kind, toAccountId: kind === 'transfer' ? toAccountId || null : null }, occ, data.transactions);
   }, [prefill, isEdit, signed, kind, data, date, accountId, merchant, today, toAccountId]);
   const linkOcc = linkOccChoice ?? !!occurrenceSuggestion?.strong;
+  // Phase 4A.10: Mark paid: an existing transaction may already be this payment (nothing is chosen for the user)
+  const markPaid = useMemo(() => (prefill?.occurrenceRef && !isEdit ? linkCandidatesForOccurrence(data, prefill.occurrenceRef, today) : null), [prefill, isEdit, data, today]);
+  const [payChoice, setPayChoice] = useState<string | null>(null); // an existing transaction id, 'new', or null (not chosen)
+  const linkingTx = markPaid?.candidates.find((c) => c.tx.id === payChoice)?.tx ?? null;
+  const needsPayChoice = !!markPaid?.candidates.length && payChoice === null;
+  // Phase 4A.10: an existing link, shown in the Edit form with a way to undo it
+  const linkedRef = isEdit ? existing!.find((t) => t.occurrenceRef)?.occurrenceRef : undefined;
+  const linkedItem = linkedRef ? data.recurring.find((r) => r.id === linkedRef.recurringId) : undefined;
   const occurrence = occurrenceSuggestion?.occurrence ?? null;
 
   // Phase 4A.5.18: money coming in that could be a returned card payment needs an explicit decision (never automatic)
@@ -200,6 +208,16 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
   const splitTotal = splits.reduce((s, x) => s + (parseAmountInput(x.amount, cur) ?? 0), 0);
 
   const save = async () => {
+    if (needsPayChoice) { setErrors({ paid: MARK_PAID_CHOOSE }); return; }
+    if (linkingTx && prefill?.occurrenceRef) {
+      setBusy(true);
+      const r = await run((ctx) => linkTransactionToOccurrence(ctx, linkingTx.id, prefill.occurrenceRef!), { undoLabel: `Linked to ${prefill.occurrenceName ?? 'the scheduled payment'}` });
+      setBusy(false);
+      if (!r.ok) { setErrors({ paid: r.errors.map((x) => x.message).join(' ') }); return; }
+      toast({ message: `Linked “${linkingTx.merchant || linkingTx.kind}” to ${prefill.occurrenceName ?? 'the scheduled payment'}`, action: { label: 'Undo', run: () => void store.undo() } });
+      onClose();
+      return;
+    }
     const e: Record<string, string> = {};
     if (cents === null || cents <= 0) e.amount = 'Enter an amount greater than zero.';
     if (kind !== 'income' && kind !== 'transfer' && !merchant.trim()) e.merchant = 'Add a merchant or description.';
@@ -282,13 +300,36 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
           )}
           <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
           <button type="submit" form="tx-form" className="btn btn-primary" disabled={busy || isAdjustment} aria-busy={busy} data-testid="save-tx">
-            {busy && <Spinner />}{duplicates.length && dupConfirmed ? 'Save anyway' : 'Save'} <kbd aria-hidden="true" style={{ background: 'transparent', color: 'inherit', borderColor: 'currentColor', opacity: 0.9 }}>↵</kbd>
+            {busy && <Spinner />}{linkingTx ? 'Link transaction' : duplicates.length && dupConfirmed ? 'Save anyway' : 'Save'} <kbd aria-hidden="true" style={{ background: 'transparent', color: 'inherit', borderColor: 'currentColor', opacity: 0.9 }}>↵</kbd>
           </button>
         </>
       }
     >
       <form id="tx-form" onSubmit={(e) => { e.preventDefault(); void save(); }} className="stack">
         {isAdjustment && <div className="callout warn" role="alert" data-testid="adjustment-locked">Balance adjustments can’t be edited: changing it here would turn it into an expense or income and could flip its sign. Delete it, or use Update balance again in Settings.</div>}
+        {markPaid?.occurrence && (() => { const o = markPaid.occurrence; return (
+          <div className="callout" data-testid="mark-paid">
+            <div className="hint" data-testid="mark-paid-scheduled">{MARK_PAID_SCHEDULED(o.name, formatShortDate(o.date), o.amountCents ? formatCents(o.amountCents, cur) : 'amount not set', data.accounts.find((a) => a.id === o.accountId)?.name ?? '')}</div>
+            {markPaid.candidates.length > 0 && (
+              <div role="radiogroup" aria-label={MARK_PAID_EXISTING_TITLE} className="stack" style={{ gap: 4, marginTop: 6 }}>
+                <strong style={{ fontSize: 13 }}>{MARK_PAID_EXISTING_TITLE}</strong>
+                {markPaid.candidates.map((c) => (
+                  <label key={c.tx.id} className="check"><input type="radio" name="mark-paid" checked={payChoice === c.tx.id} onChange={() => { setPayChoice(c.tx.id); setErrors({}); }} /><span>{linkCandidateLabel(c, data)}</span></label>
+                ))}
+                <label className="check"><input type="radio" name="mark-paid" checked={payChoice === 'new'} onChange={() => { setPayChoice('new'); setErrors({}); }} /><span>{MARK_PAID_NEW}</span></label>
+                {linkingTx && <div className="hint" data-testid="mark-paid-note">{MARK_PAID_LINK_NOTE}</div>}
+                {errors.paid && <div className="error-text" role="alert" data-testid="mark-paid-error">{errors.paid}</div>}
+              </div>
+            )}
+          </div>
+        ); })()}
+        {linkedItem && linkedRef && (
+          <div className="callout" data-testid="linked-occurrence">
+            <span className="grow">{LINKED_TO_OCCURRENCE(linkedItem.name, formatShortDate(linkedRef.originalDate))}</span>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={async () => { const r = await run((ctx) => unlinkTransactionFromOccurrence(ctx, existing![0]!.id), { undoLabel: `Unlinked from ${linkedItem.name}` }); if (r.ok) { toast({ message: `Unlinked from ${linkedItem.name}; it counts as due again`, action: { label: 'Undo', run: () => void store.undo() } }); onClose(); } }}>Unlink</button>
+          </div>
+        )}
+        {!linkingTx && <>
         {!prefill?.occurrenceRef && !isEdit && <Segmented label="Type" value={kind} options={KINDS} onChange={(k) => { changeKind(k); if (!categoryTouched) setCategoryId(k === 'income' ? 'cat_paycheck' : null); }} block />}
         <Field label="Amount" error={errors.amount}>
           {(id) => <AmountInput id={id} value={amount} onChange={setAmount} currency={cur} large autoFocus aria-invalid={!!errors.amount} data-testid="amount" />}
@@ -422,6 +463,7 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
         )}
         {/* Phase 4A.5.14: also changes refused because another tab changed the data (stale) or because a linked item can't be made pending (status) */}
         {(errors.form ?? errors.return ?? errors.delete ?? errors.includedInBalance ?? errors.stale ?? errors.status ?? errors.transfer) && <div className="error-text" role="alert" data-testid="form-error">{errors.form ?? errors.return ?? errors.delete ?? errors.includedInBalance ?? errors.stale ?? errors.status ?? errors.transfer}</div>}
+        </>}
       </form>
     </Dialog>
   );

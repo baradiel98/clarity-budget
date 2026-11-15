@@ -546,6 +546,33 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
   - A data-command caller sending `linkOccurrence: true` for a row with no suggestion is ignored, as before.
 - **[Lesson]** The engine only generates occurrences from the day an item was added (`trackFrom`): tests needing past occurrences must create the item earlier.
 - **[Known limitations]**
-  - "Mark paid" on an occurrence that an independently imported transaction already paid creates a second transaction: there is no "link this existing transaction" button yet. The data layer refuses only when the occurrence is already linked.
+  - ~~"Mark paid" on an occurrence already paid by an unlinked transaction creates a second transaction.~~ **Fixed in 4A.10.**
   - Evidence is word-based: a payee whose statement name shares no word with the item's name ("OAKWOOD MGMT" for "Rent") is strong only after the user links it once (history).
+
+## Phase 4A.10 (2026-11-15): link existing transactions to scheduled items
+- **[Defect, verified]** Mark paid always added a new transaction. With a $300 rent already imported unlinked (checking $1,000, Rent $300 Sep 15 and Oct 15), checking went to $400 (truth $700), spending to $600 (truth $300), and Safe to Spend stayed $100 (truth $400).
+- **[Confirmed policy, from the phase brief]**
+  - The user explicitly picks an existing transaction or "No, record a new payment"; nothing is preselected.
+  - Linking adds no transaction and changes no amount, status or statement identity.
+  - One transaction ↔ one occurrence.
+  - The 4A.9 matching rules are unchanged.
+- **[Verified implementation]**
+  - **Engine:** `occurrenceLinkProblem` and `LINK_WINDOW_DAYS` (31).
+  - **Data:**
+    - `findOccurrence`, `linkCandidatesForOccurrence` (structural fit plus an amount fit or evidence), `linkCandidateLabel`;
+    - `linkTransactionToOccurrence` (with `replace`) and `unlinkTransactionFromOccurrence`;
+    - `occurrenceRefProblem` now also checks type and direction;
+    - `updateTransaction` refuses an edit that no longer fits a kept link (unlink first).
+  - **UI:** web `AddTransaction` and mobile `app/add.tsx`:
+    - the Mark paid choice, with the form hidden while linking and a "Link transaction" button;
+    - "Records the scheduled payment … · Unlink" in the Edit form.
+- **[Decisions, mine; documented]**
+  - The link window is 31 days around the due date.
+  - The candidate list needs an amount fit or name/history evidence, so a month of unrelated purchases isn't offered (found in the first browser run: Shell, groceries…). The link command accepts any amount, because the link is the user's explicit choice.
+  - Amount and date edits keep a link.
+  - Reassigning a link is explicit (`replace`), or Unlink and link again.
+- **[Data model]** No schema change and no migration: the existing `occurrenceRef` field.
+- **[Known limitations]**
+  - There is no "link to a scheduled item" action starting from a transaction: linking starts from the scheduled item (Mark paid). The Edit form only unlinks.
+  - A payment more than 31 days from its due date can't be linked: "No, record a new payment" is still possible, but money would then be counted twice. Use Skip on the occurrence instead.
 

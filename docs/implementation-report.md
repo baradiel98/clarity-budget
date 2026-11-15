@@ -709,6 +709,33 @@ Owner policy: each transfer leg settles on its own; money in transit isn't spend
   - Name evidence is word-based.
   - Not verified on simulators, devices, Safari or with a screen reader.
 
+## 7z. Phase 4A.10: link existing transactions to scheduled items
+
+| Case (checking $1,000; Rent $300 due Sep 15 and Oct 15; today Sep 12) | Truth | Before (18e124b) | After |
+|---|---|---|---|
+| $300 rent imported unlinked, then Mark paid | Checking $700; spending $300; Safe to Spend $400 | Checking $400; spending $600; Safe to Spend $100 (a second $300 added) | **Checking $700; spending $300; Safe to Spend $400**: the existing payment is linked; nothing added |
+| Sample: $65 "Verizon Wireless" today, then Mark paid on Phone ($65, Nov 22) | $2,427.17 | $2,362.17 (second $65) | **$2,427.17** (linked) |
+| Unlink | the bill is due again | n/a | Safe to Spend back to $100 or $2,362.17 |
+
+- **Rules:** `docs/calculation-rules.md` ("Linking an existing transaction to a scheduled item").
+- **Data model:** no schema change and no migration.
+- **Tests (all after the final code change):**
+  - **Unit (vitest):** 774 passed, 1 skipped. New: `packages/data/test/occurrence-linking.test.ts`, 15 tests covering:
+    - the original scenario; genuine vs unrelated; the amount-fit filter;
+    - other account, refund, income, transfer, outside 31 days; pending stays pending; a scheduled transfer;
+    - one-to-one rules and explicit reassign; two occurrences of a bill;
+    - deleted, paused or skipped items; two tabs;
+    - unlink; description and amount edits; account and refund edits refused;
+    - single and bulk delete plus undo; import undo and re-import.
+  - **Mobile (jest):** 68 passed. New: Mark paid link and Unlink tests in `test/scheduled-matching.test.tsx`.
+  - **Browser:** Playwright 189 passed, 10 skipped (Chromium). New: `e2e/phase4a10.spec.ts`, 3 tests with screenshots covering linking, "record a new payment", and no candidates.
+  - **Checks:** root, web and mobile typechecks clean; lint clean; iOS and Android bundles exported.
+  - **Mutation check:** allowing an occurrence to be recorded twice, or skipping the kept-link check on edits, makes the tests fail.
+- **Limitations:**
+  - Links start from the scheduled item only (Mark paid). There is no "link to a scheduled item" action from a transaction.
+  - A payment more than 31 days from its due date can't be linked.
+  - Not verified on simulators, devices, Safari or with a screen reader.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

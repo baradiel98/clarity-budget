@@ -135,6 +135,13 @@ export const STATEMENT_RETURN_ROW_TEXT = (amount: string, payment: string, row: 
   `Linked as the return of ${amount} of the ${payment} card payment in row ${row} (${date}) of this statement, not imported as income.`;
 export const FEE_BLOCKED_BY_RETURNS = (returned: string, statement: string) =>
   `Can't be linked: ${returned} of this payment was already returned, so it can't become ${statement} with a transfer fee (returns can't exceed the payment). Remove the return first, or leave the row out.`;
+/** Phase 4A.10: Mark paid when an existing transaction may already be that payment. */
+export const MARK_PAID_EXISTING_TITLE = 'Already recorded? If one of these transactions paid it, link it instead of adding a new one.';
+export const MARK_PAID_NEW = 'No, record a new payment';
+export const MARK_PAID_CHOOSE = 'Choose the transaction that paid it, or “No, record a new payment”.';
+export const MARK_PAID_LINK_NOTE = 'Nothing new is added: the transaction keeps its amount, date and status, and this scheduled payment stops counting in your forecast.';
+export const MARK_PAID_SCHEDULED = (name: string, date: string, amount: string, account: string) => `${name} · due ${date} · ${amount} · ${account}`;
+export const LINKED_TO_OCCURRENCE = (name: string, date: string) => `Records the scheduled payment ${name} due ${date}.`;
 /** Phase 4A.9: a scheduled-item suggestion based only on the amount and date (not selected; the user decides). */
 export const OCCURRENCE_WEAK_HINT = "Only the amount and date are close; the description doesn't mention it. Tick only if this is that payment.";
 export const OCCURRENCE_WEAK_ROW = (name: string, date: string) => `Could be ${name} (due ${date}): only the amount and date are close. Not linked unless you tick it.`;

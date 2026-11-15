@@ -1,5 +1,5 @@
 import { act, fireEvent, render } from '@testing-library/react-native';
-import { applyOps, buildDemoWorkspace, type Ctx } from '@clarity/data';
+import { addTransaction, applyOps, buildDemoWorkspace, linkTransactionToOccurrence, type Ctx } from '@clarity/data';
 import { engineInput } from '@clarity/data';
 import { computeSafeToSpend } from '@clarity/engine';
 import type { WorkspaceData } from '@clarity/shared';
@@ -83,4 +83,40 @@ describe('Phase 4A.9 on mobile: scheduled-item suggestions', () => {
     expect(check.props.accessibilityState.checked).toBe(false);
     expect(ui.getByText(/Only the amount and date are close; the description doesn't mention it\./)).toBeTruthy();
   });
+
+  // Phase 4A.10: Mark paid can link an existing transaction instead of adding a second one
+  const phone = () => { const r = mockData.recurring.find((x) => x.name === 'Phone')!; return { recurringId: r.id, originalDate: '2026-11-22' }; };
+  const verizon = () => {
+    const chk = mockData.accounts.find((a) => a.name === 'Everyday Checking')!.id;
+    const r = addTransaction(ctx(), { kind: 'expense', accountId: chk, date: '2026-11-13', amountCents: 6500, merchant: 'Verizon Wireless', categoryId: null });
+    mockData = applyOps(mockData, r.ops);
+    return r.txs[0]!;
+  };
+  it('Mark paid (Phone $65) offers the existing Verizon $65: a choice is required; linking adds nothing and the bill leaves the forecast (+$65 Safe to Spend)', async () => {
+    mockData = buildDemoWorkspace(SAMPLE_TODAY, SAMPLE_NOW);
+    const t = verizon();
+    const before = sts();
+    const count = mockData.transactions.length;
+    setAddPrefill({ occurrenceRef: phone(), occurrenceName: 'Phone', amountCents: 6500 });
+    const ui = await render(<AddScreen />);
+    expect([ui.getByTestId('mark-paid-scheduled').props.children].flat().join('')).toBe('Phone · due Nov 22 · $65.00 · Everyday Checking');
+    await act(async () => { fireEvent.press(ui.getByText('Save')); });
+    expect(ui.getByText('Choose the transaction that paid it, or “No, record a new payment”.')).toBeTruthy();
+    await act(async () => { fireEvent.press(ui.getByRole('checkbox', { name: 'Nov 13 · Verizon Wireless · −$65.00 · Everyday Checking · posted' })); });
+    expect(ui.getByTestId('mark-paid-note')).toBeTruthy();
+    await act(async () => { fireEvent.press(ui.getByText('Link transaction')); });
+    expect([mockData.transactions.length, mockData.transactions.find((x) => x.id === t.id)!.occurrenceRef, sts() - before]).toEqual([count, phone(), 6500]);
+  });
+  it('Edit form of the linked transaction: Unlink makes the bill due again', async () => {
+    mockData = buildDemoWorkspace(SAMPLE_TODAY, SAMPLE_NOW);
+    const t = verizon();
+    const before = sts();
+    mockData = applyOps(mockData, linkTransactionToOccurrence(ctx(), t.id, phone()));
+    setAddPrefill({ editId: t.id });
+    const ui = await render(<AddScreen />);
+    expect(ui.getByText('Records the scheduled payment Phone due Nov 22.')).toBeTruthy();
+    await act(async () => { fireEvent.press(ui.getByText('Unlink')); });
+    expect([mockData.transactions.find((x) => x.id === t.id)!.occurrenceRef, sts()]).toEqual([undefined, before]);
+  });
 });
+

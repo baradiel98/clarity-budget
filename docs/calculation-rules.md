@@ -188,6 +188,33 @@ A link (`occurrenceRef`) marks that occurrence **confirmed**, so it leaves the f
 - **`addTransaction` / `updateTransaction`** (Mark paid, the Add form, linking later) refuse a link to an item that no longer exists, to one scheduled from another account, or to an occurrence another transaction already records. Amount and date may differ: the user records what was actually paid.
 
 Example (sample data, Nov 13): Electricity, variable, estimated $91.40, due Nov 18. A "PAYMENT TO STORE CARD −$100" row on Nov 12 used to be linked to it by default, so Safe to Spend showed $2,268.57 instead of $2,177.17. Since 4A.9 a card payment can't settle a bill. "ONLINE PMT 7781 −$100" is only a suggestion, not ticked: imported unlinked, Electricity stays due, $2,327.17. "CITY ELECTRICITY CO −$91.40" is strong: linked, Electricity paid, $2,427.17.
+
+### Linking an existing transaction to a scheduled item (Phase 4A.10)
+"Mark paid" (Home, Planning; web and mobile) used to add a new transaction every time. If the payment was already recorded (imported or entered, but not linked), the money counted twice. Example: checking $1,000, Rent $300 due Sep 15 and Oct 15, a $300 rent payment imported unlinked, then Mark paid: checking $400 instead of $700, spending $600 instead of $300, Safe to Spend $100 instead of $400. Now:
+
+- **Mark paid lists existing transactions that could be this payment** (`linkCandidatesForOccurrence`). A transaction is listed only when all of these hold:
+  - it fits the item structurally (`occurrenceLinkProblem`):
+    - type: an expense pays a bill or subscription; income is expected income; a transfer is the scheduled transfer to the same account; never a refund, adjustment, transfer fee or returned card payment;
+    - the same account and direction;
+    - dated within 31 days of the due date;
+    - not linked to another occurrence;
+  - its amount fits the scheduled amount (exact for a fixed amount, within 25% of an estimate), **or** the description names the item, or the same payee paid it before.
+- **What the user sees:** date, description, amount, account and status, plus "the description names it" or "differs from the scheduled amount by …". The scheduled item's name, due date, amount and account are shown too. Nothing is chosen: the user picks the transaction, or "No, record a new payment". Saving without a choice asks first. With nothing to list, Mark paid is the usual form.
+- **Linking** (`linkTransactionToOccurrence`) only adds the link, on every leg of a transfer: no new transaction, and the amount, date, status, account, statement link and import identity are unchanged. The occurrence counts as recorded and leaves the forecast once. Cancel changes nothing.
+- **Refused, with nothing changed:**
+  - the occurrence is already recorded by another transaction;
+  - the item was deleted, or the occurrence is paused, ended or skipped;
+  - a type, account or direction that doesn't fit;
+  - more than 31 days from the due date;
+  - a transaction that already records another occurrence. Moving a link is explicit: `replace`, or Unlink then link again.
+
+  A second tab working from older data is refused by storage.
+- **Undoing a link:** Unlink, in the Edit form (`unlinkTransactionFromOccurrence`), makes the occurrence due again.
+- **Edits to a linked transaction:**
+  - Editing its description, category, amount or date keeps the link; it records what was actually paid.
+  - Changing its account, or its type to one that can't pay the item, is refused until it is unlinked.
+  - Deleting it (single or bulk), or undoing its import, removes the link with it: the occurrence is due again, never "paid" by a transaction that no longer exists.
+- **Recording a new payment** for an occurrence (Mark paid → "No, record a new payment", the Add form) is refused when the occurrence is already recorded, or when the type doesn't fit the item.
 ## Forecast
 A day-by-day timeline of available cash from today to the horizon. On each day the **outflows are applied before inflows**: a bill due on payday must be covered by money you already have. The day's *low* (after outflows) is what "lowest balance" and Safe to Spend use.
 
