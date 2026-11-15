@@ -216,3 +216,52 @@ export const transferChoiceOf = (fromPending: boolean, toPending: boolean): Tran
   fromPending ? (toPending ? 'none' : 'received') : toPending ? 'sent' : 'both';
 export const legsPendingOf = (c: TransferSettlementChoice): { fromPending: boolean; toPending: boolean } =>
   ({ both: { fromPending: false, toPending: false }, sent: { fromPending: false, toPending: true }, received: { fromPending: true, toPending: false }, none: { fromPending: true, toPending: true } })[c];
+/**
+ * Phase 5A: the daily ledger (Planning's schedule by account, and each day's breakdown). Every row says what it is:
+ * recorded (already happened), planned (a future-dated transaction you recorded), scheduled, estimated or past due.
+ */
+export const LEDGER_ALL_CASH = 'All spendable cash';
+export const LEDGER_SHOW = 'Show';
+export const LEDGER_DAY_DETAILS = 'Day details';
+export const LEDGER_DAY_LABEL = (date: string, scope: string) => `Day details: ${date}, ${scope}`;
+export const LEDGER_BASIS: Record<'recorded' | 'pending' | 'planned' | 'scheduled' | 'estimated' | 'overdue' | 'hypothetical' | 'overdrawn', string> = {
+  recorded: 'Recorded',
+  pending: 'Recorded · pending',
+  planned: 'Planned',
+  scheduled: 'Scheduled',
+  estimated: 'Estimated',
+  overdue: 'Past due, counted today',
+  hypothetical: 'What if',
+  overdrawn: 'Overdrawn balance, still owed',
+};
+export const LEDGER_START_OF_DAY = 'Start of day';
+export const LEDGER_END_OF_DAY = 'End of day';
+export const LEDGER_LOWEST = 'Lowest during the day';
+export const LEDGER_BALANCE_AFTER = 'Balance after';
+export const LEDGER_OWED_AFTER = 'Owed after';
+export const LEDGER_SUMMARY = 'How the end-of-day balance is worked out: the balance at the start of the day, then each item in the order the forecast applies it (money going out before money coming in). The same numbers Safe to Spend and Planning use.';
+export const LEDGER_ANCHOR: Record<'opening' | 'confirmed' | 'confirmed_from_records' | 'posted_in_records', (date: string) => string> = {
+  opening: (d) => `Opening balance (${d})`,
+  confirmed: (d) => `Confirmed balance (${d})`,
+  confirmed_from_records: (d) => `Confirmed balance (${d})`,
+  posted_in_records: (d) => `Posted balance on ${d}`,
+};
+export const LEDGER_ANCHOR_NOTE: Record<'opening' | 'confirmed' | 'confirmed_from_records' | 'posted_in_records', string> = {
+  opening: 'the posted balance you entered when you added the account',
+  confirmed: 'the posted balance you entered with Update balance',
+  confirmed_from_records: 'your last Update balance, worked out from your records',
+  posted_in_records: "as recorded in Clarity; it can't tell which of these were recorded after you confirmed the balance",
+};
+export const LEDGER_RECORDED_AFTER = 'recorded after you confirmed the balance';
+export const LEDGER_NOT_POSTED_BY = (d: string) => `not posted by ${d}, so not in that balance`;
+export const LEDGER_ALREADY_INCLUDED = 'Already in this balance, not counted again';
+export const LEDGER_EARLIER_INCLUDED = (n: number) => `${n} earlier transaction${n === 1 ? ' is' : 's are'} part of this balance and not counted again.`;
+export const LEDGER_CHANGES_SINCE = (d: string) => `Changes since you confirmed it to transactions dated on or before ${d}`;
+export const LEDGER_RECORDED_TODAY = 'Recorded balance today';
+export const LEDGER_PENDING_HELD = 'Pending credits not yet available';
+export const LEDGER_AVAILABLE_TODAY = 'Available at the start of today';
+export const LEDGER_CUTOFF_RULE =
+  "A confirmed balance is the bank's posted balance: anything still pending then isn't in it and is counted on top; a transaction dated on or before that date that you marked “Already included” is never counted again; anything else recorded afterwards is counted once.";
+export const LEDGER_CARD_NOTE = "Projected card balances include only charges, payments and refunds you recorded or scheduled. Interest and fees you haven't recorded aren't included.";
+export const LEDGER_ESTIMATED_INCOME = "Includes estimated income (≈), which may differ. Safe to Spend counts only income with a fixed amount.";
+export const LEDGER_COVERED = 'Counted against your spendable accounts';

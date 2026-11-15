@@ -36,6 +36,8 @@ export interface ExplainLine {
   cents?: Cents;
   date?: ISODate;
   note?: string;
+  /** Phase 5A (daily ledger): the running balance after this line, in the order the forecast applies it. */
+  balanceAfterCents?: Cents;
 }
 
 export interface Explanation {
@@ -111,7 +113,7 @@ export interface SafeToSpend {
   cardDebtToday: CardReserve[];
 }
 
-const ASSUMPTIONS_BASE = [
+export const ASSUMPTIONS_BASE = [
   'Uses only balances and transactions you recorded or imported. Nothing is pulled from a bank.',
   'On any day, money going out is applied before money coming in (so a bill due on payday is covered by the balance you already have).',
   'Unpaid bills that are past due are treated as still owed today.',
@@ -177,12 +179,17 @@ function forecastTo(input: EngineInput, horizonEnd: ISODate, includeEstimatedInc
   });
 }
 
-function eventLine(e: ForecastEvent, cur: CurrencyCode): ExplainLine {
-  const base = e.source === 'overdue' ? 'overdue, counted today' : e.estimated ? 'estimated' : e.source === 'hypothetical' ? 'hypothetical' : e.source === 'scheduled_tx' ? 'planned' : undefined;
+/** Phase 5A: the notes on an event that explain an amount different from the scheduled one (shared with the daily ledger). */
+export function eventDetailNotes(e: ForecastEvent, cur: CurrencyCode): string[] {
   const short = e.unfundedCents ? `only ${formatCents(e.cashDeltaCents, cur)} is available to move; ${formatCents(e.unfundedCents, cur)} not counted` : undefined;
   const cover = e.source === 'archived_balance' ? (e.label.includes('(archived)') ? 'an archived account\'s negative balance; still owed' : 'a negative balance on an account not counted as spendable; still owed') : e.coverCents ? `the account it's paid from is short; ${formatCents(e.coverCents, cur)} has to come from your spendable accounts` : undefined;
   const repaid = e.repaidCents ? `${formatCents(e.repaidCents, cur)} of it repays an overdrawn balance already counted, so it isn't counted again` : undefined;
-  const status = [base, short, cover, repaid].filter(Boolean).join('; ') || undefined;
+  return [short, cover, repaid].filter((x): x is string => !!x);
+}
+
+function eventLine(e: ForecastEvent, cur: CurrencyCode): ExplainLine {
+  const base = e.source === 'overdue' ? 'overdue, counted today' : e.estimated ? 'estimated' : e.source === 'hypothetical' ? 'hypothetical' : e.source === 'scheduled_tx' ? 'planned' : undefined;
+  const status = [base, ...eventDetailNotes(e, cur)].filter(Boolean).join('; ') || undefined;
   return {
     kind: e.cashDeltaCents < 0 ? 'out' : 'in',
     label: e.label,
@@ -192,7 +199,7 @@ function eventLine(e: ForecastEvent, cur: CurrencyCode): ExplainLine {
   };
 }
 
-function excludedLine(e: ForecastEvent): ExplainLine {
+export function excludedLine(e: ForecastEvent): ExplainLine {
   const note =
     e.excluded === 'unknown_amount'
       ? 'amount unknown, not counted'
@@ -209,7 +216,7 @@ function excludedLine(e: ForecastEvent): ExplainLine {
  * (it stays in the recorded balance but isn't available to spend until it clears), so the lines still add up.
  * Pending credits on non-spendable accounts are listed for information (they can't fund transfers or bills).
  */
-function startLines(f: Forecast, accounts: readonly Account[], cur: CurrencyCode): ExplainLine[] {
+export function startLines(f: Forecast, accounts: readonly Account[], cur: CurrencyCode): ExplainLine[] {
   const name = (id: ID) => accounts.find((a) => a.id === id)?.name ?? 'Account';
   return [
     { kind: 'start', label: TERMS.recordedBalance, cents: f.recordedStartCashCents },

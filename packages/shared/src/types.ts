@@ -33,6 +33,13 @@ export interface Account {
    * including a confirmation that matched exactly (no adjustment needed). The opening date counts as confirmed too.
    */
   balanceConfirmedDate?: ISODate;
+  /**
+   * Phase 5A: the posted balance the user entered at that latest "Update balance" (signed like the account: a card
+   * owed is negative), and when it was entered. Lets the daily ledger start from the figure the user confirmed and
+   * tell which transactions were recorded afterwards. Optional: absent on accounts confirmed before Phase 5A.
+   * Never used in any calculation; balances still come from the opening balance plus transactions and adjustments.
+   */
+  balanceConfirmation?: { date: ISODate; postedCents: Cents; at: number };
   createdAt: number;
   updatedAt: number;
 }

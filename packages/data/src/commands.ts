@@ -257,7 +257,9 @@ export function adjustBalance(
   const a = ctx.data.accounts.find((x) => x.id === accountId) ?? fail('Account not found.');
   if (!Number.isSafeInteger(actualBalanceCents)) fail('Enter a valid balance.', 'balance');
   const p = previewBalanceUpdate(ctx.data, accountId, actualBalanceCents, date);
-  const confirmed: Account = { ...a, balanceConfirmedDate: a.balanceConfirmedDate && a.balanceConfirmedDate > date ? a.balanceConfirmedDate : date, updatedAt: ctx.now };
+  const latest = !(a.balanceConfirmedDate && a.balanceConfirmedDate > date);
+  // Phase 5A: remember the figure entered (the bank's posted balance, signed like the account) for the daily ledger
+  const confirmed: Account = { ...a, balanceConfirmedDate: latest ? date : a.balanceConfirmedDate!, ...(latest ? { balanceConfirmation: { date, postedCents: p.bankCents, at: ctx.now } } : {}), updatedAt: ctx.now };
   const confirmOp: Op = { t: 'put', table: 'accounts', value: confirmed };
   if (p.differenceCents === 0) return { ops: [confirmOp], tx: null, reconciled: true };
   const describe = (t: Transaction) => `${t.merchant || t.kind} ${formatCents(t.amountCents, a.currency, { sign: 'always' })} on ${formatShortDate(t.date)}`;

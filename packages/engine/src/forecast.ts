@@ -70,6 +70,12 @@ export interface ForecastEvent {
    * which was already counted against the spendable accounts (so it is given back, never counted twice).
    */
   repaidCents?: Cents;
+  /**
+   * Phase 5A: what this event actually changed in each account's projected balance, in the order the forecast applied
+   * it (after funding caps, money covered from the spendable accounts and repaid overdrawn balances). Read-only output
+   * for the daily ledger; nothing is calculated from it. `seq` orders every change within the day.
+   */
+  applied?: (Leg & { seq: number })[];
 }
 
 /** A transfer out of a non-spendable asset account (e.g. savings) that asks for more than the account holds. */
@@ -166,6 +172,13 @@ export interface ForecastDay {
     otherCreditsCents: Cents;
   }>;
   events: ForecastEvent[];
+  /**
+   * Phase 5A: every account's projected balance at the start and end of the day (the forecast's own working balances:
+   * for a card, its recorded balance, negative when owed; for any other account, what is available: the recorded
+   * balance less pending credits). Read-only snapshots for the daily ledger.
+   */
+  accountStartCents: Record<ID, Cents>;
+  accountEndCents: Record<ID, Cents>;
 }
 
 export interface Forecast {
@@ -380,6 +393,8 @@ export function buildForecast(input: ForecastInput): Forecast {
   for (let i = 0; i <= total; i++) {
     const date = addDays(today, i);
     const events = byDate.get(date) ?? [];
+    const accountStart = Object.fromEntries(balances);
+    let seq = 0;
 
     // Resolve legs. Card full-balance payments use the card balance at the start of the day.
     for (const e of events) {
@@ -409,8 +424,13 @@ export function buildForecast(input: ForecastInput): Forecast {
     const paymentsBefore = new Map<ID, Cents>();
     const paymentsAfter = new Map<ID, Cents>();
     const otherCredits = new Map<ID, Cents>();
-    const apply = (id: ID, d: Cents, isPayment = false) => {
+    const apply = (id: ID, d: Cents, ev: ForecastEvent, isPayment = false) => {
       balances.set(id, (balances.get(id) ?? 0) + d);
+      if (d !== 0) {
+        const prev = ev.applied?.find((l) => l.accountId === id);
+        if (prev) prev.deltaCents += d;
+        else (ev.applied ??= []).push({ accountId: id, deltaCents: d, seq: seq++ });
+      }
       if (d > 0 && baseCards.has(id)) {
         const m = !isPayment ? otherCredits : afterLow ? paymentsAfter : paymentsBefore;
         m.set(id, (m.get(id) ?? 0) + d);
@@ -451,7 +471,7 @@ export function buildForecast(input: ForecastInput): Forecast {
       const id = e.id.slice('overdrawn:'.length);
       const bal = balances.get(id) ?? 0;
       if (bal >= 0) continue;
-      apply(id, -bal);
+      apply(id, -bal, e);
       e.coverCents = -bal;
       debtCounted.set(id, (debtCounted.get(id) ?? 0) - bal);
       covered.push({ eventId: e.id, label: e.label, date, accountId: id, requestedCents: -bal, fundedCents: 0, coveredCents: -bal, accountBalanceCents: bal, kind: 'overdrawn' });
@@ -475,8 +495,8 @@ export function buildForecast(input: ForecastInput): Forecast {
       if (!t) { payments.push(e); continue; }
       const srcType = typeOf(t.src.accountId);
       if (cashIds.has(t.src.accountId) || (srcType === 'credit_card' && typeOf(t.dst.accountId) === 'credit_card')) {
-        apply(t.src.accountId, t.src.deltaCents);
-        apply(t.dst.accountId, repay(t.dst.accountId, t.dst.deltaCents, e), true);
+        apply(t.src.accountId, t.src.deltaCents, e);
+        apply(t.dst.accountId, repay(t.dst.accountId, t.dst.deltaCents, e), e, true);
         noteOut(t.src.accountId, e.label);
       } else if (srcType === 'credit_card') {
         advances.push({ e, src: t.src.accountId, dst: t.dst.accountId, cents: t.dst.deltaCents });
@@ -493,14 +513,14 @@ export function buildForecast(input: ForecastInput): Forecast {
           const bal = balances.get(l.accountId) ?? 0;
           const requested = -l.deltaCents;
           const funded = Math.min(requested, Math.max(0, bal));
-          apply(l.accountId, -funded); // the rest is paid with money moved in from the spendable accounts
+          apply(l.accountId, -funded, e); // the rest is paid with money moved in from the spendable accounts
           if (funded < requested) {
             e.coverCents = (e.coverCents ?? 0) + (requested - funded);
             // the account's real balance: an overdrawn balance counted separately is still part of it (Phase 4A.5.9)
             covered.push({ eventId: e.id, label: e.label, date, accountId: l.accountId, requestedCents: requested, fundedCents: funded, coveredCents: requested - funded, accountBalanceCents: bal - (debtCounted.get(l.accountId) ?? 0) });
           }
         } else {
-          apply(l.accountId, l.deltaCents);
+          apply(l.accountId, l.deltaCents, e);
           noteOut(l.accountId, e.label);
         }
       }
@@ -527,10 +547,10 @@ export function buildForecast(input: ForecastInput): Forecast {
       }
     }
     // 3. income, refunds, cash advances
-    for (const e of new Set(incoming)) for (const l of e.legs) if (l.deltaCents > 0) apply(l.accountId, repay(l.accountId, l.deltaCents, e));
+    for (const e of new Set(incoming)) for (const l of e.legs) if (l.deltaCents > 0) apply(l.accountId, repay(l.accountId, l.deltaCents, e), e);
     for (const a of advances) {
-      apply(a.src, -a.cents);
-      apply(a.dst, a.cents, true);
+      apply(a.src, -a.cents, a.e);
+      apply(a.dst, a.cents, a.e, true);
       // Borrowed against the spendable accounts only when the card is in the base currency (Phase 4A.4.4):
       // a card in another currency can't be subtracted from a base-currency total.
       if (typeOf(a.dst) !== 'credit_card' && accountById.get(a.src)?.currency === baseCurrency) {
@@ -563,8 +583,8 @@ export function buildForecast(input: ForecastInput): Forecast {
           group.forEach((m, k) => {
             const sh = shares[k]!;
             if (sh <= 0) return;
-            apply(m.src, -sh);
-            apply(m.dst, repay(m.dst, sh, m.e), true);
+            apply(m.src, -sh, m.e);
+            apply(m.dst, repay(m.dst, sh, m.e), m.e, true);
             m.funded += sh;
             progress = true;
           });
@@ -577,7 +597,7 @@ export function buildForecast(input: ForecastInput): Forecast {
       const short = m.requested - m.funded;
       if (m.cls === 0) {
         // A card payment is an obligation: the part savings can't pay has to come from the spendable accounts.
-        apply(m.dst, short, true);
+        apply(m.dst, short, m.e, true);
         m.e.legs = [{ accountId: m.src, deltaCents: -m.funded }, { accountId: m.dst, deltaCents: m.requested }];
         m.e.coverCents = short;
         covered.push({ eventId: m.e.id, label: m.e.label, date, accountId: m.src, requestedCents: m.requested, fundedCents: m.funded, coveredCents: short, accountBalanceCents: sourceBalance.get(m.src) ?? 0 });
@@ -610,7 +630,7 @@ export function buildForecast(input: ForecastInput): Forecast {
       c.paymentsCents = (paymentsBefore.get(id) ?? 0) + c.paymentsAfterLowCents;
       c.otherCreditsCents = otherCredits.get(id) ?? 0;
     }
-    days.push({ date, startCashCents: start, lowCashCents: low, endCashCents: cash, advanceOwedAtLowCents: owedAtLow, advanceOwedEndCents: owedTotal(), cards: cardsAtLow, events });
+    days.push({ date, startCashCents: start, lowCashCents: low, endCashCents: cash, advanceOwedAtLowCents: owedAtLow, advanceOwedEndCents: owedTotal(), cards: cardsAtLow, events, accountStartCents: accountStart, accountEndCents: Object.fromEntries(balances) });
   }
 
   return {
