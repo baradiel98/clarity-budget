@@ -192,7 +192,8 @@ function DraftCard({ d, issues, data, ctx, today, cur, busy, onChange, onRemove,
         <Input accessibilityLabel="Amount" keyboardType="decimal-pad" value={amountText} onChangeText={(v) => { setAmountText(v); const x = parseAmountInput(v, cur); onChange({ amountCents: x !== null && x > 0 ? x : null, approximate: false, currency: cur }); }} invalid={blocking.some((i) => i.field === 'amount')} />
       </Field>
       <DateField label={`Date${d.date && d.dateSource ? ` · ${SOURCE[d.dateSource]}` : ''}`} value={d.date ?? today} onChange={(date) => onChange({ date, dateSource: 'words', dateAmbiguous: false, dateText: null })} />
-      {d.kind !== 'transfer' && d.splits.length === 0 && (
+      {/* Phase 4A.8 (N3): a confirmed returned card payment has no category (as in the Add form) */}
+      {d.kind !== 'transfer' && d.splits.length === 0 && !chosenReturnOf(d, ctx) && (
         <Choices label={`Category${d.categoryId && d.categorySource ? ` · ${SOURCE[d.categorySource]}` : ''}`} value={d.categoryId} options={cats.map((x) => ({ value: x.id, label: x.name }))} onChange={(v) => onChange({ categoryId: v, categorySource: 'words', categoryWords: null })} />
       )}
       {d.splits.map((s, i) => (

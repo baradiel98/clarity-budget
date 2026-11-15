@@ -124,6 +124,17 @@ export const MATCH_PARTIAL_RETURN_NOTE = (returned: string, payment: string, lef
 export const RETURN_ROW_BADGE = 'Returned card payment';
 export const RETURN_ROW_TEXT = (amount: string, payment: string, date: string, card: string) =>
   `Linked as the return of ${amount} of the ${payment} payment to ${card} on ${date}, not imported as income.`;
+/** Phase 4A.8: a row that may be the return of a card payment row in the same statement (neither in Clarity yet). */
+export const STATEMENT_RETURN_LABEL = (row: number, date: string, description: string, amount: string) => `It's the return of the card payment in row ${row}: ${date} · ${description} · ${amount}`;
+export const STATEMENT_RETURN_NOTE = (row: number) =>
+  `Clarity imports row ${row} as a payment to your credit card and records this row as its return: the money coming back isn't counted as income, and the payment no longer counts as paying the card. Row ${row} must be imported as a transfer to the credit card it paid.`;
+export const STATEMENT_RETURN_TITLE = 'Is this the return of a card payment in this statement?';
+export const STATEMENT_RETURN_NONE_LABEL = "No, it's a separate transaction. Import it as new";
+export const STATEMENT_RETURN_NEEDS_PAYMENT = (row: number) => `To record this return, import row ${row} as a transfer to your credit card (Type: Transfer, then the card).`;
+export const STATEMENT_RETURN_ROW_TEXT = (amount: string, payment: string, row: number, date: string) =>
+  `Linked as the return of ${amount} of the ${payment} card payment in row ${row} (${date}) of this statement, not imported as income.`;
+export const FEE_BLOCKED_BY_RETURNS = (returned: string, statement: string) =>
+  `Can't be linked: ${returned} of this payment was already returned, so it can't become ${statement} with a transfer fee (returns can't exceed the payment). Remove the return first, or leave the row out.`;
 /** Phase 4A.5.18: the manual-entry decision (Add/Edit form). */
 export const RETURN_CHECK_TITLE = 'Is this money a returned card payment?';
 export const RETURN_SEPARATE_LABEL = "No, it's separate income";

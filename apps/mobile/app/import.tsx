@@ -2,12 +2,12 @@ import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native';
 import * as ExpoCrypto from 'expo-crypto';
-import { commitImport, describeImportResult, describeImportUndo, markTransactionPosted, isLinkChoice, matchDecision, matchOptionView, postedByMatchOf, returnRowText, undoImportBatch, type ImportDecision } from '@clarity/data';
+import { commitImport, describeImportResult, describeImportUndo, markTransactionPosted, isLinkChoice, isStatementReturnChoice, matchOptionView, postedByMatchOf, returnRowText, rowChoiceDecision, STATEMENT_RETURN_CHOICE, statementReturnRowText, undoImportBatch, type ImportDecision } from '@clarity/data';
 import {
   buildPreview, checkImportFile, findMatchCandidates, csvParser, MATCH_WINDOWS, dataRowCount, guessMapping, headerSignature, NO_DATA_ROWS_MESSAGE, nonBlankRowCount, reconcilePreview, suggestSignConvention, type ImportCandidate, type ImportPreview,
   type MappingGuess, type RawTable,
 } from '@clarity/import';
-import { formatCents, formatShortDate, IMPORT_BUTTON, RETURN_ROW_BADGE, MATCH_CHOICE_TITLE, MATCH_NONE_LABEL, MATCH_SKIP_LABEL, MATCH_STALE_TITLE, MATCH_TAKEN, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, TERMS, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
+import { formatCents, formatShortDate, IMPORT_BUTTON, RETURN_ROW_BADGE, STATEMENT_RETURN_LABEL, STATEMENT_RETURN_NEEDS_PAYMENT, STATEMENT_RETURN_NONE_LABEL, STATEMENT_RETURN_NOTE, STATEMENT_RETURN_TITLE, MATCH_CHOICE_TITLE, MATCH_NONE_LABEL, MATCH_SKIP_LABEL, MATCH_STALE_TITLE, MATCH_TAKEN, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, TERMS, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
 import { Check } from '../src/features/Welcome';
 import { pickTextFile } from '../src/platform/files';
 import { useData, useRun, useSession } from '../src/state/session';
@@ -102,7 +102,7 @@ export default function ImportScreen() {
           account, accounts: data.accounts, transactions: data.transactions, recurring: data.recurring, exceptions: data.exceptions, importBatches: data.importBatches, fileHash: file.hash, today,
         });
         setPreview(p);
-        setRows(p.candidates.map((x) => ({ ...x, editKind: x.looksLikeTransfer ? 'transfer' : x.kind, editCategory: x.categoryId, otherAccountId: '', linkOccurrence: !!x.occurrenceMatch, expanded: false, matchChoice: null })));
+        setRows(p.candidates.map((x) => ({ ...x, editKind: x.looksLikeTransfer ? 'transfer' : x.kind, editCategory: x.categoryId, otherAccountId: x.suggestedOtherAccountId ?? '', linkOccurrence: !!x.occurrenceMatch, expanded: false, matchChoice: null })));
         setStage('review');
       } catch (e) {
         setError((e as Error).message);
@@ -118,11 +118,25 @@ export default function ImportScreen() {
   const liveOf = (r: Row) => (account ? findMatchCandidates(r, account, data.transactions, { alsoIds: r.matchCandidates.map((m) => m.txId), accounts: data.accounts }) : []);
   // Phase 4A.5.17: a confirmed return adds the returned money, so it counts as a new row, not a link
   const linked = (r: Row) => isLinkChoice(r.matchChoice, liveOf(r));
-  const returnOf = (r: Row) => { const m = r.matchChoice ? liveOf(r).find((x) => x.txId === r.matchChoice && x.basis === 'return') : undefined; return m ? returnRowText(m, data) : null; };
+  const returnOf = (r: Row) => {
+    // Phase 4A.8: the return of a card payment row of this same statement
+    if (isStatementReturnChoice(r.matchChoice)) { const o = (r.statementReturnOf ?? []).find((x) => STATEMENT_RETURN_CHOICE(x.paymentRow) === r.matchChoice); return o ? statementReturnRowText(r, o, cur) : null; }
+    const m = r.matchChoice ? liveOf(r).find((x) => x.txId === r.matchChoice && x.basis === 'return') : undefined; return m ? returnRowText(m, data) : null;
+  };
+  // Phase 4A.8 (N1): same rules as the web review
+  const hasChoice = (r: Row) => liveOf(r).length > 0 || (r.statementReturnOf?.length ?? 0) > 0;
+  const paymentRowProblem = (r: Row) => {
+    if (!isStatementReturnChoice(r.matchChoice) || !r.include) return null;
+    const n = Number(r.matchChoice!.slice(4));
+    const p = rows.find((x) => x.rowNumber === n);
+    const ok = p && p.include && p.editKind === 'transfer' && (p.matchChoice === null || p.matchChoice === 'none') && data.accounts.find((a) => a.id === p.otherAccountId)?.type === 'credit_card';
+    return ok ? null : STATEMENT_RETURN_NEEDS_PAYMENT(n);
+  };
   // Phase 4A.5.14: per leg; a confirmed transfer fee makes the linked leg's effect the statement amount
   const sameIds = included.filter(linked).map((r) => postedByMatchOf(r.matchChoice!, liveOf(r), r.amountCents));
   const recon = useMemo(() => (preview && account ? reconcilePreview(preview, included.filter((r) => !linked(r)), { account, transactions: data.transactions, postedByMatch: sameIds }) : null), [preview, included, account, data.transactions, JSON.stringify(sameIds)]);
   const blocking = included.filter((r) => r.editKind === 'transfer' && !r.otherAccountId && (r.matchChoice === null || r.matchChoice === 'none')).length;
+  const pairBlocking = included.filter((r) => !!paymentRowProblem(r));
   const rowFor = (txId: string) => rows.find((r) => liveOf(r).some((m) => m.txId === txId));
   // Phase 4A.5.9: pending items that could explain the statement difference (cleared at the bank, still pending here)
   const reconPending = recon && !recon.note && recon.differenceCents !== 0 ? [...new Map([...(recon.pendingMatches ?? []).flat(), ...(recon.pendingPartial ?? [])].map((t) => [t.id, t])).values()] : [];
@@ -137,7 +151,7 @@ export default function ImportScreen() {
       const res = commitImport(ctx, {
         accountId: account.id, fileName: file.name, fileHash: file.hash, parserId: 'csv', headerSignature: headerSignature(file.guess.headers), delimiter: file.table.delimiter,
         settings: { hasHeader: file.guess.hasHeader, columns: file.guess.columns!, dateFormat, decimalSeparator: decimal, signConvention: sign },
-        decisions: included.map((x) => ({ candidate: x, kind: x.editKind, categoryId: x.editKind === 'transfer' ? null : x.editCategory, merchant: x.merchant, ...(x.otherAccountId ? { otherAccountId: x.otherAccountId } : {}), linkOccurrence: x.linkOccurrence, ...(x.matchChoice !== null ? { match: matchDecision(x.matchChoice, liveOf(x)) } : {}) })),
+        decisions: included.map((x) => ({ candidate: x, kind: x.editKind, categoryId: x.editKind === 'transfer' ? null : x.editCategory, merchant: x.merchant, ...(x.otherAccountId && x.editKind === 'transfer' ? { otherAccountId: x.otherAccountId } : {}), linkOccurrence: x.linkOccurrence, ...rowChoiceDecision(x.matchChoice, liveOf(x), x.statementReturnOf) })),
         knownDuplicateIds: rows.flatMap((x) => (x.duplicate?.level === 'exact' ? [x.duplicate.txId] : [])),
         totalRows: rows.length + preview.errors.length, excludedCount: rows.length - included.length, duplicateCount: rows.filter((x) => x.duplicate).length, errorCount: preview.errors.length,
         reconciliation: recon, applyAdjustment: applyAdj && (reconPending.length === 0 || reconUnrelated), adjustmentUnrelatedToPending: reconUnrelated,
@@ -199,7 +213,7 @@ export default function ImportScreen() {
           <Card>
             {rows.map((r, i) => (
               <View key={r.rowNumber} style={{ borderBottomWidth: i === rows.length - 1 ? 0 : 1, borderBottomColor: c.border, paddingVertical: 10, opacity: r.include ? 1 : 0.55 }}>
-                <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: r.include }} onPress={() => { if (!liveOf(r).length) setRow(i, { include: !r.include }); }} accessibilityHint={liveOf(r).length ? 'Choose below which transaction this is, or that it is a different one' : undefined} onLongPress={() => setRow(i, { expanded: !r.expanded })} style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+                <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: r.include }} onPress={() => { if (!hasChoice(r)) setRow(i, { include: !r.include }); }} accessibilityHint={hasChoice(r) ? 'Choose below which transaction this is, or that it is a different one' : undefined} onLongPress={() => setRow(i, { expanded: !r.expanded })} style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
                   <View style={{ width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: r.include ? c.accent : c.borderStrong, backgroundColor: r.include ? c.accent : 'transparent' }} />
                   <View style={{ flex: 1 }}>
                     <T numberOfLines={1} style={{ fontFamily: 'Inter_500Medium' }}>{r.merchant || r.rawDescription || 'No description'}</T>
@@ -207,13 +221,14 @@ export default function ImportScreen() {
                   </View>
                   <Money cents={r.amountCents} currency={cur} sign="always" color={r.amountCents > 0 ? 'positive' : 'text'} style={{ fontFamily: 'Inter_600SemiBold' }} />
                 </Pressable>
-                {(r.duplicate || r.reasons.length > 0 || r.occurrenceMatch || liveOf(r).length > 0) && (
+                {(r.duplicate || r.reasons.length > 0 || r.occurrenceMatch || hasChoice(r)) && (
                   <View style={{ marginLeft: 32, marginTop: 4, gap: 4 }}>
                     {r.duplicate && <Badge label={r.duplicate.level === 'exact' ? 'Already imported' : 'Possible duplicate'} tone={r.duplicate.level === 'exact' ? 'neg' : 'warn'} />}
                     {r.occurrenceMatch && <Check label={`Pays ${r.occurrenceMatch.name}`} value={r.linkOccurrence} onChange={(v) => setRow(i, { linkOccurrence: v })} />}
                     <T variant="caption" color="textSecondary">{[r.duplicate?.reason, ...r.reasons].filter(Boolean).join(' ')}</T>
-                    {liveOf(r).length > 0 && (() => {
+                    {hasChoice(r) && (() => {
                       const live = liveOf(r);
+                      const pairs = r.statementReturnOf ?? [];
                       const views = live.map((m) => matchOptionView(m, r.amountCents, data, cur));
                       const chosen = views.find((v) => v.txId === r.matchChoice);
                       const option = (v: typeof views[number]) => {
@@ -228,13 +243,16 @@ export default function ImportScreen() {
                       };
                       return (
                         <View accessibilityRole="radiogroup" testID={`match-choice-${r.rowNumber}`} style={{ gap: 6 }}>
-                          <T variant="footnote" style={{ fontFamily: 'Inter_600SemiBold' }}>{MATCH_CHOICE_TITLE}</T>
+                          <T variant="footnote" style={{ fontFamily: 'Inter_600SemiBold' }}>{live.length ? MATCH_CHOICE_TITLE : STATEMENT_RETURN_TITLE}</T>
                           {views.filter((v) => !v.stale).map(option)}
                           {views.some((v) => v.stale) && <T variant="caption" color="warning" testID={`match-stale-${r.rowNumber}`}>{MATCH_STALE_TITLE(MATCH_WINDOWS.pending.daysAfter)}</T>}
                           {views.filter((v) => v.stale).map(option)}
-                          <Check label={MATCH_NONE_LABEL(live.length)} value={r.matchChoice === 'none'} onChange={() => setRow(i, { matchChoice: 'none', include: true })} />
+                          {pairs.map((o) => <Check key={`row-${o.paymentRow}`} label={STATEMENT_RETURN_LABEL(o.paymentRow, formatShortDate(o.date), o.rawDescription, formatCents(o.amountCents, cur, { sign: 'always' }))} value={r.matchChoice === STATEMENT_RETURN_CHOICE(o.paymentRow)} onChange={() => setRow(i, { matchChoice: STATEMENT_RETURN_CHOICE(o.paymentRow), include: true })} />)}
+                          <Check label={live.length ? MATCH_NONE_LABEL(live.length + pairs.length) : STATEMENT_RETURN_NONE_LABEL} value={r.matchChoice === 'none'} onChange={() => setRow(i, { matchChoice: 'none', include: true })} />
                           <Check label={MATCH_SKIP_LABEL} value={r.matchChoice === null} onChange={() => setRow(i, { matchChoice: null, include: false })} />
                           {chosen && <T variant="caption" color="textSecondary" testID={`match-note-${r.rowNumber}`}>{chosen.note}</T>}
+                          {isStatementReturnChoice(r.matchChoice) && <T variant="caption" color="textSecondary" testID={`match-note-${r.rowNumber}`}>{STATEMENT_RETURN_NOTE(Number(r.matchChoice!.slice(4)))}</T>}
+                          {paymentRowProblem(r) && <T variant="caption" color="warning" testID={`pair-problem-${r.rowNumber}`}>{paymentRowProblem(r)}</T>}
                         </View>
                       );
                     })()}
@@ -290,7 +308,8 @@ export default function ImportScreen() {
             </Card>
           )}
           {blocking > 0 && <T color="warning">Choose the other account for {blocking} transfer{blocking > 1 ? 's' : ''}.</T>}
-          <Button title={IMPORT_BUTTON(included.filter((r) => !linked(r) && !returnOf(r)).length, included.filter(linked).length, included.filter((r) => !!returnOf(r)).length)} disabled={busy || included.length === 0 || blocking > 0} busy={busy} onPress={() => void commit()} />
+          {pairBlocking.length > 0 && <T color="warning" testID="pair-blocking">{pairBlocking.map((r) => paymentRowProblem(r)).join(' ')}</T>}
+          <Button title={IMPORT_BUTTON(included.filter((r) => !linked(r) && !returnOf(r)).length, included.filter(linked).length, included.filter((r) => !!returnOf(r)).length)} disabled={busy || included.length === 0 || blocking > 0 || pairBlocking.length > 0} busy={busy} onPress={() => void commit()} />
         </>
       )}
 

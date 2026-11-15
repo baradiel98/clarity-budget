@@ -1,10 +1,10 @@
 import { AlertTriangle, CheckCircle2, CopyCheck, FileUp, Link2, ListChecks, ShieldCheck, Upload } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { commitImport, describeImportResult, describeImportUndo, markTransactionPosted, isLinkChoice, matchDecision, matchOptionView, postedByMatchOf, returnRowText, undoImportBatch as undoImport, type ImportDecision } from '@clarity/data';
+import { commitImport, describeImportResult, describeImportUndo, markTransactionPosted, isLinkChoice, isStatementReturnChoice, matchOptionView, postedByMatchOf, returnRowText, rowChoiceDecision, STATEMENT_RETURN_CHOICE, statementReturnRowText, undoImportBatch as undoImport, type ImportDecision } from '@clarity/data';
 import {
   checkImportFile, dataRowCount, DATE_FORMATS, findMatchCandidates, headerSignature, MATCH_WINDOWS, NO_DATA_ROWS_MESSAGE, reconcilePreview, type ImportCandidate, type ImportPreview, type ImportSettings,
 } from '@clarity/import';
-import { formatShortDate, IMPORT_BUTTON, RETURN_ROW_BADGE, MATCH_CHOICE_TITLE, MATCH_NONE_LABEL, MATCH_SKIP_LABEL, MATCH_STALE_TITLE, MATCH_TAKEN, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, TERMS, type ColumnMapping, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
+import { formatCents, formatShortDate, IMPORT_BUTTON, RETURN_ROW_BADGE, STATEMENT_RETURN_LABEL, STATEMENT_RETURN_NEEDS_PAYMENT, STATEMENT_RETURN_NONE_LABEL, STATEMENT_RETURN_NOTE, STATEMENT_RETURN_TITLE, MATCH_CHOICE_TITLE, MATCH_NONE_LABEL, MATCH_SKIP_LABEL, MATCH_STALE_TITLE, MATCH_TAKEN, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, TERMS, type ColumnMapping, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
 import { useRouter } from '../lib/router';
 import { sha256Hex } from '../platform/files';
 import { useData, useRun, useSession } from '../state/session';
@@ -114,7 +114,7 @@ export function ImportPage() {
         importBatches: data.importBatches, fileHash: file.hash, today,
       });
       setPreview(p);
-      setRows(p.candidates.map((c) => ({ ...c, editKind: c.looksLikeTransfer ? 'transfer' : c.kind, editCategory: c.categoryId, otherAccountId: '', linkOccurrence: !!c.occurrenceMatch, matchChoice: null })));
+      setRows(p.candidates.map((c) => ({ ...c, editKind: c.looksLikeTransfer ? 'transfer' : c.kind, editCategory: c.categoryId, otherAccountId: c.suggestedOtherAccountId ?? '', linkOccurrence: !!c.occurrenceMatch, matchChoice: null })));
       setStage('review');
     } catch (e) {
       setError((e as Error).message);
@@ -131,12 +131,28 @@ export function ImportPage() {
   // Phase 4A.5.17: a confirmed return adds the returned money, so it counts as a new row, not a link
   const linked = (r: Row) => isLinkChoice(r.matchChoice, liveOf(r));
   // Phase 4A.5.18: what a row confirmed as a returned card payment records (shown instead of type and category)
-  const returnOf = (r: Row) => { const m = r.matchChoice ? liveOf(r).find((x) => x.txId === r.matchChoice && x.basis === 'return') : undefined; return m ? returnRowText(m, data) : null; };
+  const returnOf = (r: Row) => {
+    // Phase 4A.8: the return of a card payment row of this same statement
+    if (isStatementReturnChoice(r.matchChoice)) { const o = (r.statementReturnOf ?? []).find((x) => STATEMENT_RETURN_CHOICE(x.paymentRow) === r.matchChoice); return o ? statementReturnRowText(r, o, cur) : null; }
+    const m = r.matchChoice ? liveOf(r).find((x) => x.txId === r.matchChoice && x.basis === 'return') : undefined; return m ? returnRowText(m, data) : null;
+  };
+  // Phase 4A.8 (N1): a row with a decision to make (existing transactions it could be, or a payment row it could return)
+  const hasChoice = (r: Row) => liveOf(r).length > 0 || (r.statementReturnOf?.length ?? 0) > 0;
+  // the payment row a confirmed same-statement return needs: included, as a transfer to a credit card
+  const paymentRowProblem = (r: Row) => {
+    if (!isStatementReturnChoice(r.matchChoice) || !r.include) return null;
+    const n = Number(r.matchChoice!.slice(4));
+    const p = rows.find((x) => x.rowNumber === n);
+    const ok = p && p.include && p.editKind === 'transfer' && (p.matchChoice === null || p.matchChoice === 'none') && data.accounts.find((a) => a.id === p.otherAccountId)?.type === 'credit_card';
+    return ok ? null : STATEMENT_RETURN_NEEDS_PAYMENT(n);
+  };
   // Phase 4A.5.14: per leg; a confirmed transfer fee makes the linked leg's effect the statement amount
   const sameIds = included.filter(linked).map((r) => postedByMatchOf(r.matchChoice!, liveOf(r), r.amountCents));
   const recon = useMemo(() => (preview && account ? reconcilePreview(preview, included.filter((r) => !linked(r)), { account, transactions: data.transactions, postedByMatch: sameIds }) : null), [preview, included, account, data.transactions, JSON.stringify(sameIds)]);
   // a row linked to an existing transaction (e.g. an existing transfer) creates nothing, so it needs no other account
-  const blocking = included.filter((r) => r.editKind === 'transfer' && !r.otherAccountId && (r.matchChoice === null || r.matchChoice === 'none'));
+  const transferBlocking = included.filter((r) => r.editKind === 'transfer' && !r.otherAccountId && (r.matchChoice === null || r.matchChoice === 'none'));
+  const pairBlocking = included.filter((r) => !!paymentRowProblem(r));
+  const blocking = [...transferBlocking, ...pairBlocking];
   // Phase 4A.5.9: pending items that could explain the statement difference (cleared at the bank, still pending here)
   const reconPending = recon && !recon.note && recon.differenceCents !== 0 ? [...new Map([...(recon.pendingMatches ?? []).flat(), ...(recon.pendingPartial ?? [])].map((t) => [t.id, t])).values()] : [];
   // a pending item that is a candidate of a row is resolved in that row only (one place to decide)
@@ -151,7 +167,7 @@ export function ImportPage() {
       const res = commitImport(ctx, {
         accountId: account.id, fileName: file.name, fileHash: file.hash, parserId: 'csv', headerSignature: headerSignature(analysis.guess.headers), delimiter: analysis.delimiter,
         settings: { hasHeader, columns, dateFormat, decimalSeparator: decimal, signConvention: sign },
-        decisions: included.map((x) => ({ candidate: x, kind: x.editKind, categoryId: x.editKind === 'transfer' ? null : x.editCategory, merchant: x.merchant, ...(x.otherAccountId ? { otherAccountId: x.otherAccountId } : {}), linkOccurrence: x.linkOccurrence, ...(x.matchChoice !== null ? { match: matchDecision(x.matchChoice, liveOf(x)) } : {}) })),
+        decisions: included.map((x) => ({ candidate: x, kind: x.editKind, categoryId: x.editKind === 'transfer' ? null : x.editCategory, merchant: x.merchant, ...(x.otherAccountId && x.editKind === 'transfer' ? { otherAccountId: x.otherAccountId } : {}), linkOccurrence: x.linkOccurrence, ...rowChoiceDecision(x.matchChoice, liveOf(x), x.statementReturnOf) })),
         knownDuplicateIds: rows.flatMap((x) => (x.duplicate?.level === 'exact' ? [x.duplicate.txId] : [])),
         totalRows: rows.length + preview.errors.length, excludedCount: rows.length - included.length, duplicateCount: rows.filter((x) => x.duplicate).length, errorCount: preview.errors.length,
         reconciliation: recon, applyAdjustment: applyAdj && (reconPending.length === 0 || reconUnrelated), adjustmentUnrelatedToPending: reconUnrelated,
@@ -309,7 +325,7 @@ export function ImportPage() {
               {rows.some((r) => r.confidence !== 'high') && <span className="badge warn">{rows.filter((r) => r.confidence !== 'high').length} to check</span>}
               {preview.errors.length > 0 && <span className="badge neg">{preview.errors.length} could not be read</span>}
               <span className="spacer" />
-              <button className="btn btn-ghost btn-sm" onClick={() => setRows(rows.map((r) => ({ ...r, include: !(r.editKind === 'transfer' && !r.otherAccountId && !r.matchChoice) && !(liveOf(r).length && !r.matchChoice) })))}>Select all</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setRows(rows.map((r) => ({ ...r, include: !(r.editKind === 'transfer' && !r.otherAccountId && !r.matchChoice) && !(hasChoice(r) && !r.matchChoice) })))}>Select all</button>
               <button className="btn btn-ghost btn-sm" onClick={() => setRows(rows.map((r) => ({ ...r, include: false })))}>Select none</button>
             </div>
           </div>
@@ -323,7 +339,7 @@ export function ImportPage() {
                 <tbody>
                   {rows.map((r, i) => (
                     <tr key={r.rowNumber} className={r.include ? '' : 'excluded'}>
-                      <td className="w-check"><input type="checkbox" aria-label={`Import row ${r.rowNumber}`} checked={r.include} disabled={liveOf(r).length > 0} title={liveOf(r).length ? 'Choose below which transaction this is, or that it is a different one' : undefined} onChange={(e) => setRow(i, { include: e.target.checked })} /></td>
+                      <td className="w-check"><input type="checkbox" aria-label={`Import row ${r.rowNumber}`} checked={r.include} disabled={hasChoice(r)} title={hasChoice(r) ? 'Choose below which transaction this is, or that it is a different one' : undefined} onChange={(e) => setRow(i, { include: e.target.checked })} /></td>
                       <td className="num" style={{ whiteSpace: 'nowrap' }}>{formatShortDate(r.date)}</td>
                       <td>
                         <div style={{ fontWeight: 500 }}>{r.merchant || <span className="faint">No description</span>}</div>
@@ -366,8 +382,9 @@ export function ImportPage() {
                           )}
                         </div>
                         {(r.duplicate || r.reasons.length > 0) && <div className="hint" style={{ marginTop: 4 }}>{[r.duplicate?.reason, ...r.reasons].filter(Boolean).join(' ')}</div>}
-                        {liveOf(r).length > 0 && (() => {
+                        {hasChoice(r) && (() => {
                           const live = liveOf(r);
+                          const pairs = r.statementReturnOf ?? [];
                           const views = live.map((m) => matchOptionView(m, r.amountCents, data, cur));
                           const chosen = views.find((v) => v.txId === r.matchChoice);
                           const option = (v: typeof views[number]) => {
@@ -381,14 +398,23 @@ export function ImportPage() {
                             );
                           };
                           return (
-                            <div role="radiogroup" aria-label={`Row ${r.rowNumber}: ${MATCH_CHOICE_TITLE}`} className="stack" style={{ gap: 2, marginTop: 6 }} data-testid={`match-choice-${r.rowNumber}`}>
-                              <strong style={{ fontSize: 12.5 }}>{MATCH_CHOICE_TITLE}</strong>
+                            <div role="radiogroup" aria-label={`Row ${r.rowNumber}: ${live.length ? MATCH_CHOICE_TITLE : STATEMENT_RETURN_TITLE}`} className="stack" style={{ gap: 2, marginTop: 6 }} data-testid={`match-choice-${r.rowNumber}`}>
+                              <strong style={{ fontSize: 12.5 }}>{live.length ? MATCH_CHOICE_TITLE : STATEMENT_RETURN_TITLE}</strong>
                               {views.filter((v) => !v.stale).map(option)}
                               {views.some((v) => v.stale) && <div className="hint warn" style={{ marginTop: 4 }} data-testid={`match-stale-${r.rowNumber}`}>{MATCH_STALE_TITLE(MATCH_WINDOWS.pending.daysAfter)}</div>}
                               {views.filter((v) => v.stale).map(option)}
-                              <label className="check" style={{ fontSize: 12.5 }}><input type="radio" name={`match-${r.rowNumber}`} checked={r.matchChoice === 'none'} onChange={() => setRow(i, { matchChoice: 'none', include: true })} /><span>{MATCH_NONE_LABEL(live.length)}</span></label>
+                              {/* Phase 4A.8 (N1): the card payment may be in this same statement */}
+                              {pairs.map((o) => (
+                                <label key={`row-${o.paymentRow}`} className="check" style={{ fontSize: 12.5 }}>
+                                  <input type="radio" name={`match-${r.rowNumber}`} checked={r.matchChoice === STATEMENT_RETURN_CHOICE(o.paymentRow)} onChange={() => setRow(i, { matchChoice: STATEMENT_RETURN_CHOICE(o.paymentRow), include: true })} />
+                                  <span>{STATEMENT_RETURN_LABEL(o.paymentRow, formatShortDate(o.date), o.rawDescription, formatCents(o.amountCents, cur, { sign: 'always' }))}</span>
+                                </label>
+                              ))}
+                              <label className="check" style={{ fontSize: 12.5 }}><input type="radio" name={`match-${r.rowNumber}`} checked={r.matchChoice === 'none'} onChange={() => setRow(i, { matchChoice: 'none', include: true })} /><span>{live.length ? MATCH_NONE_LABEL(live.length + pairs.length) : STATEMENT_RETURN_NONE_LABEL}</span></label>
                               <label className="check" style={{ fontSize: 12.5 }}><input type="radio" name={`match-${r.rowNumber}`} checked={r.matchChoice === null} onChange={() => setRow(i, { matchChoice: null, include: false })} /><span>{MATCH_SKIP_LABEL}</span></label>
                               {chosen && <div className="hint" data-testid={`match-note-${r.rowNumber}`}>{chosen.note}</div>}
+                              {isStatementReturnChoice(r.matchChoice) && <div className="hint" data-testid={`match-note-${r.rowNumber}`}>{STATEMENT_RETURN_NOTE(Number(r.matchChoice!.slice(4)))}</div>}
+                              {paymentRowProblem(r) && <div className="hint warn" role="alert" data-testid={`pair-problem-${r.rowNumber}`}>{paymentRowProblem(r)}</div>}
                             </div>
                           );
                         })()}
@@ -451,7 +477,8 @@ export function ImportPage() {
           )}
 
           <div className="row" style={{ justifyContent: 'flex-end' }}>
-            {blocking.length > 0 && <span className="t-footnote warn">Choose the other account for {blocking.length} transfer{blocking.length > 1 ? 's' : ''}.</span>}
+            {transferBlocking.length > 0 && <span className="t-footnote warn">Choose the other account for {transferBlocking.length} transfer{transferBlocking.length > 1 ? 's' : ''}.</span>}
+            {pairBlocking.length > 0 && <span className="t-footnote warn" data-testid="pair-blocking">{pairBlocking.map((r) => paymentRowProblem(r)).join(' ')}</span>}
             <button className="btn btn-primary btn-lg" disabled={busy || included.length === 0 || blocking.length > 0} onClick={() => void commit()} data-testid="commit-import" aria-busy={busy}>
               {busy && <Spinner />}{IMPORT_BUTTON(included.filter((r) => !linked(r) && !returnOf(r)).length, included.filter(linked).length, included.filter((r) => !!returnOf(r)).length)}
             </button>

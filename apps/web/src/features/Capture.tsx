@@ -217,7 +217,8 @@ function DraftCard({ d, issues, data, ctx, cur, saving, onChange, onRemove, onAp
         <Cell label="Date" hint={d.date ? SOURCE_LABEL[d.dateSource ?? ''] : undefined} invalid={has('date')}>
           {(id) => <input id={id} className="input" type="date" value={d.date ?? ''} aria-invalid={has('date')} onChange={(e) => onChange({ date: e.target.value || null, dateSource: 'words', dateAmbiguous: false, dateText: null })} />}
         </Cell>
-        {d.kind !== 'transfer' && d.splits.length === 0 && (
+        {/* Phase 4A.8 (N3): a confirmed returned card payment has no category (as in the Add form) */}
+        {d.kind !== 'transfer' && d.splits.length === 0 && !chosenReturnOf(d, ctx) && (
           <Cell label="Category" hint={d.categoryId ? SOURCE_LABEL[d.categorySource ?? ''] : undefined}>
             {(id) => <CategorySelect id={id} value={d.categoryId} kind={d.kind === 'income' ? 'income' : 'expense'} onChange={(v) => onChange({ categoryId: v, categorySource: 'words', categoryWords: null })} />}
           </Cell>

@@ -68,6 +68,27 @@ A card owing $500 has balance **−$500**, displayed as "Owed $500".
     - **Editing a payment** that has returns (`returnEditProblem`): its amount can't go below the total returned (equal is allowed: fully returned), its paying account and card can't change, it stays a transfer, and it can't be dated after its first return. The description, notes and settlement status can change, and its statement link and import identity are kept. **Editing a return** keeps it a return (`returnOf` is kept), keeps its accounts, can't be dated before the payment, and can't exceed what is left of the payment. To correct a returned payment otherwise, remove its returns first, then edit or delete it.
 
     Examples (checking $1,000, Visa owes $500, $200 payment; truth by hand): returned via Capture → $500 (was $700). Fully returned payment edited to $100 → refused, $500 (was $600, with $100 created). Undo of the payment's import after its return → refused, $500 (was checking $1,200 and Visa $700 with an orphaned return).
+  - **Card payment and its return in the same statement (Phase 4A.8, audit 4A.7.1 N1).** A statement can show a payment ("PAYMENT TO VISA −$200") and its return ("RETURNED PAYMENT +$200") when neither is in Clarity yet: a first import, or after the user deleted both. The import review pairs rows of that same statement as a **proposal only** (`statementReturnOptions`).
+    - **When a pairing is offered:** all of these must hold, never the amount alone:
+      - a non-card account's statement;
+      - the money-in row says it is a return (RETURNED, REVERSAL, REJECTED, NSF, …);
+      - the money-out row looks like a card payment, or at least says "payment";
+      - the return is no larger than the payment, dated on or after it, within 30 days;
+      - neither row is already in Clarity.
+    - **The user's choice.** Every possible payment row is listed, exact amounts and card wording first, then the closest date. The return row stays unselected until the user picks "It's the return of the card payment in row N" or "No, it's a separate transaction", or leaves it out.
+    - **What is recorded.** The payment row must be imported in the same import as a transfer to a credit card. `commitImport` creates it first, then records the return with the same builder and cap as every other return (`buildPaymentReturn`). Each row is its own account's posted statement row. Visa's side of both stays pending: nothing is posted for the other bank. Undo removes both.
+    - **Checked at commit.** The pairing is re-derived from the rows being imported, and the import is refused, with nothing changed, if any of these holds:
+      - the payment row was left out, isn't a card transfer, or was linked to an existing transaction instead;
+      - the pairing wasn't offered;
+      - a row changed;
+      - a row was added elsewhere since (for example, in another tab).
+    - **A rejected pairing** imports the money as new (the user's decision), so it counts. Example (checking $1,000, Visa owes $500): paired → $500; "separate" → $700.
+  - **Card-payment wording (Phase 4A.8, N4).** An outgoing row counts as a card payment (a transfer, unselected until the card is confirmed) when its description says so ("PAYMENT THANK YOU", "AUTOPAY", "CARD PAYMENT", …), or says "payment" (PAYMENT, PMT, PYMT) together with a card name or network ("PAYMENT TO VISA", "VISA PAYMENT", "CHASE FREEDOM PMT").
+    - The review suggests the one card the description names, by account name, or by a network only one card's name contains.
+    - "Payment" alone ("PAYMENT TO CITY WATER", "ONLINE PAYMENT 1234") or a card word alone ("VISA GIFT CARD") is not a card payment.
+  - **Transfer fees never shrink a returned payment (Phase 4A.8, N2).** Linking a statement row that shows less arriving than was paid, as "the payment plus a fee", makes the payment what arrived. That is not offered when more than that was already returned. The review shows "Can't be linked: $200.00 of this payment was already returned, so it can't become $150.00 with a transfer fee…".
+    - `commitImport` checks this again itself (the fee branch).
+    - After every import, `commitImport` also checks that no card payment it touched has more returned than its amount, whatever the order of the rows (a fee row and a reversal row on one card statement). Otherwise the whole import is refused.
   - **Opening-balance correction (Phase 4A.5.18).** A pending item dated before an account was added counts (Phase 4A.5.17). If it had in fact already posted then, so it is inside the balance the user entered, there are two routes:
     - link it to its statement row, dated before the opening date, which puts it in the opening balance;
     - with no statement, the Edit form's "It had already posted when I added {account}" (`markPostedBeforeOpening`), which marks it posted with no later posting date, so it counts as history.

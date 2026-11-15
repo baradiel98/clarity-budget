@@ -496,3 +496,35 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
   - Partial returns of transfer fees aren't modelled.
   - Not verified on simulators, devices, Safari or with a screen reader.
 
+## Phase 4A.8 (2026-11-15): same-statement card returns and import integrity (audit 4A.7.1 N1–N4)
+- **[Confirmed policy, from the phase brief]**
+  - A payment row and its return row in one statement are paired only as a user-confirmed proposal. The return row stays unselected until decided; rejecting it imports the money as new.
+  - `commitImport` re-derives and re-validates the pairing and is atomic.
+  - Fees never reduce a payment below its returned total, checked in both the matching layer and the data command.
+  - Capture hides Category once a return is chosen.
+- **[Verified implementation]**
+  - **Import package:**
+    - `packages/import/src/statementReturns.ts`: `statementReturnOptions`.
+    - `categorize.ts`: `cardPaymentEvidence`.
+    - The pipeline adds `statementReturnOf` and `suggestedOtherAccountId` to candidates.
+    - `matching.ts`: `RETURN_RE` (now exported), `returnedBlocksFee`, and the candidate field `feeBlockedByReturnsCents`.
+  - **Data (`commands.ts`):**
+    - `ImportDecision.pairing`, plus the `commitImport` pairing pass (after all rows), the fee check, and the final "returns ≤ payment" check.
+    - `rowChoiceDecision`, `STATEMENT_RETURN_CHOICE` / `isStatementReturnChoice`, and `statementReturnRowText`.
+    - `isLinkChoice` ignores `row:N` choices.
+  - **Web and mobile review:**
+    - pairing options ("row:N" choices) and the "payment row must be a card transfer" check;
+    - the suggested card prefilled, with rows still unselected.
+- **[Data model]** No schema change and no migration: only optional fields on review candidates and decisions, which are never stored.
+- **[Decisions, mine; documented]**
+  - A payment row that only says "payment" (no card evidence) is still offered as a weaker proposal, because the return wording is strong evidence.
+  - A payment row that could also be an existing transaction is still offered. If the user links it instead, the pairing is refused and the return must be recorded against the existing payment.
+  - Partial returns of up to the payment's amount are offered.
+- **[Lesson]**
+  - Excluding payment rows with any existing match candidate silently disabled pairing whenever a pending outgoing item existed. The randomized model caught it (0 pairings), and the rule was refined.
+  - A new same-statement return initially double-counted earlier returns from the same import. The several-returns test caught it.
+- **[New finding, not fixed (outside N1–N4)]** The import review pre-ticks a suggested scheduled-item link (`occurrenceMatch`) by amount and date even when the row is a card payment and the item is a bill: in the sample data, "PAYMENT TO STORE CARD −$100" was matched to the Electricity bill, overstating Safe to Spend by $91.40. This existed before 4A.8 (the row was then an expense, with the same pre-ticked link). Recommended next.
+- **[Known limitations]**
+  - Same-statement pairing covers non-card statements. On a card statement, a payment row and its reversal row aren't paired: that remains the existing matching against payments already in Clarity.
+  - Re-importing only the return's statement after the user deleted both the payment and the return (the two in separate files) still offers the row as new money. Pairing needs both rows in one review, and no row-level deletion history is kept (deliberately not added: it would need a stored schema change).
+

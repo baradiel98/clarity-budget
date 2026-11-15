@@ -1,10 +1,10 @@
 import {
-  defaultCategories, formatCents, formatShortDate, localISODate, MATCH_AMOUNT_NOTE, MATCH_PARTIAL_RETURN_LABEL, MATCH_PARTIAL_RETURN_NOTE, RETURN_ROW_TEXT, MATCH_RETURN_LABEL, MATCH_RETURN_NOTE, MATCH_FEE_LABEL, MATCH_FEE_NOTE, MATCH_NOT_FEE, MATCH_PENDING_NOTE, MATCH_POSTED_NOTE, MATCH_TRANSFER_NOTE, type Account, type AccountType, type Cents, type Category, type ID, type ISODate, type ImportBatch,
+  defaultCategories, formatCents, formatShortDate, localISODate, MATCH_AMOUNT_NOTE, MATCH_PARTIAL_RETURN_LABEL, MATCH_PARTIAL_RETURN_NOTE, RETURN_ROW_TEXT, MATCH_RETURN_LABEL, MATCH_RETURN_NOTE, MATCH_FEE_LABEL, MATCH_FEE_NOTE, MATCH_NOT_FEE, MATCH_PENDING_NOTE, MATCH_POSTED_NOTE, MATCH_TRANSFER_NOTE, STATEMENT_RETURN_ROW_TEXT, FEE_BLOCKED_BY_RETURNS, type Account, type AccountType, type Cents, type Category, type ID, type ISODate, type ImportBatch,
   type MappingProfile, type OccurrenceException, type Provenance, type RecurringAmount, type RecurringItem, type RecurringKind, type Schedule, type Settings,
   type Split, type Transaction, type TxKind, type TxStatus, type WeekendRule, type WorkspaceData,
 } from '@clarity/shared';
 import { accountBalance, balanceAsOfDate, inclusionProblem, paymentReturnStatus, pendingMatches, pendingPartialMatches, postedBalance, validateTransaction, validateTransferPair, type InclusionProblem, type Occurrence, type ValidationIssue } from '@clarity/engine';
-import { candidateLabel, feeOfLeg, findExactDuplicate, findMatchCandidates, findReturnCandidates, sameSnapshot, snapshotOf, type CandidateSnapshot, type ImportCandidate, type ImportSettings, type MatchCandidate, type ReconciliationPreview } from '@clarity/import';
+import { candidateLabel, feeOfLeg, findExactDuplicate, findMatchCandidates, findReturnCandidates, returnedBlocksFee, sameSnapshot, snapshotOf, statementReturnOptions, type CandidateSnapshot, type ImportCandidate, type ImportSettings, type MatchCandidate, type ReconciliationPreview, type StatementReturnOption } from '@clarity/import';
 import { applyOps as applyLocal, type Op } from './ops';
 
 /**
@@ -836,6 +836,13 @@ export interface ImportDecision {
   match?: { txId: ID; snapshot?: CandidateSnapshot; fee?: { feeCents: Cents } } | { none: true; seen: (ID | CandidateSnapshot)[] };
   /** Phase 4A.5.10 form, still accepted: same → { txId }; not same → { none, seen: [txId] }. */
   pendingResolution?: { txId: ID; same: boolean };
+  /**
+   * Phase 4A.8 (N1): for a row that could be the return of a card payment in this same statement
+   * (candidate.statementReturnOf, re-derived here from the included rows): { paymentRow } the user confirmed it is the
+   * return of that row's payment (that row must be imported in this commit as a transfer to a credit card);
+   * { none } it is a separate transaction. Required whenever such a pairing is possible.
+   */
+  pairing?: { paymentRow: number } | { none: true };
 }
 
 export interface CommitImportInput {
@@ -891,8 +898,13 @@ export function commitImport(ctx: Ctx, input: CommitImportInput): { ops: Op[]; b
   const transferGroups = new Set<ID>();
   const acctTx = ctx.data.transactions.filter((t) => t.accountId === account.id);
   const known = new Set(input.knownDuplicateIds ?? []);
+  // Phase 4A.8 (N1): same-statement returns, re-derived from the rows being imported (not trusted from the review)
+  const pairs = statementReturnOptions(input.decisions.map((d) => d.candidate), account, ctx.data.accounts);
+  const createdByRow = new Map<number, { out: Transaction; other: Transaction }>();
+  const pairedReturns: { d: ImportDecision; paymentRow: number }[] = [];
   for (const d of input.decisions) {
     const c = d.candidate;
+    if (d.pairing && 'paymentRow' in d.pairing && d.match && 'txId' in d.match) fail(`Row ${c.rowNumber}: choose either an existing transaction or the payment in row ${d.pairing.paymentRow}, not both.`, 'match');
     // Phase 4A.5.14 (D9): a row that wasn't already in Clarity when the review was built must not be now; otherwise
     // something else (another tab, an earlier commit of the same review) added or linked it since.
     if (c.duplicate?.level !== 'exact') {
@@ -966,6 +978,10 @@ export function commitImport(ctx: Ctx, input: CommitImportInput): { ops: Op[]; b
           transferFeeOf: leg.transferGroupId!, provenance: { source: 'import', importBatchId: batchId }, createdAt: ctx.now, updatedAt: ctx.now,
         };
         if (leg.amountCents > 0) {
+          // Phase 4A.8 (N2): checked here too (not only by the matching layer): the transfer can't become less than what
+          // was already returned of it
+          const returnedAlready = returnedBlocksFee(leg, c.amountCents, [...ctx.data.transactions, ...txs]);
+          if (returnedAlready !== null) fail(`Row ${c.rowNumber}: ${formatCents(returnedAlready, cur)} of the payment ${label(cand.txId)} was already returned, so it can't become ${formatCents(c.amountCents, cur)} with a ${formatCents(opt.feeCents, cur)} fee. Returns can't exceed the payment. Remove the return first, or leave the row out.`, 'match');
           // receiving leg: what arrived is the transfer amount (both sides); the fee is charged to the sending account
           // with the sending leg's own status, so the sending total (and that bank's balance) is unchanged
           sm.fee = { feeTxId: feeTx.id, previousPrincipalCents: leg.amountCents };
@@ -998,6 +1014,10 @@ export function commitImport(ctx: Ctx, input: CommitImportInput): { ops: Op[]; b
       // (not edited, posted, deleted, or linked to another statement row since).
       for (const s of seen) { const m = live.find((x) => x.txId === s.txId); if (!m || !sameSnapshot(s, snapshotOf(m))) changed(s.txId); }
     }
+    // Phase 4A.8 (N1): a row that could be the return of a card payment in this statement needs the user's decision
+    const proposed = [...new Set([...(c.statementReturnOf ?? []).map((o) => o.paymentRow), ...(pairs.get(c.rowNumber) ?? []).map((o) => o.paymentRow)])];
+    if (proposed.length && !d.pairing) fail(`Row ${c.rowNumber}: this could be the return of the card payment in ${proposed.length === 1 ? `row ${proposed[0]}` : `rows ${proposed.join(', ')}`} of this statement. Choose whether it is, or that it's a separate transaction.`, 'match');
+    if (d.pairing && 'paymentRow' in d.pairing) { pairedReturns.push({ d, paymentRow: d.pairing.paymentRow }); continue; } // recorded after the payment rows
     const separateFrom = choice && 'none' in choice ? live.map((m) => m.txId) : [];
     const provenance = {
       source: 'import' as const,
@@ -1029,6 +1049,7 @@ export function commitImport(ctx: Ctx, input: CommitImportInput): { ops: Op[]; b
       if (issues.length) throw new CommandError(issues.map((i) => ({ ...i, message: `Row ${c.rowNumber}: ${i.message}` })));
       txs.push(legA, legB);
       transferGroups.add(groupId);
+      createdByRow.set(c.rowNumber, { out: legA, other: legB });
       continue;
     }
     const amount = d.kind === 'expense' ? -Math.abs(c.amountCents) : Math.abs(c.amountCents);
@@ -1044,6 +1065,45 @@ export function commitImport(ctx: Ctx, input: CommitImportInput): { ops: Op[]; b
     const issues = validateTransaction(tx, ctx.data.accounts, ctx.data.categories);
     if (issues.length) throw new CommandError(issues.map((i) => ({ ...i, message: `Row ${c.rowNumber}: ${i.message}` })));
     txs.push(tx);
+  }
+  // Phase 4A.8 (N1): returns of payments in this same statement, after every payment row is created. The payment row
+  // must still be a proposed payment for this row (re-derived above), included, and imported as a transfer to a credit
+  // card; the return uses the same builder (and cap) as every other return. Any problem refuses the whole import.
+  for (const { d, paymentRow } of pairedReturns) {
+    const c = d.candidate;
+    const reviewed = (c.statementReturnOf ?? []).find((o: StatementReturnOption) => o.paymentRow === paymentRow) ?? fail(`Row ${c.rowNumber}: row ${paymentRow} wasn't offered as the payment this row returns; review the statement again.`, 'stale');
+    const now = (pairs.get(c.rowNumber) ?? []).find((o) => o.paymentRow === paymentRow) ?? fail(`Row ${c.rowNumber}: row ${paymentRow} can't be the payment this row returns (it is left out of this import, already in Clarity, or doesn't look like a card payment any more). Include row ${paymentRow}, or say this row is a separate transaction.`, 'match');
+    if (now.date !== reviewed.date || now.amountCents !== reviewed.amountCents || now.rawDescription !== reviewed.rawDescription) fail(`Row ${c.rowNumber}: row ${paymentRow} changed after you reviewed it; review the statement again.`, 'stale');
+    const payDecision = input.decisions.find((x) => x.candidate.rowNumber === paymentRow);
+    if (payDecision?.match && 'txId' in payDecision.match) fail(`Row ${c.rowNumber}: row ${paymentRow} is linked to a transaction already in Clarity, so it isn't imported as a new payment. Choose that payment's return option for this row instead, or say this row is a separate transaction.`, 'match');
+    const pay = createdByRow.get(paymentRow) ?? fail(`Row ${c.rowNumber}: import row ${paymentRow} as the card payment (a transfer to your credit card) to record this row as its return, or say this row is a separate transaction.`, 'match');
+    const card = ctx.data.accounts.find((a) => a.id === pay.other.accountId);
+    if (card?.type !== 'credit_card') fail(`Row ${c.rowNumber}: row ${paymentRow} is imported as a transfer to ${card?.name ?? 'another account'}, which isn't a credit card, so this row can't be its returned card payment. Choose the card for row ${paymentRow}, or say this row is a separate transaction.`, 'match');
+    const g = pay.out.transferGroupId!;
+    const already = returnedInCommit.get(g) ?? 0;
+    // the payment as created by this commit; returns already recorded by this commit are counted by `extraReturned`
+    const withNew: Ctx = { ...ctx, data: { ...ctx.data, transactions: [...ctx.data.transactions, pay.out, pay.other] } };
+    const r = buildPaymentReturn(withNew, {
+      leg: pay.out, accountId: account.id, amountCents: Math.abs(c.amountCents), date: c.date, status: 'confirmed', extraReturned: already,
+      provenance: { source: 'import', importBatchId: batchId, rowNumber: c.rowNumber, rawDescription: c.rawDescription, rowDate: c.date, rowAmountCents: c.amountCents, ...(c.externalId ? { externalId: c.externalId } : {}) },
+      note: `confirmed when importing ${input.fileName} (row ${c.rowNumber}, the return of row ${paymentRow})`, where: `Row ${c.rowNumber}: `,
+    });
+    returnedInCommit.set(g, already + Math.abs(c.amountCents));
+    Object.assign(r.here, inclusionFor(ctx, account.id, c.date, 'confirmed', undefined, undefined));
+    r.there.provenance = { source: 'import', importBatchId: batchId };
+    txs.push(r.here, r.there);
+    returns++;
+  }
+  // Phase 4A.8 (N2): whatever this import did (fees, links, returns, in any row order), no card payment ends up with
+  // more returned than its amount.
+  {
+    const after0 = [...ctx.data.transactions.filter((t) => !touched.has(t.id)), ...touched.values(), ...txs];
+    const groups = new Set<string>([...transferGroups, ...txs.flatMap((t) => (t.returnOf ? [t.returnOf] : [])), ...[...touched.values()].flatMap((t) => (t.transferGroupId ? [t.transferGroupId] : []))]);
+    for (const g of groups) {
+      if (!after0.some((t) => t.returnOf === g)) continue;
+      const st = paymentReturnStatus(g, after0);
+      if (st.returnedCents > st.paymentCents) fail(`This import would leave a card payment of ${formatCents(st.paymentCents, cur)} with ${formatCents(st.returnedCents, cur)} returned. Returns can't exceed the payment; nothing was imported. Review the statement again.`, 'match');
+    }
   }
   for (const t of touched.values()) ops.push({ t: 'put', table: 'transactions', value: t });
   for (const t of txs) ops.push({ t: 'put', table: 'transactions', value: t });
@@ -1151,7 +1211,7 @@ export function matchOptionView(m: MatchCandidate, rowAmountCents: Cents, data: 
   return {
     txId: m.txId,
     label: fee ? `${MATCH_FEE_LABEL(fmt(fee.feeCents), name(fee.chargedToAccountId))}: ${desc}` : `It's this one: ${desc}`,
-    disabledReason: isTransfer && m.differenceCents !== 0 && !fee ? MATCH_NOT_FEE(fmt(m.differenceCents, true)) : null,
+    disabledReason: isTransfer && m.differenceCents !== 0 && !fee ? (m.feeBlockedByReturnsCents ? FEE_BLOCKED_BY_RETURNS(fmt(m.feeBlockedByReturnsCents), fmt(rowAmountCents)) : MATCH_NOT_FEE(fmt(m.differenceCents, true))) : null,
     note: notes.join(' '),
     stale: m.basis === 'stale',
     fee: fee ? { feeCents: fee.feeCents } : null,
@@ -1188,7 +1248,29 @@ export function returnRowText(m: MatchCandidate, data: WorkspaceData): string {
  * is not a link: it adds the returned money (a new transaction), so the balance check counts the row like a new one.
  */
 export function isLinkChoice(choice: string | null, live: readonly MatchCandidate[]): boolean {
-  return choice !== null && choice !== 'none' && live.find((m) => m.txId === choice)?.basis !== 'return';
+  return choice !== null && choice !== 'none' && !isStatementReturnChoice(choice) && live.find((m) => m.txId === choice)?.basis !== 'return';
+}
+
+/**
+ * Phase 4A.8 (N1): the review screens' choice for "this row is the return of the card payment in row N of this
+ * statement" is the string `row:N` (other choices: a transaction id, 'none', or null).
+ */
+export const STATEMENT_RETURN_CHOICE = (paymentRow: number) => `row:${paymentRow}`;
+export const isStatementReturnChoice = (choice: string | null): boolean => !!choice && /^row:\d+$/.test(choice);
+
+/**
+ * Phase 4A.8: everything a review row's choice sends to commitImport (match and pairing), the same for web, mobile and
+ * tests. 'none' also says "not the return of a payment in this statement" when such a pairing was offered.
+ */
+export function rowChoiceDecision(choice: string | null, live: readonly MatchCandidate[], statementReturnOf: readonly StatementReturnOption[] = []): Pick<ImportDecision, 'match' | 'pairing'> {
+  if (choice === null) return {};
+  if (isStatementReturnChoice(choice)) return { pairing: { paymentRow: Number(choice.slice(4)) }, ...(live.length ? { match: { none: true, seen: live.map(snapshotOf) } } : {}) };
+  return { match: matchDecision(choice, live), ...(choice === 'none' && statementReturnOf.length ? { pairing: { none: true } } : {}) };
+}
+
+/** Phase 4A.8 (N1): what a row confirmed as the return of a payment row of the same statement records, in words. */
+export function statementReturnRowText(row: { amountCents: Cents }, opt: StatementReturnOption, currency: string): string {
+  return STATEMENT_RETURN_ROW_TEXT(formatCents(row.amountCents, currency), formatCents(-opt.amountCents, currency), opt.paymentRow, formatShortDate(opt.date));
 }
 
 /** Phase 4A.5.14: what a linked row does to its own account's posted balance (for the review's balance check). */

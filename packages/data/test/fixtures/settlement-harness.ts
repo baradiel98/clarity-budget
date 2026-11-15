@@ -2,8 +2,8 @@ import { accountBalance, computeSafeToSpend, postedBalance } from '@clarity/engi
 import { buildPreview, csvParser, findMatchCandidates, guessMapping, reconcilePreview, suggestSignConvention, type ImportCandidate } from '@clarity/import';
 import type { ID, Transaction, WorkspaceData } from '@clarity/shared';
 import {
-  addTransaction, applyOps, CommandError, commitImport, createAccount, defaultSettings, emptyWorkspace, engineInput, isLinkChoice, markTransactionPosted, matchDecision,
-  postedByMatchOf, undoImportBatch, type Ctx, type TxInput,
+  addTransaction, applyOps, CommandError, commitImport, createAccount, defaultSettings, emptyWorkspace, engineInput, isLinkChoice, markTransactionPosted,
+  postedByMatchOf, rowChoiceDecision, undoImportBatch, type Ctx, type TxInput,
 } from '../../src';
 
 /**
@@ -62,9 +62,10 @@ export class Book {
       .map((c) => {
         const v = decide[c.rawDescription];
         const live = findMatchCandidates(c, this.a(rv.accountId), this.data.transactions, { alsoIds: c.matchCandidates.map((m) => m.txId), accounts: this.data.accounts });
-        const match = v && v !== 'auto' ? matchDecision(v, live) : undefined;
+        // Phase 4A.8: the screens' own choice → decision mapping (a transaction id, 'none', or 'row:N' for a payment row)
+        const choice = v && v !== 'auto' ? rowChoiceDecision(v, live, c.statementReturnOf) : {};
         const o = other[c.rawDescription];
-        return { candidate: c, kind: o ? ('transfer' as const) : (c.kind as 'expense' | 'income' | 'refund' | 'transfer'), categoryId: null, merchant: c.merchant, linkOccurrence: false, ...(o ? { otherAccountId: o } : {}), ...(match ? { match } : {}) };
+        return { candidate: c, kind: o ? ('transfer' as const) : (c.kind as 'expense' | 'income' | 'refund' | 'transfer'), categoryId: null, merchant: c.merchant, linkOccurrence: false, ...(o ? { otherAccountId: o } : {}), ...choice };
       });
   }
   commit(rv: ReturnType<Book['review']>, decide: Decide = {}, opts: { other?: Record<string, ID>; applyAdjustment?: boolean; decisions?: ReturnType<Book['decisions']> } = {}) {

@@ -137,7 +137,10 @@ describe('Clarity Capture (mobile)', () => {
     expect(within(d!).getByTestId('capture-return-check')).toHaveTextContent(/Is this money a returned card payment\?.*It's the return of this card payment.*\$200\.00.*No, it's separate income/);
     expect(d).toHaveTextContent(/This could be a card payment coming back to you/);
     expect(ui.getByTestId('approve-all')).toBeDisabled();
+    // Phase 4A.8 (N3): Category is shown while undecided, hidden once it's a returned card payment (as in the Add form)
+    expect(within(d!).queryAllByText(/^Category/).length).toBeGreaterThan(0);
     await fireEvent.press(within(d!).getByTestId(`capture-return-${legs[0]}`));
+    expect(within(d!).queryAllByText(/^Category/)).toHaveLength(0);
     expect(within(d!).getByTestId('capture-return-note')).toHaveTextContent(/It isn't counted as income/);
     await fireEvent.press(ui.getByTestId('approve-all'));
     await ui.findByTestId('capture-saved');
@@ -151,6 +154,7 @@ describe('Clarity Capture (mobile)', () => {
     await fireEvent.press(within(d!).getByTestId('capture-return-separate'));
     await fireEvent.press(ui.getByTestId('approve-all'));
     await ui.findByTestId('capture-saved');
+    expect(within(d!).queryAllByText(/^Category/).length).toBeGreaterThan(0); // separate income keeps its category
     const inc = store.data.transactions.find((t) => t.kind === 'income')!;
     expect([sts(store), inc.provenance.separateFrom]).toEqual([190000, [legs[0]]]);
   });

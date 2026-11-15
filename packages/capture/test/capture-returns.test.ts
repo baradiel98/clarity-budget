@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { computeSafeToSpend, accountBalance } from '@clarity/engine';
-import { MemoryAdapter, WorkspaceStore, addTransaction, createAccount, engineInput, onboard, saveCaptured, type CaptureItem } from '@clarity/data';
+import { MemoryAdapter, WorkspaceStore, addTransaction, createAccount, engineInput, onboard, recordPaymentReturn, saveCaptured, type CaptureItem } from '@clarity/data';
 import { createNobleProvider } from '@clarity/security/noble';
 import type { WorkspaceData } from '@clarity/shared';
 import { draftReturnOptions, interpretLocal, parseDrafts, reviewDraft, toCaptureItem, toTxInput, type CaptureContext, type CaptureDraft } from '../src';
@@ -174,5 +174,24 @@ describe('Capture: a captured amount that could be a returned card payment', () 
     const parsed = parseDrafts({ drafts: [{ kind: 'income', amountCents: 20000, date: TODAY, merchant: '', accountId: id(s.data, 'Checking'), returnChoice: leg.id, askReturn: true, sourceText: 'x' }] }, ctxOf(s.data));
     expect(parsed.ok && [parsed.drafts[0]!.returnChoice, parsed.drafts[0]!.askReturn]).toEqual([undefined, undefined]);
     expect(parsed.ok && blocking(parsed.drafts[0]!, s.data)).toContain('possible_return');
+  });
+
+  it('Phase 4A.8 (N3): a category chosen on the draft is never saved onto a return; the return equals the Add form\'s apart from source and note', async () => {
+    const s1 = await workspace();
+    const leg1 = await pay(s1);
+    const [d] = drafts('Received $200 today', s1.data);
+    const item = toCaptureItem({ ...d!, categoryId: 'cat_paycheck', returnChoice: leg1.id }, ctxOf(s1.data))!;
+    expect('paymentReturn' in item && !('categoryId' in item.paymentReturn)).toBe(true);
+    const cap = saveCaptured(s1.ctx(NOW, TODAY), [item]);
+    // the same return entered in the Add form (recordPaymentReturn, as the form sends it: merchant left empty, posted)
+    const s2 = await workspace();
+    const leg2 = await pay(s2);
+    const add = recordPaymentReturn(s2.ctx(NOW, TODAY), { paymentLegId: leg2.id, accountId: id(s2.data, 'Checking'), amountCents: 20000, date: TODAY, status: 'confirmed', merchant: '' });
+    const strip = (t: Record<string, unknown>) => { const { id: _i, transferGroupId: _g, returnOf: _r, createdAt: _c, updatedAt: _u, accountId, provenance: _p, notes: _n, ...rest } = t; return { ...rest, account: accountId === id(s1.data, 'Checking') || accountId === id(s2.data, 'Checking') ? 'Checking' : 'Visa' }; };
+    expect(cap.txs.map((t) => strip(t as never))).toEqual(add.txs.map((t) => strip(t as never)));
+    expect([cap.txs.map((t) => t.categoryId), cap.txs.map((t) => t.provenance.source), add.txs.map((t) => t.provenance.source)]).toEqual([[null, null], ['capture', 'manual'], ['manual', 'manual']]);
+    await s1.apply(cap.ops); await s2.apply(add.ops);
+    // both → Checking 2,000, Visa owes 300 → $1,700
+    expect([sts(s1), sts(s2)]).toEqual([170000, 170000]);
   });
 });

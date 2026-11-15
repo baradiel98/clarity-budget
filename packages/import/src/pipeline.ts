@@ -6,7 +6,8 @@ import {
   balanceAsOfDate, buildMerchantMemory, pendingMatches, pendingPartialMatches, postedBalance, cleanMerchant, expandOccurrences, merchantKey, normalizeDescription, similarity,
   suggestOccurrenceMatch, type Occurrence,
 } from '@clarity/engine';
-import { CARD_PAYMENT_RE, REFUND_RE, TRANSFER_RE, suggestCategory, type CategorySource } from './categorize';
+import { CARD_PAYMENT_RE, REFUND_RE, TRANSFER_RE, cardPaymentEvidence, suggestCategory, type CategorySource } from './categorize';
+import { statementReturnOptions, type StatementReturnOption } from './statementReturns';
 import { dataRows } from './mapping';
 import { parseStatementAmount, parseStatementDate } from './normalize';
 import { MAX_IMPORT_ROWS, type RawTable } from './parsers';
@@ -41,6 +42,16 @@ export interface ImportCandidate {
   occurrenceMatch: { key: string; recurringId: ID; originalDate: ISODate; name: string } | null;
   /** Default decision for the review screen. The user can change it. */
   include: boolean;
+  /**
+   * Phase 4A.8 (N4): for a row that looks like a payment to a credit card, the one card its description names (by the
+   * account's name or a card network only that card has), as a suggestion; null when none or several could be meant.
+   */
+  suggestedOtherAccountId?: ID | null;
+  /**
+   * Phase 4A.8 (N1): payment rows of THIS statement this row could be the return of (statementReturnOptions). Non-empty
+   * means the row isn't selected until the user says whether it is that return or a separate transaction.
+   */
+  statementReturnOf?: StatementReturnOption[];
 }
 
 export interface ImportRowError {
@@ -247,8 +258,10 @@ export function buildPreview(table: RawTable, s: ImportSettings, ctx: PreviewCon
       else if (inflow) kind = 'refund';
     } else {
       if (inflow && REFUND_RE.test(p.rawDescription)) kind = 'refund';
-      if (!inflow && CARD_PAYMENT_RE.test(p.rawDescription)) looksLikeTransfer = true;
+      // Phase 4A.8 (N4): card-payment wording, or "payment" with a card's name or network ("PAYMENT TO VISA")
+      if (!inflow && cardPaymentEvidence(p.rawDescription, ctx.accounts).looks) looksLikeTransfer = true;
     }
+    const suggestedCard = !inflow && account.type !== 'credit_card' && looksLikeTransfer ? cardPaymentEvidence(p.rawDescription, ctx.accounts).cardId : null;
     const cat = suggestCategory(p.rawDescription, kind === 'income', memory, merchantKey(p.merchant));
 
     if (!p.rawDescription) {
@@ -322,8 +335,19 @@ export function buildPreview(table: RawTable, s: ImportSettings, ctx: PreviewCon
       repeatInFile,
       occurrenceMatch: occ ? { key: occ.key, recurringId: occ.recurringId, originalDate: occ.originalDate, name: occ.name } : null,
       include,
+      ...(suggestedCard && suggestedCard !== account.id ? { suggestedOtherAccountId: suggestedCard } : {}),
     };
   });
+
+  // Phase 4A.8 (N1): a returned card payment whose payment is in this same statement: proposed, never decided
+  const pairs = statementReturnOptions(candidates, account, ctx.accounts);
+  for (const c of candidates) {
+    const opts = pairs.get(c.rowNumber);
+    if (!opts) continue;
+    c.statementReturnOf = opts;
+    c.include = false;
+    c.reasons.push(`Could be the return of the card payment in ${opts.length === 1 ? `row ${opts[0]!.paymentRow}` : `rows ${opts.map((o) => o.paymentRow).join(', ')}`} of this statement. Choose whether it is, or that it's a separate transaction.`);
+  }
 
   const already = ctx.importBatches.find((b) => b.fileHash === ctx.fileHash && b.accountId === account.id && !b.undoneAt) ?? null;
   return {

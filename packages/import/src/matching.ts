@@ -24,7 +24,7 @@ export const MATCH_WINDOWS = {
 } as const;
 
 /** Phase 4A.5.17: words banks use for a returned payment. Evidence that ranks a candidate first, never proof on its own. */
-const RETURN_RE = /\b(return(ed)?|revers(al|ed)?|reject(ed)?|nsf|insufficient|chargeback|refused|failed|unpaid)\b/i;
+export const RETURN_RE = /\b(return(ed)?|revers(al|ed)?|reject(ed)?|nsf|insufficient|chargeback|refused|failed|unpaid)\b/i;
 
 export interface MatchCandidate {
   txId: ID;
@@ -68,6 +68,11 @@ export interface MatchCandidate {
    * a fee: then this leg can't be linked to the row (leave the row out and check the transfer).
    */
   feeOption?: { feeCents: Cents; chargedToAccountId: ID; principalCents: Cents } | null;
+  /**
+   * Phase 4A.8: no fee option because the transfer is a card payment of which this much was already returned, more than
+   * the statement amount it would become (returns can't exceed the payment).
+   */
+  feeBlockedByReturnsCents?: Cents;
 }
 
 export interface MatchRow { date: ISODate; amountCents: Cents; rawDescription: string; merchant?: string }
@@ -133,7 +138,11 @@ export function findMatchCandidates(row: MatchRow, account: Account, transaction
       status: t.status, amountCents: amount, differenceCents, daysApart: Math.abs(age), ageDays: age, version: t.updatedAt,
       ...(fee ? { feeCents: fee.amountCents } : {}),
     };
-    if (t.transferGroupId && differenceCents !== 0) c.feeOption = transferFeeOption(t, row.amountCents, transactions, !!fee);
+    if (t.transferGroupId && differenceCents !== 0) {
+      c.feeOption = transferFeeOption(t, row.amountCents, transactions, !!fee);
+      const blocked = !c.feeOption && !fee && t.amountCents > 0 && row.amountCents > 0 && row.amountCents < t.amountCents ? returnedBlocksFee(t, row.amountCents, transactions) : null;
+      if (blocked !== null) c.feeBlockedByReturnsCents = blocked;
+    }
     out.push(c);
   }
   const desc = row.merchant || row.rawDescription;
@@ -202,8 +211,24 @@ function transferFeeOption(leg: Transaction, rowCents: Cents, transactions: read
   const partner = transactions.find((t) => t.transferGroupId === leg.transferGroupId && t.id !== leg.id);
   if (!partner) return null;
   if (leg.amountCents < 0 && rowCents < leg.amountCents) return { feeCents: leg.amountCents - rowCents, chargedToAccountId: leg.accountId, principalCents: -leg.amountCents };
-  if (leg.amountCents > 0 && rowCents > 0 && rowCents < leg.amountCents) return { feeCents: leg.amountCents - rowCents, chargedToAccountId: partner.accountId, principalCents: rowCents };
+  if (leg.amountCents > 0 && rowCents > 0 && rowCents < leg.amountCents) {
+    // Phase 4A.8 (audit 4A.7.1 N2): the transfer would become what arrived; never less than what was already returned of
+    // it (returns can't exceed the payment). Such a row can't be linked as a fee (see returnedBlocksFee).
+    if (returnedBlocksFee(leg, rowCents, transactions)) return null;
+    return { feeCents: leg.amountCents - rowCents, chargedToAccountId: partner.accountId, principalCents: rowCents };
+  }
   return null;
+}
+
+/**
+ * Phase 4A.8: the amount already returned of the card payment `leg` belongs to, when that is more than `principalCents`
+ * (what the payment would become if a statement row's smaller amount were confirmed as the transfer plus a fee);
+ * otherwise null. Used by the matching layer (no fee option) and checked again by commitImport.
+ */
+export function returnedBlocksFee(leg: Pick<Transaction, 'transferGroupId'>, principalCents: Cents, transactions: readonly Transaction[]): Cents | null {
+  if (!leg.transferGroupId) return null;
+  const returned = paymentReturnStatus(leg.transferGroupId, transactions).returnedCents;
+  return returned > principalCents ? returned : null;
 }
 
 /** For tests and docs: the latest date a pending item dated `d` can still be matched by a statement row. */

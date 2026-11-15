@@ -640,6 +640,41 @@ Owner policy: each transfer leg settles on its own; money in transit isn't spend
   - In Capture, the Category field stays visible after "It's the return" is chosen. It is not saved: a return has no category.
   - Not verified on simulators, devices, Safari or with a screen reader.
 
+## 7x. Phase 4A.8: same-statement card returns and import integrity (audit 4A.7.1 N1–N4)
+
+| Case (checking $1,000, Visa owes $500; truth by hand) | Truth | Before (57ee9a5) | After |
+|---|---:|---:|---:|
+| N1: first import of a statement with "PAYMENT TO VISA −$200" and "RETURNED PAYMENT +$200", payment marked as card payment | $500 (checking 1,000, Visa 500) | $700 (return imported as a refund, selected by default) | **$500**: return unselected until confirmed, then recorded as the payment's return |
+| N1: the same after the user deleted both and re-imports | $500 | $700 | **$500** (same pairing) |
+| N2: $200 payment fully returned; Visa statement shows $150 received, linked with a $50 fee | refused | accepted: payment $150, $200 returned, Visa $550, $450 | **refused**, nothing changed (no fee option; the commit refuses a direct attempt) |
+| N4: "PAYMENT TO VISA" | a card payment | an expense | a transfer with Visa suggested, unselected until confirmed |
+| N3: Capture return with a category chosen | no category | Category shown (not saved) | Category hidden, still not saved |
+
+- **Rules:** `docs/calculation-rules.md` (Phase 4A.8 bullets).
+- **Data model:** no schema change and no migration.
+- **Tests (all after the final code change):**
+  - **Unit (vitest):** 738 passed, 1 skipped.
+    - `packages/data/test/statement-returns.test.ts`: 37 tests covering N1, N2 and N4, including ambiguous rows, either row order, rejection, stale and two-tab commits, undo and re-import, independent posting, partial and multiple returns, the fee limit and a direct fee attempt.
+    - `packages/data/test/statement-randomized.test.ts`: the model below.
+    - Capture N3 equivalence test added.
+  - **Mobile (jest):** 63 passed. New: `test/statement-returns.test.tsx` (2 tests) and Capture Category assertions.
+  - **Browser:** Playwright 183 passed, 10 skipped (Chromium). New: `e2e/phase4a8.spec.ts`, 4 tests with screenshots covering pairing, a rejected pairing, the refused fee and Capture.
+  - **Checks:** root, web and mobile typechecks clean; lint clean; iOS and Android bundles exported.
+- **Randomized independent model:**
+  - **Scale:** 300 scenarios, 3,709 actions, including:
+    - 896 same-statement pairings and 178 rejected pairings;
+    - 331 fees and 142 refused fees;
+    - 319 refusals in total, each verified to change nothing.
+  - **Result:** 0 mismatches in checking, Visa owed and Safe to Spend, 0 orphaned returns, and returns never exceeded a payment.
+  - **Mutation check:** disabling the matching guard, the commit checks, or the pairing makes the tests fail.
+  - **Coverage:** the 4A.7 lifecycle model still passes.
+  - This is evidence, not proof.
+- **New finding (pre-existing, not fixed):** the review pre-ticks a scheduled-item link by amount and date even for a card-payment row matched to a bill. In the sample data, Electricity overstated Safe to Spend by $91.40.
+- **Limitations:**
+  - Pairing within card statements isn't implemented.
+  - A return statement re-imported alone, after deleting a payment that was in a separate file, still offers the row as new money.
+  - Not verified on simulators, devices, Safari or with a screen reader.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.
