@@ -725,3 +725,16 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
   - A toast raised on one screen stays over the next.
 - **[Manual tests]** `docs/device-test-script.md` §2b (M13–M25).
 - **[Decision, mine]** Not tagged `phase4b5-complete`: the phase's objective (native verification) can't be met in this environment.
+
+## Phase 5A (2026-11-15): daily balance ledger
+- **[Decision, owner]** Direction: Balance Forecast first, then simulation (5B), debt data (5C), payoff calculator (5D), plan to schedule (5E). Only 5A is authorised so far.
+  - Loans will count in Safe to Spend only through scheduled instalments; card rule unchanged.
+  - The forecast stays interest-free (option b); the Debt Planner will calculate interest separately.
+  - Minimum payments are user-entered only. Keep required minimum, planned payment and existing scheduled payment distinct; never double count.
+- **[Decision, owner]** No separate cash-flow engine. Simulations stay in memory and are never saved automatically.
+- **[Verified]** The ledger is a read-only view of `buildForecast` (`ForecastEvent.applied`, `ForecastDay.accountStartCents/accountEndCents`; `packages/engine/src/ledger.ts`). Invariant tests tie it to the forecast every day for every account.
+- **[Verified]** Cutoff for today's starting balance: see docs/calculation-rules.md "Daily ledger". `Account.balanceConfirmation` (optional) stores the figure entered with Update balance; it is never used in calculations.
+- **[Verified]** All spendable cash ≠ sum of accounts when savings can't cover a payment (the covered part is counted against the total only). This is intended and documented.
+- **[Assumption]** One-account views list items in the forecast's application order; the combined view sorts money out largest first. The end of the day is the same; intermediate running figures can differ.
+- **[Open]** Pre-5A exact-match confirmations have no stored time, so their trail starts from the posted balance as now recorded, with a note.
+- **[Lesson]** Listing today in the schedule changed the first row; tests should target a day by its content, not by position.

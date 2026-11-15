@@ -321,6 +321,7 @@ export function ledgerDayExplanation(input: EngineInput, ledger: DailyLedger, da
     summary: LEDGER_SUMMARY,
     lines,
     assumptions,
+    ...(cur !== input.baseCurrency ? { currency: cur } : {}),
   };
 }
 

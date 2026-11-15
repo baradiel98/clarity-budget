@@ -3,8 +3,8 @@ import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, ChevronDown, ChevronUp, Pl
 import { useMemo, useRef, useState } from 'react';
 import { ActionSheetIOS, Alert, Platform, Pressable, View } from 'react-native';
 import { catchUp, clearOccurrenceException, deleteRecurring, engineInput, estimateNote, paidThisMonth, warningsBesideCatchUp, recurringAmountView, setOccurrenceException, setRecurringPaused } from '@clarity/data';
-import { annualEquivalentCents, applyWeekendRule, balanceOnDate, buildDashboard, buildForecast, computeSafeToSpend, describeSchedule, monthlyEquivalentCents, nextScheduleDate, planningWindowEnd, type Occurrence } from '@clarity/engine';
-import { addDays, CATCHUP_ACTION_LABEL, INCOME_STATUS_LABEL, OCCURRENCE_STATUS_LABEL, CATCHUP_COUNT, CATCHUP_DONE, CATCHUP_HINT, CATCHUP_TITLE, endOfMonth, formatCents, formatShortDate, formatWeekdayDate, monthNameLong, PAID_DUE, PAID_EMPTY, PAID_HINT, PAID_TITLE, parseISO, TERMS, type RecurringItem } from '@clarity/shared';
+import { annualEquivalentCents, applyWeekendRule, balanceOnDate, buildDailyLedger, buildDashboard, buildForecast, ledgerAccounts, ledgerDayExplanation, computeSafeToSpend, describeSchedule, monthlyEquivalentCents, nextScheduleDate, planningWindowEnd, type Occurrence } from '@clarity/engine';
+import { addDays, CATCHUP_ACTION_LABEL, INCOME_STATUS_LABEL, OCCURRENCE_STATUS_LABEL, CATCHUP_COUNT, CATCHUP_DONE, CATCHUP_HINT, CATCHUP_TITLE, endOfMonth, formatCents, formatShortDate, formatWeekdayDate, LEDGER_ALL_CASH, LEDGER_CARD_NOTE, LEDGER_DAY_DETAILS, LEDGER_DAY_LABEL, LEDGER_SHOW, monthNameLong, PAID_DUE, PAID_EMPTY, PAID_HINT, PAID_TITLE, parseISO, TERMS, type RecurringItem } from '@clarity/shared';
 import { setAddPrefill, setExplain } from '../../src/state/nav';
 import { useData, useRun, useSession, useStore } from '../../src/state/session';
 import { Button, LinkButton } from '../../src/ui/Button';
@@ -56,6 +56,37 @@ export default function Planning() {
   const skip = async (o: Occurrence) => { const r = await run((ctx) => setOccurrenceException(ctx, o, 'skip'), { undoLabel: 'Skip' }); if (r.ok) toast({ message: `${o.name} skipped`, action: { label: 'Undo', run: () => void store.undo() } }); };
   const forecast = useMemo(() => buildForecast({ today, horizonEnd: windowEnd, accounts: data.accounts, transactions: data.transactions, recurring: data.recurring, exceptions: data.exceptions, baseCurrency: cur, includeEstimatedIncome: true }), [data, today, cur, windowEnd]);
   const onDate = useMemo(() => balanceOnDate(engineInput(data, today), target), [data, today, target]);
+  // Phase 5A: the schedule for all spendable cash (default) or one account, from the same forecast
+  const [scope, setScope] = useState<string>('cash');
+  const ledgerChoices = useMemo(() => ledgerAccounts(data.accounts, forecast), [data.accounts, forecast]);
+  const scopeId = scope !== 'cash' && ledgerChoices.some((a) => a.id === scope) ? scope : 'cash';
+  const scopeName = data.accounts.find((a) => a.id === scopeId)?.name ?? LEDGER_ALL_CASH;
+  const ledger = useMemo(() => buildDailyLedger(engineInput(data, today), scopeId === 'cash' ? { kind: 'cash' } : { kind: 'account', accountId: scopeId }, { forecast }), [data, today, scopeId, forecast]);
+  const dayDetails = (date: string) => { const ex = ledgerDayExplanation(engineInput(data, today), ledger, date, { forecast }); if (ex) { setExplain(ex); router.push('/explain'); } };
+  type Row = { key: string; label: string; cents: number; currency: string; occ?: Occurrence; excluded?: string; isIncome: boolean };
+  const scheduleDays = useMemo(() => {
+    const out: { date: string; end: number; rows: Row[] }[] = [];
+    for (const d of ledger.days) {
+      const rows: Row[] = [];
+      if (scopeId === 'cash') {
+        const fd = forecast.days.find((x) => x.date === d.date)!;
+        for (const e of [...fd.events, ...forecast.excludedEvents.filter((x) => x.date === d.date)]) {
+          const isIncome = e.occurrence?.kind === 'income' || (e.source === 'scheduled_tx' && (e.legs[0]?.deltaCents ?? 0) > 0);
+          const cents = e.cashDeltaCents || (e.legs[0]?.deltaCents ?? 0);
+          // an amount that isn't a cash effect is in the currency of its account (Phase 4A.4.4)
+          const currency = e.cashDeltaCents ? cur : data.accounts.find((a) => a.id === (e.occurrence?.accountId ?? e.legs[0]?.accountId))?.currency ?? cur;
+          rows.push({ key: e.id, label: e.label, cents, currency, ...(e.occurrence ? { occ: e.occurrence } : {}), ...(e.excluded ? { excluded: e.excluded } : {}), isIncome });
+        }
+      } else {
+        for (const e of d.entries) rows.push({ key: e.eventId, label: e.label, cents: e.deltaCents, currency: ledger.currency, ...(e.occurrence ? { occ: e.occurrence } : {}), isIncome: e.deltaCents > 0 });
+        for (const e of d.notCounted) rows.push({ key: e.id, label: e.label, cents: 0, currency: ledger.currency, ...(e.occurrence ? { occ: e.occurrence } : {}), excluded: e.excluded ?? 'unknown_amount', isIncome: true });
+      }
+      // today always: its details show how the day starts
+      if (rows.length || d.date === today) out.push({ date: d.date, end: d.endCents, rows });
+    }
+    return out;
+  }, [ledger, forecast, scopeId, today, data.accounts, cur]);
+  const chooseScope = () => choose(LEDGER_SHOW, [{ label: LEDGER_ALL_CASH, run: () => setScope('cash') }, ...ledgerChoices.map((a) => ({ label: `${a.name}${a.archived ? ' (archived)' : ''}`, run: () => setScope(a.id) }))]);
 
   const occActions = (o: Occurrence, isIncome: boolean) =>
     choose(`${o.name} · ${formatShortDate(o.date)}`, o.status === 'skipped'
@@ -169,26 +200,34 @@ export default function Planning() {
             : `Safe to Spend counts items through ${formatShortDate(stsScope.horizonEnd)}; items after that are shown here but not counted.`}
           {stsScope.nextAfterNote && windowEnd === stsScope.horizonEnd ? ` ${stsScope.nextAfterNote}` : ''}
         </T>
-        {forecast.days.filter((d) => d.events.length).length === 0 && <T color="textSecondary">Nothing scheduled yet.</T>}
-        {forecast.days.filter((d) => d.events.length || forecast.excludedEvents.some((e) => e.date === d.date)).map((d) => (
-          <View key={d.date} style={{ borderTopWidth: 1, borderTopColor: c.border, paddingVertical: 8 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-              <T variant="footnote" style={{ fontFamily: 'Inter_600SemiBold' }}>{formatWeekdayDate(d.date)}</T>
-              <Money cents={d.endCashCents} currency={cur} variant="footnote" color={d.endCashCents < 0 ? 'negative' : 'textSecondary'} />
+        {ledgerChoices.length > 1 && (
+          <Pressable testID="ledger-scope" accessibilityRole="button" accessibilityLabel={`${LEDGER_SHOW}: ${scopeName}. Change`} onPress={chooseScope} hitSlop={8}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: c.border, marginBottom: 6 }}>
+            <T variant="footnote" color="textSecondary">{LEDGER_SHOW}</T>
+            <T variant="footnote" style={{ fontFamily: 'Inter_600SemiBold' }}>{scopeName}</T>
+            <ChevronDown size={16} color={c.textTertiary} />
+          </Pressable>
+        )}
+        {ledger.isCard && <T variant="footnote" color="textTertiary" testID="ledger-card-note" style={{ marginBottom: 6 }}>{LEDGER_CARD_NOTE}</T>}
+        {!scheduleDays.some((d) => d.rows.length) && <T color="textSecondary">Nothing scheduled yet.</T>}
+        {scheduleDays.map((d) => (
+          <View key={d.date} testID="tl-day" style={{ borderTopWidth: 1, borderTopColor: c.border, paddingVertical: 8 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+              <T variant="footnote" style={{ fontFamily: 'Inter_600SemiBold', flex: 1 }}>{formatWeekdayDate(d.date)}</T>
+              {ledger.isCard ? (
+                <T variant="footnote" color="textSecondary" testID="tl-day-end">Owed {formatCents(-d.end, ledger.currency)}</T>
+              ) : (
+                <View testID="tl-day-end"><Money cents={d.end} currency={ledger.currency} variant="footnote" color={d.end < 0 ? 'negative' : 'textSecondary'} /></View>
+              )}
+              <LinkButton title={LEDGER_DAY_DETAILS} accessibilityLabel={LEDGER_DAY_LABEL(formatWeekdayDate(d.date), scopeName)} testID="day-details" onPress={() => dayDetails(d.date)} />
             </View>
-            {[...d.events, ...forecast.excludedEvents.filter((e) => e.date === d.date)].map((e) => {
-              const isIncome = e.occurrence?.kind === 'income' || (e.source === 'scheduled_tx' && (e.legs[0]?.deltaCents ?? 0) > 0);
-              const cents = e.cashDeltaCents || (e.legs[0]?.deltaCents ?? 0);
-              // an amount that isn't a cash effect is in the currency of its account (Phase 4A.4.4)
-              const amountCur = e.cashDeltaCents ? cur : data.accounts.find((a) => a.id === (e.occurrence?.accountId ?? e.legs[0]?.accountId))?.currency ?? cur;
-              return (
-                <Pressable key={e.id} disabled={!e.occurrence} onPress={() => e.occurrence && occActions(e.occurrence, isIncome)} accessibilityRole={e.occurrence ? 'button' : undefined} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 }}>
-                  <T style={{ flex: 1 }} numberOfLines={1}>{e.label}</T>
-                  {e.excluded ? <Badge label={e.excluded === 'unknown_amount' ? 'Amount unknown' : 'Not counted'} tone="warn" /> : e.occurrence && e.occurrence.status !== 'expected' ? <StatusBadge u={{ status: e.occurrence.status, isIncome }} /> : null}
-                  {e.excluded ? <T color="textTertiary">—</T> : <Money cents={cents} currency={amountCur} sign="always" color={cents > 0 ? 'positive' : 'text'} style={{ fontFamily: 'Inter_600SemiBold' }} />}
-                </Pressable>
-              );
-            })}
+            {d.rows.map((e) => (
+              <Pressable key={e.key} disabled={!e.occ} onPress={() => e.occ && occActions(e.occ, e.isIncome)} accessibilityRole={e.occ ? 'button' : undefined} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 }}>
+                <T style={{ flex: 1 }} numberOfLines={1}>{e.label}</T>
+                {e.excluded ? <Badge label={e.excluded === 'unknown_amount' ? 'Amount unknown' : 'Not counted'} tone="warn" /> : e.occ && e.occ.status !== 'expected' ? <StatusBadge u={{ status: e.occ.status, isIncome: e.isIncome }} /> : null}
+                {e.excluded ? <T color="textTertiary">—</T> : <Money cents={e.cents} currency={e.currency} sign="always" color={e.cents > 0 ? 'positive' : 'text'} style={{ fontFamily: 'Inter_600SemiBold' }} />}
+              </Pressable>
+            ))}
           </View>
         ))}
       </Card>

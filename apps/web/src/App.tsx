@@ -193,7 +193,7 @@ function Shell() {
 
       {add !== null && <AddTransactionDialog prefill={add} onClose={() => setAdd(null)} />}
       {afford && <AffordDialog onClose={() => setAfford(false)} />}
-      {explain && <ExplainDialog ex={explain} currency={data.settings.baseCurrency} onClose={() => setExplain(null)} />}
+      {explain && <ExplainDialog ex={explain} currency={explain.currency ?? data.settings.baseCurrency} onClose={() => setExplain(null)} />}
       {more && (
         <Dialog title="More" onClose={() => setMore(false)}>
           <div className="more-list" onClick={() => setMore(false)}>

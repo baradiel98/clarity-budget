@@ -243,6 +243,40 @@ Events in the timeline:
 - overdue bills (placed today);
 - hypothetical purchases ("Can I afford this?"), which are never saved.
 
+## Daily ledger (Phase 5A)
+A read-only view of the same forecast, for all spendable cash or one account (Planning's schedule, "Day details"). It calculates nothing of its own.
+- **Per account:** each event records what it actually changed in each account (`ForecastEvent.applied`, after funding caps, covered payments and repaid overdrawn balances), and each day records every account's start and end (`ForecastDay.accountStartCents/accountEndCents`). Start + the day's items = end, exactly (tested every day, every account, on the sample, every golden scenario and the Phase 5A scenarios).
+- **Balances used:** a card's recorded balance (negative = owed; shown as "Owed"); any other account's *available* balance (recorded less pending credits), which is what the forecast works with.
+- **Order inside a day:**
+  - All spendable cash: the forecast's own order (money out sorted largest first, then money in), so the running balance reaches the forecast's low point.
+  - One account: the order the forecast applied the items to that account (a transfer arriving in the morning before a bill paid from it). The end of the day is the same either way; only the intermediate running figures can differ between the two views.
+- **All spendable cash ≠ sum of every account:** the combined figure also includes money that a non-spendable account (savings) can't cover and that "has to come from your spendable accounts". That is counted against the total, not against one account, because Clarity doesn't choose which spendable account pays. Identity (tested): Σ spendable accounts' end + cumulative (− covered + repaid) = combined end.
+- **Cards and interest (owner decision, option b):** the forecast stays interest-free. Card balances are projected from recorded and scheduled charges, payments and refunds only, and say so ("Interest and fees you haven't recorded aren't included").
+- **Estimated income:** counted and marked ≈, as in Planning's schedule. Safe to Spend still counts only fixed income.
+
+### Today's starting balance: the cutoff from the last confirmed balance
+The anchor is `balanceAsOfDate`: the opening date, or the latest Update balance or adjustment. The rules are the existing ones (Phase 4A.5.6–4A.5.17), stated here:
+1. A confirmed balance is the bank's **posted** balance. A transaction still pending then, or posted only after that date, is not in it and is counted on top, whatever its date.
+2. A transaction dated on or before the anchor date and marked **"Already included"** is part of it and never counted again. So is a transaction dated before the opening date that had posted by then.
+3. A transaction dated **after** the anchor date is counted.
+4. A posted transaction dated on or before a confirmed date is part of it only if it was recorded **before** the confirmation. One recorded afterwards and not marked "Already included" is counted on top. The existing default stands: a same-day item counts unless ticked; an earlier-dated one defaults to "Already included".
+
+**Which figure starts the trail:**
+- **Opening balance:** the figure entered when the account was added. Every counted transaction since is listed.
+- **Confirmed (from Phase 5A on):** the posted figure entered with Update balance, stored with its time on the account (`Account.balanceConfirmation`, optional, written only by Update balance, never used in a calculation). Items recorded after it are listed. If a transaction dated on or before it was later edited, deleted or posted, the difference is shown as its own line, "Changes since you confirmed it…", so the trail always adds up.
+- **Confirmed before Phase 5A, with an adjustment:** the same figure, worked out from the adjustment's time.
+- **Confirmed before Phase 5A as an exact match (no adjustment):** Clarity has no time to compare with, so the trail starts from the posted balance on that date as now recorded and says it can't tell which items were recorded afterwards.
+
+Anchor + listed items (+ any change line) = the recorded balance today. Then recorded − pending credits = available = the first day's start in the ledger (tested for every account).
+
+**Worked example (the owner's):** Checking confirmed at $1,500 on Nov 15; groceries $85 on Nov 15; Nov 16 electricity $115 (scheduled), gas $50 and another expense $250 (planned).
+- Nov 15: $1,500 → $1,415.
+- Nov 16: $1,415 → $1,000.
+- If the groceries are marked "Already included": $1,500 and $1,085.
+- If they are pending: still $1,415 (money going out counts at once).
+
+`packages/data/test/daily-ledger.test.ts`.
+
 ## Headline numbers
 - **Projected end of today** = today's recorded cash + today's remaining scheduled items.
 - **Upcoming (dashboard)** lists overdue items and everything from today through **at least month-end** (or 14 days, whichever is later). The cash items listed therefore add up to the projected month-end; a test checks this identity on 90 consecutive days of sample data.

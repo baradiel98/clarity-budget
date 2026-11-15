@@ -870,6 +870,45 @@ Checkpoint `phase4b5-checkpoint-before` (8c59819).
 
 Regression tests: `apps/mobile/test/phase4b5.test.tsx` (2, mutation-checked). Manual device steps still needed: `docs/device-test-script.md` §2b.
 
+## 7ag. Phase 5A: daily balance ledger
+
+Checkpoints: `phase5a-checkpoint-before` (316a147), engine commit f11ee21. Owner decisions applied:
+- loans count only through scheduled instalments (not built yet);
+- the forecast stays interest-free (option b);
+- user-entered minimums only (not built yet).
+
+**Implemented:**
+- **Engine** (`forecast.ts`, read-only additions, no calculation changed):
+  - each event's applied per-account changes;
+  - per-day per-account start and end.
+- **Engine** (`ledger.ts`):
+  - `buildDailyLedger` (all spendable cash or one account; running balance after every item; low; end; items not counted);
+  - `balanceTrail` (today's starting balance from the last confirmed balance, with the cutoff rules in calculation-rules.md "Daily ledger");
+  - `ledgerDayExplanation` (a day as an Explanation, shown by the existing "Why this number?" views on both apps);
+  - `ledgerAccounts`.
+- **Data:** Update balance stores the posted figure entered and its time (`Account.balanceConfirmation`). It is optional, so no migration is needed and old backups restore.
+- **Web and mobile Planning:**
+  - "Show" chooser (All spendable cash or any account);
+  - "Day details" on every day;
+  - today always listed;
+  - cards shown as Owed, with the "interest not included" note;
+  - the explanation views show the running balance under each amount.
+
+**Verified:**
+- 14 package tests (the owner example and its "Already included" and pending variants; confirmation cutoffs before, on and after the date; legacy confirmations; later edits; exact-match confirmation; cards; transfers; savings and card per account).
+- The invariants on the sample, every golden scenario and the new scenarios.
+- Safe to Spend unchanged by building the ledger.
+- 3 Chromium e2e tests (`phase5a.spec.ts`, including 390px) and 2 mobile component tests.
+- Full suites:
+  - 816 package tests;
+  - 83 mobile tests;
+  - all web e2e (one existing assertion retargeted because today is now listed first);
+  - lint, typecheck, web build, and iOS and Android bundles.
+
+**Not verified:** native devices (Phase 4B.5 remains open), screen readers, Safari.
+
+**Not done (per instruction):** simulation (5B), debt data (5C) and later phases.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

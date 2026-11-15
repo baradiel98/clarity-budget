@@ -3,7 +3,7 @@ import {
   accountBalance, balanceTrail, buildDailyLedger, buildForecast, computeSafeToSpend, GOLDEN_SCENARIOS, ledgerDayExplanation, planningWindowEnd,
   type EngineInput, type Forecast,
 } from '@clarity/engine';
-import { addTransaction, adjustBalance, applyOps, buildDemoWorkspace, createRecurring, deleteTransaction, engineInput, type TxInput } from '../src';
+import { adjustBalance, applyOps, buildDemoWorkspace, createRecurring, deleteTransaction, engineInput, type TxInput } from '../src';
 import { Book } from './fixtures/settlement-harness';
 
 /**

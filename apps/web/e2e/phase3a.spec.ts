@@ -62,7 +62,8 @@ test.describe('1. Planning on phones', () => {
       expect(r.amts.map((a) => a.text)).toContain('≈−$91.40');
       expect(r.amts.map((a) => a.text)).toContain('+$1,860.00');
       for (const [aw, ah] of r.acts) { expect(aw).toBeGreaterThanOrEqual(40); expect(ah).toBeGreaterThanOrEqual(40); }
-      await expect(tl.locator('.tl-head').first()).toContainText('$2,779.83');
+      // Phase 5A: today is listed first (so its day details can be opened); the Nov 18 Electricity day ends at $2,779.83
+      await expect(tl.locator('.tl-day').filter({ hasText: 'Electricity' }).first().locator('.tl-head')).toContainText('$2,779.83');
       // names are not broken mid-word: one-word names stay on one line
       for (const name of ['Paycheck', 'Electricity', 'Streaming']) {
         const h = await tl.locator('.tl-label').filter({ hasText: name }).first().locator('span').first().evaluate((e) => e.getBoundingClientRect().height);

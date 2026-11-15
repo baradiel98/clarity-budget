@@ -43,9 +43,9 @@ export function Button({ title, kind = 'primary', icon, busy, small, style, onPr
   );
 }
 
-export function LinkButton({ title, onPress, color = 'accent' }: { title: string; onPress: () => void; color?: 'accent' | 'textSecondary' | 'negative' }) {
+export function LinkButton({ title, onPress, color = 'accent', accessibilityLabel, testID }: { title: string; onPress: () => void; color?: 'accent' | 'textSecondary' | 'negative'; accessibilityLabel?: string; testID?: string }) {
   return (
-    <Pressable accessibilityRole="button" onPress={onPress} hitSlop={10} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1, paddingVertical: 4 })}>
+    <Pressable accessibilityRole="button" onPress={onPress} {...(accessibilityLabel ? { accessibilityLabel } : {})} {...(testID ? { testID } : {})} hitSlop={10} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1, paddingVertical: 4 })}>
       <T variant="callout" color={color} style={{ fontFamily: 'Inter_500Medium' }}>{title}</T>
     </Pressable>
   );

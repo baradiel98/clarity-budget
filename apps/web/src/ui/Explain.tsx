@@ -1,13 +1,14 @@
 import type { Explanation } from '@clarity/engine';
 import { formatShortDate } from '@clarity/shared';
-import { TERMS } from '@clarity/shared';
+import { LEDGER_BALANCE_AFTER, TERMS } from '@clarity/shared';
 import { Dialog } from './Dialog';
 import { Money } from './Money';
 
 /** "Why this number?" — renders the engine's own line items, never recomputes. */
 export function ExplainDialog({ ex, currency, onClose }: { ex: Explanation; currency: string; onClose: () => void }) {
+  const hasRunning = ex.lines.some((l) => l.balanceAfterCents !== undefined);
   return (
-    <Dialog title={`${TERMS.whyThisNumber} · ${ex.title}`} onClose={onClose} variant="drawer" labelId="explain-title">
+    <Dialog title={hasRunning ? ex.title : `${TERMS.whyThisNumber} · ${ex.title}`} onClose={onClose} variant="drawer" labelId="explain-title">
       <p className="t-callout muted" style={{ margin: 0 }}>{ex.summary}</p>
       <div className="explain-lines">
         {ex.lines.map((l, i) => (
@@ -24,6 +25,9 @@ export function ExplainDialog({ ex, currency, onClose }: { ex: Explanation; curr
             </div>
             <div className="num">
               {l.cents !== undefined ? <Money cents={l.cents} currency={currency} sign={l.kind === 'in' || l.kind === 'out' || l.kind === 'reserve' ? 'always' : 'auto'} /> : ''}
+              {l.balanceAfterCents !== undefined && (
+                <div className="note" data-testid="balance-after"><span className="sr-only">{LEDGER_BALANCE_AFTER}: </span><Money cents={l.balanceAfterCents} currency={currency} /></div>
+              )}
             </div>
           </div>
         ))}

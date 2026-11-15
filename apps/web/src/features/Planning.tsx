@@ -6,10 +6,10 @@ import {
   type RecurringInput,
 } from '@clarity/data';
 import {
-  annualEquivalentCents, applyWeekendRule, balanceOnDate, buildDashboard, buildForecast, computeSafeToSpend, describeSchedule, monthlyEquivalentCents, nextScheduleDate, planningWindowEnd, type Occurrence,
+  annualEquivalentCents, applyWeekendRule, balanceOnDate, buildDailyLedger, buildDashboard, ledgerAccounts, ledgerDayExplanation, buildForecast, computeSafeToSpend, describeSchedule, monthlyEquivalentCents, nextScheduleDate, planningWindowEnd, type Occurrence,
 } from '@clarity/engine';
 import {
-  addDays, CATCHUP_ACTION_LABEL, INCOME_STATUS_LABEL, OCCURRENCE_STATUS_LABEL, STATUS_HELP, CATCHUP_COUNT, CATCHUP_DONE, CATCHUP_HINT, CATCHUP_TITLE, centsToDecimalString, endOfMonth, formatCents, formatShortDate, formatWeekdayDate, monthNameLong, PAID_DUE, PAID_EMPTY, PAID_HINT, PAID_TITLE, parseAmountInput, parseISO, TERMS, type RecurringAmount,
+  addDays, CATCHUP_ACTION_LABEL, INCOME_STATUS_LABEL, OCCURRENCE_STATUS_LABEL, STATUS_HELP, CATCHUP_COUNT, CATCHUP_DONE, CATCHUP_HINT, CATCHUP_TITLE, centsToDecimalString, LEDGER_ALL_CASH, LEDGER_CARD_NOTE, LEDGER_DAY_DETAILS, LEDGER_DAY_LABEL, LEDGER_SHOW, endOfMonth, formatCents, formatShortDate, formatWeekdayDate, monthNameLong, PAID_DUE, PAID_EMPTY, PAID_HINT, PAID_TITLE, parseAmountInput, parseISO, TERMS, type RecurringAmount,
   type RecurringItem, type RecurringKind, type Schedule, type WeekendRule,
 } from '@clarity/shared';
 import { useData, useRun, useSession, useStore } from '../state/session';
@@ -90,8 +90,32 @@ export function Planning() {
     [data, today, horizon, cur],
   );
   const onDate = useMemo(() => balanceOnDate(engineInput(data, today), target), [data, today, target]);
+  // Phase 5A: the schedule for all spendable cash (default) or one account, from the same forecast
+  const [scope, setScope] = useState<string>('cash');
+  const ledgerChoices = useMemo(() => ledgerAccounts(data.accounts, forecast), [data.accounts, forecast]);
+  const scopeId = scope !== 'cash' && ledgerChoices.some((a) => a.id === scope) ? scope : 'cash';
+  const scopeAcct = data.accounts.find((a) => a.id === scopeId);
+  const ledger = useMemo(() => buildDailyLedger(engineInput(data, today), scopeId === 'cash' ? { kind: 'cash' } : { kind: 'account', accountId: scopeId }, { forecast }), [data, today, scopeId, forecast]);
+  const scopeName = scopeAcct?.name ?? LEDGER_ALL_CASH;
+  const scopeCur = ledger.currency;
+  const isCard = ledger.isCard;
+  const dayDetails = (date: string) => { const ex = ledgerDayExplanation(engineInput(data, today), ledger, date, { forecast }); if (ex) ui.explain(ex); };
 
   const timeline = useMemo(() => {
+    if (scopeId !== 'cash') {
+      // one account: the ledger's own entries (the effect on this account), plus what isn't counted and skipped items
+      const skippedHere = forecast.occurrences.filter((o) => o.status === 'skipped' && (o.accountId === scopeId || o.toAccountId === scopeId));
+      return ledger.days.map((d) => {
+        const items: { key: string; label: string; cents: number; currency?: string; occ?: Occurrence; status: Occurrence['status'] | 'scheduled_tx' | 'excluded'; isIncome: boolean }[] = d.entries.map((e) => ({
+          key: e.eventId, label: e.label, cents: e.deltaCents, currency: scopeCur, ...(e.occurrence ? { occ: e.occurrence } : {}),
+          status: (e.basis === 'planned' ? 'scheduled_tx' : e.occurrence?.status ?? 'expected') as Occurrence['status'] | 'scheduled_tx',
+          isIncome: e.deltaCents > 0,
+        }));
+        for (const e of d.notCounted) if (e.occurrence) items.push({ key: e.id, label: e.label, cents: 0, occ: e.occurrence, status: e.excluded === 'unknown_amount' ? 'unknown' : 'excluded', isIncome: true });
+        for (const o of skippedHere) if (o.date === d.date) items.push({ key: `s:${o.key}`, label: o.name, cents: 0, occ: o, status: 'skipped', isIncome: o.kind === 'income' });
+        return { date: d.date, end: d.endCents, items };
+      }).filter((d) => d.items.length || d.date === today); // today always: its details show how the day starts
+    }
     // An amount that isn't a cash effect is in the currency of the account it belongs to (Phase 4A.4.4).
     const ccy = (id?: string) => data.accounts.find((a) => a.id === id)?.currency ?? cur;
     const days: { date: string; end: number; items: { key: string; label: string; cents: number; currency?: string; occ?: Occurrence; status: Occurrence['status'] | 'scheduled_tx' | 'excluded'; isIncome: boolean }[] }[] = [];
@@ -109,10 +133,10 @@ export function Planning() {
       }));
       for (const e of forecast.excludedEvents) if (e.date === d.date && e.occurrence) items.push({ key: e.id, label: e.label, cents: 0, occ: e.occurrence, status: e.excluded === 'unknown_amount' ? 'unknown' : 'excluded', isIncome: true });
       for (const o of occByDate.get(d.date) ?? []) if (o.status === 'skipped') items.push({ key: `s:${o.key}`, label: o.name, cents: 0, occ: o, status: 'skipped', isIncome: o.kind === 'income' });
-      if (items.length) days.push({ date: d.date, end: d.endCashCents, items });
+      if (items.length || d.date === today) days.push({ date: d.date, end: d.endCashCents, items });
     }
     return days;
-  }, [forecast, today, data.accounts, cur]);
+  }, [forecast, today, data.accounts, cur, scopeId, ledger, scopeCur]);
 
   const items = (g: Group) => data.recurring.filter((r) => GROUP_KINDS[g].includes(r.kind));
   const totals = (g: Group) => {
@@ -193,20 +217,35 @@ export function Planning() {
       )}
       <div className="grid plan-grid">
         <section className="card" aria-labelledby="tl">
-          <div className="card-head"><h2 className="card-title" id="tl">Through {formatShortDate(horizon)}</h2><span className="hint">Balance shown is projected available cash at the end of each day</span></div>
+          <div className="card-head"><h2 className="card-title" id="tl">Through {formatShortDate(horizon)}</h2><span className="hint">{scopeId === 'cash' ? 'Balance shown is projected available cash at the end of each day' : isCard ? `Amount owed on ${scopeName} at the end of each day` : `Projected balance of ${scopeName} at the end of each day`}</span></div>
+          {ledgerChoices.length > 1 && (
+            <label className="row ledger-scope" style={{ gap: 8, marginBottom: 8 }}>
+              <span className="t-footnote muted">{LEDGER_SHOW}</span>
+              <select className="input" style={{ width: 'auto', minWidth: 0, maxWidth: '100%' }} value={scopeId} onChange={(e) => setScope(e.target.value)} data-testid="ledger-scope" aria-label={`${LEDGER_SHOW}: account`}>
+                <option value="cash">{LEDGER_ALL_CASH}</option>
+                {ledgerChoices.map((a) => <option key={a.id} value={a.id}>{a.name}{a.archived ? ' (archived)' : ''}</option>)}
+              </select>
+            </label>
+          )}
+          {isCard && <p className="hint" data-testid="ledger-card-note" style={{ marginTop: 0 }}>{LEDGER_CARD_NOTE}</p>}
           <p className="hint" data-testid="timeline-scope" style={{ marginTop: 0 }}>
               {horizon === stsScope.horizonEnd
                 ? `Shows what's scheduled through ${formatShortDate(horizon)}, the end of the Safe to Spend forecast. Recurring items continue after that; see the lists.`
                 : `Safe to Spend counts items through ${formatShortDate(stsScope.horizonEnd)}; items after that are shown here but not counted.`}
               {stsScope.nextAfterNote && horizon === stsScope.horizonEnd ? ` ${stsScope.nextAfterNote}` : ''}
             </p>
-          {timeline.length === 0 ? (
-            <div className="empty"><div>Nothing scheduled yet.</div></div>
-          ) : (
+          {!timeline.some((d) => d.items.length) && <div className="empty"><div>Nothing scheduled yet.</div></div>}
+          {timeline.length > 0 && (
             <div className="list" data-testid="timeline">
               {timeline.map((d) => (
                 <div key={d.date} className="tl-day">
-                  <div className="tl-head"><strong className="t-footnote">{formatWeekdayDate(d.date)}</strong><span className={`t-footnote num ${d.end < 0 ? 'neg' : 'muted'}`}><span className="sr-only">Projected balance at end of day: </span><Money cents={d.end} currency={cur} /></span></div>
+                  <div className="tl-head">
+                    <strong className="t-footnote">{formatWeekdayDate(d.date)}</strong>
+                    <span className="row" style={{ gap: 8 }}>
+                      <span className={`t-footnote num ${!isCard && d.end < 0 ? 'neg' : 'muted'}`} data-testid="tl-day-end"><span className="sr-only">{isCard ? 'Owed at end of day: ' : 'Projected balance at end of day: '}</span>{isCard && <span aria-hidden>Owed </span>}<Money cents={isCard ? -d.end : d.end} currency={scopeCur} /></span>
+                      <button type="button" className="btn-link t-footnote" data-testid="day-details" aria-label={LEDGER_DAY_LABEL(formatWeekdayDate(d.date), scopeName)} onClick={() => dayDetails(d.date)}>{LEDGER_DAY_DETAILS}</button>
+                    </span>
+                  </div>
                   {d.items.map((it) => (
                     <div key={it.key} className="tl-item">
                       <span className={`cat-icon tl-icon ${it.isIncome ? 'inflow' : ''}`}>{it.isIncome ? <ArrowDownLeft size={14} /> : <ArrowUpRight size={14} />}</span>

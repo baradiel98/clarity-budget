@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { ScrollView, View } from 'react-native';
-import { formatShortDate, TERMS } from '@clarity/shared';
+import { formatCents, formatShortDate, LEDGER_BALANCE_AFTER, TERMS } from '@clarity/shared';
 import { takeExplain } from '../src/state/nav';
 import { useData } from '../src/state/session';
 import { LinkButton } from '../src/ui/Button';
@@ -13,12 +13,13 @@ export default function Explain() {
   const ex = takeExplain();
   const data = useData();
   const { c } = useTheme();
-  const cur = data.settings.baseCurrency;
   if (!ex) return null;
+  const cur = ex.currency ?? data.settings.baseCurrency;
+  const running = ex.lines.some((l) => l.balanceAfterCents !== undefined);
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16 }}>
-        <T variant="headline" accessibilityRole="header">{TERMS.whyThisNumber}</T>
+        <T variant="headline" accessibilityRole="header">{running ? 'Day details' : TERMS.whyThisNumber}</T>
         <LinkButton title="Done" onPress={() => router.back()} />
       </View>
       <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 0, gap: 4, paddingBottom: 40 }}>
@@ -30,7 +31,10 @@ export default function Explain() {
               <T style={{ fontFamily: l.kind === 'result' ? 'Inter_700Bold' : 'Inter_400Regular' }} color={l.kind === 'excluded' ? 'textTertiary' : 'text'}>{l.label}</T>
               {(l.date || l.note) && <T variant="caption" color="textTertiary">{[l.date ? formatShortDate(l.date) : '', l.note ?? ''].filter(Boolean).join(' · ')}</T>}
             </View>
-            {l.cents !== undefined && <Money cents={l.cents} currency={cur} sign={l.kind === 'in' || l.kind === 'out' || l.kind === 'reserve' ? 'always' : 'auto'} style={{ fontFamily: l.kind === 'result' ? 'Inter_700Bold' : 'Inter_500Medium' }} color={l.kind === 'excluded' ? 'textTertiary' : 'text'} />}
+            <View style={{ alignItems: 'flex-end' }}>
+              {l.cents !== undefined && <Money cents={l.cents} currency={cur} sign={l.kind === 'in' || l.kind === 'out' || l.kind === 'reserve' ? 'always' : 'auto'} style={{ fontFamily: l.kind === 'result' ? 'Inter_700Bold' : 'Inter_500Medium' }} color={l.kind === 'excluded' ? 'textTertiary' : 'text'} />}
+              {l.balanceAfterCents !== undefined && <T variant="caption" color="textTertiary" testID="balance-after" accessibilityLabel={`${LEDGER_BALANCE_AFTER}: ${formatCents(l.balanceAfterCents, cur)}`}>{formatCents(l.balanceAfterCents, cur)}</T>}
+            </View>
           </View>
         ))}
         <T variant="headline" style={{ marginTop: 20 }}>Assumptions</T>

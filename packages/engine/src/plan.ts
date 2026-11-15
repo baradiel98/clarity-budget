@@ -46,6 +46,8 @@ export interface Explanation {
   summary: string;
   lines: ExplainLine[];
   assumptions: string[];
+  /** Phase 5A: set when the amounts are in another currency than the base currency (a ledger for that account). */
+  currency?: CurrencyCode;
 }
 
 export interface Warning {
