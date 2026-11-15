@@ -1,7 +1,7 @@
 import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, CalendarPlus, ChevronDown, MoreHorizontal, Pause, Pencil, Play, Plus, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
-  clearOccurrenceException, createRecurring, deleteRecurring, engineInput, estimateNote, paidThisMonth, recurringAmountView, setOccurrenceException, setRecurringPaused, updateRecurring,
+  catchUp, clearOccurrenceException, createRecurring, deleteRecurring, engineInput, estimateNote, paidThisMonth, warningsBesideCatchUp, recurringAmountView, setOccurrenceException, setRecurringPaused, updateRecurring,
   type RecurringAmountView,
   type RecurringInput,
 } from '@clarity/data';
@@ -9,7 +9,7 @@ import {
   annualEquivalentCents, applyWeekendRule, balanceOnDate, buildDashboard, buildForecast, computeSafeToSpend, describeSchedule, monthlyEquivalentCents, nextScheduleDate, planningWindowEnd, type Occurrence,
 } from '@clarity/engine';
 import {
-  addDays, centsToDecimalString, endOfMonth, formatCents, formatShortDate, formatWeekdayDate, monthNameLong, PAID_DUE, PAID_EMPTY, PAID_HINT, PAID_TITLE, parseAmountInput, parseISO, TERMS, type RecurringAmount,
+  addDays, CATCHUP_ACTION_LABEL, INCOME_STATUS_LABEL, OCCURRENCE_STATUS_LABEL, STATUS_HELP, CATCHUP_COUNT, CATCHUP_DONE, CATCHUP_HINT, CATCHUP_TITLE, centsToDecimalString, endOfMonth, formatCents, formatShortDate, formatWeekdayDate, monthNameLong, PAID_DUE, PAID_EMPTY, PAID_HINT, PAID_TITLE, parseAmountInput, parseISO, TERMS, type RecurringAmount,
   type RecurringItem, type RecurringKind, type Schedule, type WeekendRule,
 } from '@clarity/shared';
 import { useData, useRun, useSession, useStore } from '../state/session';
@@ -70,7 +70,17 @@ export function Planning() {
   const horizon = useMemo(() => planningWindowEnd(engineInput(data, today)), [data, today]);
   const stsScope = useMemo(() => computeSafeToSpend(engineInput(data, today)), [data, today]);
   // The complete warning list (Phase 4A.4.2): Home shows the first five and links here.
-  const allWarnings = useMemo(() => buildDashboard(engineInput(data, today)).warnings, [data, today]);
+  const dash = useMemo(() => buildDashboard(engineInput(data, today)), [data, today]);
+  // Phase 4B.4: per-item past-due warnings are listed (with their actions) in the catch-up review instead
+  const allWarnings = useMemo(() => warningsBesideCatchUp(dash.warnings), [dash]);
+  const pastDue = useMemo(() => catchUp(dash), [dash]);
+  // show "All caught up" only after past-due items were resolved here (an empty review is simply not shown)
+  const hadPastDue = useRef(pastDue.count > 0);
+  if (pastDue.count > 0) hadPastDue.current = true;
+  const catchUpRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (window.location.hash === '#catch-up') catchUpRef.current?.scrollIntoView({ block: 'start' });
+  }, []);
   const warningsRef = useRef<HTMLElement>(null);
   useEffect(() => {
     if (window.location.hash === '#warnings') warningsRef.current?.scrollIntoView({ block: 'start' });
@@ -135,6 +145,46 @@ export function Planning() {
         </div>
       </div>
 
+      {(pastDue.count > 0 || hadPastDue.current) && (
+        <section className="card catchup" id="catch-up" ref={catchUpRef} aria-labelledby="h-catch" data-testid="catch-up" style={{ marginBottom: 16 }}>
+          <div className="card-head">
+            <h2 className="card-title" id="h-catch">{CATCHUP_TITLE}{pastDue.count > 0 && <span className="faint" style={{ fontWeight: 500 }}> · {CATCHUP_COUNT(pastDue.count)}</span>}</h2>
+          </div>
+          {pastDue.count === 0 ? (
+            <p className="t-callout muted" data-testid="catch-up-done" role="status" style={{ margin: 0 }}>{CATCHUP_DONE}</p>
+          ) : (
+            <>
+              <p className="hint" style={{ marginTop: 0 }}>{CATCHUP_HINT}</p>
+              <div className="catchup-groups">
+                {pastDue.groups.map((g) => (
+                  <div key={g.recurringId} className="catchup-group" role="group" aria-labelledby={`cu-${g.recurringId}`} data-testid="catch-up-group">
+                    <h3 className="catchup-name" id={`cu-${g.recurringId}`}>{g.name}{g.items.length > 1 && <span className="faint"> · {g.items.length} past due</span>}</h3>
+                    <ul className="catchup-list">
+                      {g.items.map((u) => {
+                        const o = u.occurrence!;
+                        const due = formatShortDate(u.date);
+                        const verb = u.isIncome ? 'Record' : 'Mark paid';
+                        return (
+                          <li key={u.id} className="catchup-row" data-testid="catch-up-row">
+                            <span className="catchup-date">{formatWeekdayDate(u.date)}</span>
+                            <span className="catchup-status"><span className="badge" title={STATUS_HELP.overdue(u.isIncome)}>{(u.isIncome ? INCOME_STATUS_LABEL : OCCURRENCE_STATUS_LABEL).overdue}<span className="sr-only">: {STATUS_HELP.overdue(u.isIncome)}</span></span>{!u.affectsCash && <span className="faint t-footnote"> Charged to a card</span>}</span>
+                            <span className={`catchup-amt num ${u.cents > 0 ? 'pos' : ''}`}>{o.amountBasis === 'unknown' ? <span className="faint">—</span> : <>{o.amountBasis !== 'fixed' && o.amountBasis !== 'override' && o.amountBasis !== 'actual' && <span className="approx" aria-label="about">≈</span>}<Money cents={u.cents} currency={u.currency ?? cur} sign="always" /></>}</span>
+                            <span className="catchup-acts">
+                              <button className="btn btn-secondary btn-sm" aria-label={CATCHUP_ACTION_LABEL(verb, g.name, due)}
+                                onClick={() => ui.openAdd({ occurrenceRef: { recurringId: o.recurringId, originalDate: o.originalDate }, occurrenceName: u.label, amountCents: o.amountCents || undefined })}>{verb}</button>
+                              <button className="btn btn-ghost btn-sm" aria-label={CATCHUP_ACTION_LABEL('Skip', g.name, due)} onClick={() => void occAct(o, 'skip')}>Skip</button>
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </section>
+      )}
       {allWarnings.length > 0 && (
         <section className="card" id="warnings" ref={warningsRef} aria-labelledby="h-allwarn" data-testid="all-warnings" style={{ marginBottom: 16 }}>
           <div className="card-head"><h2 className="card-title" id="h-allwarn">Needs attention · {allWarnings.length}</h2><span className="hint">Every warning from your forecast</span></div>

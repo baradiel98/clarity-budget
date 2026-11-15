@@ -1,9 +1,9 @@
 import { AlertTriangle, ArrowDownLeft, ArrowUpRight, CircleAlert, CircleHelp, Info, Sparkles } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
 import { Pressable, View } from 'react-native';
-import { buildHomeView, recentRow, upcomingLaterPreview } from '@clarity/data';
+import { buildHomeView, catchUp, currentUpcoming, recentRow, upcomingLaterPreview, warningsBesideCatchUp } from '@clarity/data';
 import type { Explanation, UpcomingItem } from '@clarity/engine';
-import { formatCents, formatShortDate, formatWeekdayDate, INCOME_STATUS_LABEL, LOWEST_MONTH_SUB, LOWEST_THROUGH, OCCURRENCE_STATUS_LABEL, STATUS_HELP, TERMS, UPCOMING_LATER_TITLE, UPCOMING_NOTE, type ISODate, type WorkspaceData } from '@clarity/shared';
+import { formatCents, formatShortDate, formatWeekdayDate, INCOME_STATUS_LABEL, LOWEST_MONTH_SUB, LOWEST_THROUGH, OCCURRENCE_STATUS_LABEL, PAST_DUE_SUMMARY, PAST_DUE_TITLE, STATUS_HELP, TERMS, UPCOMING_LATER_TITLE, UPCOMING_NOTE, type ISODate, type WorkspaceData } from '@clarity/shared';
 import type { AddPrefill } from '../state/nav';
 import { Button, LinkButton } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -38,7 +38,12 @@ export function HomeView({ data, today, backup, actions }: { data: WorkspaceData
   const lb = d.lowestBeforeNextIncome;
   const delta = view.monthEndDeltaCents;
   const later = upcomingLaterPreview(d);
-  const statuses = [...new Map(d.upcoming.map((u) => [`${u.status}:${u.isIncome}`, u])).values()];
+  // Phase 4B.4: past-due items are summarized in one line and reviewed in Planning's catch-up
+  const pastDue = useMemo(() => catchUp(d), [d]);
+  const upcoming = useMemo(() => currentUpcoming(d), [d]);
+  const warnings = useMemo(() => warningsBesideCatchUp(d.warnings), [d]);
+  const pastDueText = pastDue.count === 0 ? '' : pastDue.count === 1 ? PAST_DUE_SUMMARY(1, formatWeekdayDate(pastDue.oldest!), pastDue.groups[0]!.name) : PAST_DUE_SUMMARY(pastDue.count, formatShortDate(pastDue.oldest!));
+  const statuses = [...new Map(upcoming.map((u) => [`${u.status}:${u.isIncome}`, u])).values()];
 
   return (
     <>
@@ -130,9 +135,9 @@ export function HomeView({ data, today, backup, actions }: { data: WorkspaceData
         </View>
       </Card>
 
-      {d.warnings.length > 0 && (
+      {warnings.length > 0 && (
         <Card title="Needs attention">
-          {d.warnings.slice(0, 5).map((w) => (
+          {warnings.slice(0, 5).map((w) => (
             <View key={w.id} style={{ flexDirection: 'row', gap: 10, paddingVertical: 8 }}>
               {w.severity === 'critical' ? <CircleAlert size={18} color={c.negative} /> : w.severity === 'warning' ? <AlertTriangle size={18} color={c.warning} /> : <Info size={18} color={c.textTertiary} />}
               <View style={{ flex: 1 }}>
@@ -141,23 +146,34 @@ export function HomeView({ data, today, backup, actions }: { data: WorkspaceData
               </View>
             </View>
           ))}
-          {d.warnings.length > 5 && <LinkButton title={`${d.warnings.length - 5} more in Planning`} onPress={() => actions.open('/planning')} />}
+          {warnings.length > 5 && <LinkButton title={`${warnings.length - 5} more in Planning`} onPress={() => actions.open('/planning')} />}
         </Card>
       )}
 
       {/* 4. Upcoming: names shown in full (they wrap), estimated amounts marked ≈, statuses explained on request */}
       <Card title={`${TERMS.upcoming} · through ${formatShortDate(d.upcomingUntil)}`}>
-        {d.upcoming.length === 0 && d.upcomingLater.length === 0 ? (
-          <T color="textSecondary" testID="upcoming-empty">No bills, paychecks or planned expenses through {formatShortDate(d.upcomingLaterUntil)}.</T>
+        {pastDue.count > 0 && (
+          <Pressable testID="past-due" accessibilityRole="button" accessibilityLabel={`${PAST_DUE_TITLE}. ${pastDueText}. Review in Planning.`}
+            onPress={() => actions.open('/planning')}
+            style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, marginBottom: 8, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.surfaceMuted, opacity: pressed ? 0.6 : 1 })}>
+            <View style={{ flex: 1 }}>
+              <T style={{ fontFamily: 'Inter_600SemiBold' }}>{PAST_DUE_TITLE}</T>
+              <T variant="footnote" color="textSecondary" testID="past-due-summary">{pastDueText}</T>
+            </View>
+            <T color="accent" style={{ fontFamily: 'Inter_500Medium' }}>Review</T>
+          </Pressable>
+        )}
+        {upcoming.length === 0 && d.upcomingLater.length === 0 ? (
+          pastDue.count > 0 ? null : <T color="textSecondary" testID="upcoming-empty">No bills, paychecks or planned expenses through {formatShortDate(d.upcomingLaterUntil)}.</T>
         ) : (
           <View testID="upcoming">
             <T variant="footnote" color="textTertiary" style={{ marginBottom: 4 }}>{UPCOMING_NOTE}</T>
-            {d.upcoming.length === 0 && <T color="textSecondary" testID="upcoming-none">Nothing scheduled through {formatShortDate(d.upcomingUntil)}.</T>}
-            {d.upcoming.map((u, i) => (
+            {upcoming.length === 0 && <T color="textSecondary" testID="upcoming-none">Nothing scheduled through {formatShortDate(d.upcomingUntil)}.</T>}
+            {upcoming.map((u, i) => (
               <ListRow
                 key={u.id}
                 testID="upcoming-row"
-                last={i === d.upcoming.length - 1}
+                last={i === upcoming.length - 1}
                 titleLines={0}
                 icon={<IconBubble tone={u.isIncome ? 'inflow' : 'neutral'}>{u.isIncome ? <ArrowDownLeft size={17} color={c.positive} /> : <ArrowUpRight size={17} color={c.textSecondary} />}</IconBubble>}
                 title={u.label}

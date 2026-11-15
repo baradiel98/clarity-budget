@@ -44,8 +44,9 @@ test('D1: an overdue rent paid 38 days late: Show older transactions lists it (u
   const beforeText = await page.getByTestId('safe-to-spend').innerText();
   const before = money(beforeText);
   const recorded = await page.getByTestId('available-cash').innerText();
-  const markRent = page.getByRole('button', { name: 'Mark paid: Rent' });
-  await markRent.first().click();
+  // Phase 4B.4: past-due items are resolved from Planning's catch-up review (Home shows one line for them)
+  await page.getByTestId('past-due-review').click();
+  await page.getByRole('button', { name: 'Mark paid: Rent, due Dec 1' }).click();
   const d = page.getByRole('dialog');
   await expect(d.getByTestId('mark-paid-scheduled')).toHaveText('Rent · due Dec 1 · $1,450.00 · Everyday Checking');
   await expect(d.getByRole('radiogroup')).toHaveCount(0);
@@ -59,6 +60,7 @@ test('D1: an overdue rent paid 38 days late: Show older transactions lists it (u
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/4a11-01-show-older.png`, fullPage: false });
   await d.getByTestId('save-tx').click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
+  await go(page, '/');
   const afterText = await page.getByTestId('safe-to-spend').innerText();
   const after = money(afterText);
   // e.g. "Short by $2,986.89" → "Short by $1,536.89": the overdue $1,450 Dec 1 rent is no longer counted

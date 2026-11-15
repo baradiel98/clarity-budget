@@ -825,6 +825,28 @@ Tests:
 - `apps/mobile/test/paid-history.test.tsx` (2).
 - `apps/web/e2e/phase4b3.spec.ts` (3). The unlink case checks that Safe to Spend stays $2,267.17: after the early card payment the low point moves to Nov 18, before the Nov 19 paycheck, so the Phone bill due Nov 22 doesn't lower it.
 
+## 7ae. Phase 4B.4: overdue-item catch-up
+
+Checkpoint `phase4b4-checkpoint-before` (c0cadeb). No engine, calculation or data-model change.
+
+- **Home (web and mobile):** past-due items leave the Upcoming list and become one "Past due" line with Review. Example: on Jan 10, 2027 with nothing recorded since Nov 13, Home showed 16 overdue rows; it now shows "16 items since Nov 18 need a decision".
+- **Planning (web and mobile):** a "Catch up" review grouped by item. Each row has the existing Mark paid / Record (which can link an existing payment) and Skip, one occurrence at a time. A per-item past-due warning is no longer repeated in Needs attention.
+
+Tests:
+- **`packages/data/test/catch-up.test.ts` (6, hand-calculated):**
+  - 10 past-due items after six weeks (8 bills, 2 paychecks);
+  - an unlinked $65 payment isn't assumed; linking it resolves only Nov 22, and Dec 22 is still expected;
+  - a pending payment stays pending; skip affects one occurrence;
+  - a transfer and a card payment;
+  - a long absence (62-day window: 10 items since Dec 15 on Jan 31);
+  - one item, then resolved, and an empty workspace.
+- **`apps/mobile/test/catch-up.test.tsx` (3).**
+- **`apps/web/e2e/phase4b4.spec.ts` (3):**
+  - one item resolved with Safe to Spend unchanged (the $91.40 counted as owed is now recorded);
+  - 16 items: linking the Jan 8 $1,450 payment to the Jan 1 rent raises Safe to Spend by exactly $1,450.00, with one transaction only; skipping one Streaming leaves the other;
+  - 390px, plus the empty state.
+- **Updated on purpose:** `phase4a11.spec.ts` now reaches the overdue rent through the catch-up review.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

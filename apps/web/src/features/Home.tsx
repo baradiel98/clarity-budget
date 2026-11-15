@@ -1,8 +1,8 @@
 import { AlertTriangle, ArrowDownLeft, ArrowUpRight, CalendarClock, CircleAlert, CircleHelp, Info, TrendingDown, TrendingUp } from 'lucide-react';
 import { useMemo, useState, type CSSProperties } from 'react';
-import { backupDue, buildHomeView, recentRow, upcomingLaterPreview } from '@clarity/data';
+import { backupDue, buildHomeView, recentRow, upcomingLaterPreview, catchUp, currentUpcoming, warningsBesideCatchUp } from '@clarity/data';
 import { buildForecast, cashHistory, type Explanation, type UpcomingItem } from '@clarity/engine';
-import { addDays, formatCents, formatMonthYear, formatShortDate, formatWeekdayDate, INCOME_STATUS_LABEL, LOWEST_MONTH_SUB, LOWEST_THROUGH, OCCURRENCE_STATUS_LABEL, STATUS_HELP, TERMS, UPCOMING_LATER_TITLE, UPCOMING_NOTE } from '@clarity/shared';
+import { addDays, formatCents, formatMonthYear, formatShortDate, formatWeekdayDate, INCOME_STATUS_LABEL, PAST_DUE_SUMMARY, PAST_DUE_TITLE, LOWEST_MONTH_SUB, LOWEST_THROUGH, OCCURRENCE_STATUS_LABEL, STATUS_HELP, TERMS, UPCOMING_LATER_TITLE, UPCOMING_NOTE } from '@clarity/shared';
 import { isFresh } from '../state/fresh';
 import { CaptureLauncher } from './Capture';
 import { useRouter } from '../lib/router';
@@ -45,6 +45,10 @@ export function Home() {
   const history = useMemo(() => cashHistory(data.accounts, data.transactions, addDays(today, -14), addDays(today, -1), cur), [data.accounts, data.transactions, today, cur]);
 
   const later = upcomingLaterPreview(d);
+  // Phase 4B.4: past-due items are summarized in one line here and reviewed in Planning's catch-up
+  const pastDue = useMemo(() => catchUp(d), [d]);
+  const upcoming = useMemo(() => currentUpcoming(d), [d]);
+  const warnings = useMemo(() => warningsBesideCatchUp(d.warnings), [d]);
   const { monthEndDeltaCents: delta, show, recent } = view;
   const cats = useMemo(() => new Map(data.categories.map((c) => [c.id, c])), [data.categories]);
   const Why = ({ ex, label }: { ex: Explanation; label: string }) => (
@@ -176,19 +180,30 @@ export function Home() {
               <h2 className="card-title" id="h-up">{TERMS.upcoming} <span className="faint" style={{ fontWeight: 500 }}>· through {formatShortDate(d.upcomingUntil)}</span></h2>
               <button className="btn-link" onClick={() => navigate('/planning')}>Open Planning</button>
             </div>
-            {d.upcoming.length === 0 && d.upcomingLater.length === 0 ? (
+            {pastDue.count > 0 && (
+              <div className="past-due" data-testid="past-due">
+                <div className="past-due-text">
+                  <div className="title">{PAST_DUE_TITLE}</div>
+                  <div className="meta" data-testid="past-due-summary">{pastDue.count === 1 ? PAST_DUE_SUMMARY(1, formatWeekdayDate(pastDue.oldest!), pastDue.groups[0]!.name) : PAST_DUE_SUMMARY(pastDue.count, formatShortDate(pastDue.oldest!))}</div>
+                </div>
+                <button className="btn btn-secondary btn-sm" data-testid="past-due-review" aria-label={`Review ${pastDue.count} past-due item${pastDue.count === 1 ? '' : 's'} in Planning`} onClick={() => navigate('/planning#catch-up')}>Review</button>
+              </div>
+            )}
+            {upcoming.length === 0 && d.upcomingLater.length === 0 ? (
+              pastDue.count > 0 ? null : (
               <div className="empty">
                 <div className="ico"><CalendarClock size={24} /></div>
                 <div className="t-headline">Nothing scheduled</div>
                 <div className="t-callout">No bills, paychecks or planned expenses through {formatShortDate(d.upcomingLaterUntil)}.</div>
                 <button className="btn btn-secondary btn-sm" style={{ marginTop: 8 }} onClick={() => navigate('/planning')}>Add a bill or income</button>
               </div>
+              )
             ) : (
               <>
               <p className="hint upcoming-note">{UPCOMING_NOTE}</p>
-              {d.upcoming.length === 0 && <p className="t-callout muted" data-testid="upcoming-none">Nothing scheduled through {formatShortDate(d.upcomingUntil)}.</p>}
+              {upcoming.length === 0 && <p className="t-callout muted" data-testid="upcoming-none">Nothing scheduled through {formatShortDate(d.upcomingUntil)}.</p>}
               <div className="list" data-testid="upcoming">
-                {d.upcoming.map((u) => (
+                {upcoming.map((u) => (
                   <div key={u.id} className="list-row up-row">
                     <div className={`cat-icon up-icon ${u.isIncome ? 'inflow' : ''}`}>{u.isIncome ? <ArrowDownLeft size={17} /> : <ArrowUpRight size={17} />}</div>
                     <div className="up-main">
@@ -234,10 +249,10 @@ export function Home() {
 
           <div className="stack" style={{ alignContent: 'start' }}>
             {/* 5. Things that need attention (only when there are any) */}
-            {d.warnings.length > 0 && (
+            {warnings.length > 0 && (
               <section className="card" aria-labelledby="h-warn" data-testid="warnings">
                 <div className="card-head"><h2 className="card-title" id="h-warn">Needs attention</h2></div>
-                {d.warnings.slice(0, 5).map((w) => (
+                {warnings.slice(0, 5).map((w) => (
                   <div key={w.id} className="warning-row">
                     {w.severity === 'critical' ? <span className="attention neg warn-ico"><CircleAlert size={18} className="neg" /></span> : w.severity === 'warning' ? <span className="attention warn-ico"><AlertTriangle size={18} className="warn" /></span> : <Info size={18} className="faint" />}
                     <div>
@@ -246,7 +261,7 @@ export function Home() {
                     </div>
                   </div>
                 ))}
-                {d.warnings.length > 5 && <button className="btn-link" data-testid="more-warnings" onClick={() => navigate('/planning#warnings')}>{d.warnings.length - 5} more in Planning</button>}
+                {warnings.length > 5 && <button className="btn-link" data-testid="more-warnings" onClick={() => navigate('/planning#warnings')}>{warnings.length - 5} more in Planning</button>}
               </section>
             )}
 

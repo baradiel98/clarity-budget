@@ -1035,3 +1035,20 @@ input[type='date'].input::-webkit-calendar-picker-indicator { opacity: 0.6; curs
 .paid-main .meta { font-size: 12px; color: var(--c-text-tertiary); }
 .paid-amt { font-size: 14px; font-weight: 600; white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .paid-toggle .chev { transition: none; } }
+
+/* Phase 4B.4: Planning's catch-up review (past-due items, grouped by scheduled item; calm, no alarm colours beyond the existing status badge) */
+.catchup-groups { display: grid; gap: 14px; margin-top: 12px; }
+.catchup-name { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
+.catchup-list { list-style: none; margin: 0; padding: 0; }
+.catchup-row { display: grid; grid-template-columns: minmax(96px, auto) minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--c-border); font-size: 14px; }
+.catchup-date { color: var(--c-text-secondary); }
+.catchup-amt { font-weight: 600; white-space: nowrap; }
+.catchup-acts { display: flex; gap: 6px; }
+@media (max-width: 760px) {
+  .catchup-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'date amt' 'status status' 'acts acts'; row-gap: 6px; }
+  .catchup-date { grid-area: date; } .catchup-amt { grid-area: amt; } .catchup-status { grid-area: status; } .catchup-acts { grid-area: acts; }
+}
+.past-due { display: flex; align-items: center; gap: 12px; padding: 10px 12px; margin: 0 0 10px; border: 1px solid var(--c-border); border-radius: 12px; background: var(--c-surface-muted); }
+.past-due-text { flex: 1; min-width: 0; }
+.past-due .title { font-size: 14px; font-weight: 600; }
+.past-due .meta { font-size: 12.5px; color: var(--c-text-secondary); }

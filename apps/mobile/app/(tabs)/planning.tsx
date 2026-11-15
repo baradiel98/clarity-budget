@@ -1,13 +1,13 @@
 import { router } from 'expo-router';
 import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, ChevronDown, ChevronUp, Plus } from 'lucide-react-native';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { ActionSheetIOS, Alert, Platform, Pressable, View } from 'react-native';
-import { clearOccurrenceException, deleteRecurring, engineInput, estimateNote, paidThisMonth, recurringAmountView, setOccurrenceException, setRecurringPaused } from '@clarity/data';
+import { catchUp, clearOccurrenceException, deleteRecurring, engineInput, estimateNote, paidThisMonth, warningsBesideCatchUp, recurringAmountView, setOccurrenceException, setRecurringPaused } from '@clarity/data';
 import { annualEquivalentCents, applyWeekendRule, balanceOnDate, buildDashboard, buildForecast, computeSafeToSpend, describeSchedule, monthlyEquivalentCents, nextScheduleDate, planningWindowEnd, type Occurrence } from '@clarity/engine';
-import { addDays, endOfMonth, formatCents, formatShortDate, formatWeekdayDate, monthNameLong, PAID_DUE, PAID_EMPTY, PAID_HINT, PAID_TITLE, parseISO, TERMS, type RecurringItem } from '@clarity/shared';
+import { addDays, CATCHUP_ACTION_LABEL, INCOME_STATUS_LABEL, OCCURRENCE_STATUS_LABEL, CATCHUP_COUNT, CATCHUP_DONE, CATCHUP_HINT, CATCHUP_TITLE, endOfMonth, formatCents, formatShortDate, formatWeekdayDate, monthNameLong, PAID_DUE, PAID_EMPTY, PAID_HINT, PAID_TITLE, parseISO, TERMS, type RecurringItem } from '@clarity/shared';
 import { setAddPrefill, setExplain } from '../../src/state/nav';
 import { useData, useRun, useSession, useStore } from '../../src/state/session';
-import { LinkButton } from '../../src/ui/Button';
+import { Button, LinkButton } from '../../src/ui/Button';
 import { Badge, Card } from '../../src/ui/Card';
 import { DateField } from '../../src/ui/DateField';
 import { IconBubble, ListRow } from '../../src/ui/ListRow';
@@ -47,7 +47,13 @@ export default function Planning() {
   const windowEnd = useMemo(() => planningWindowEnd(engineInput(data, today)), [data, today]);
   const stsScope = useMemo(() => computeSafeToSpend(engineInput(data, today)), [data, today]);
   // The complete warning list (Phase 4A.4.2): Home shows the first five and links here; it is first on the screen.
-  const allWarnings = useMemo(() => buildDashboard(engineInput(data, today)).warnings, [data, today]);
+  const dash = useMemo(() => buildDashboard(engineInput(data, today)), [data, today]);
+  // Phase 4B.4: per-item past-due warnings are listed (with their actions) in the catch-up review instead
+  const allWarnings = useMemo(() => warningsBesideCatchUp(dash.warnings), [dash]);
+  const pastDue = useMemo(() => catchUp(dash), [dash]);
+  const hadPastDue = useRef(pastDue.count > 0);
+  if (pastDue.count > 0) hadPastDue.current = true;
+  const skip = async (o: Occurrence) => { const r = await run((ctx) => setOccurrenceException(ctx, o, 'skip'), { undoLabel: 'Skip' }); if (r.ok) toast({ message: `${o.name} skipped`, action: { label: 'Undo', run: () => void store.undo() } }); };
   const forecast = useMemo(() => buildForecast({ today, horizonEnd: windowEnd, accounts: data.accounts, transactions: data.transactions, recurring: data.recurring, exceptions: data.exceptions, baseCurrency: cur, includeEstimatedIncome: true }), [data, today, cur, windowEnd]);
   const onDate = useMemo(() => balanceOnDate(engineInput(data, today), target), [data, today, target]);
 
@@ -108,6 +114,42 @@ export default function Planning() {
 
   return (
     <Screen title={TERMS.tabs.planning} subtitle="Income, bills and transfers that shape your forecast.">
+      {(pastDue.count > 0 || hadPastDue.current) && (
+        <Card title={pastDue.count > 0 ? `${CATCHUP_TITLE} · ${CATCHUP_COUNT(pastDue.count)}` : CATCHUP_TITLE}>
+          {pastDue.count === 0 ? (
+            <T color="textSecondary" testID="catch-up-done" accessibilityLiveRegion="polite">{CATCHUP_DONE}</T>
+          ) : (
+            <View testID="catch-up" style={{ gap: 12 }}>
+              <T variant="footnote" color="textTertiary">{CATCHUP_HINT}</T>
+              {pastDue.groups.map((g) => (
+                <View key={g.recurringId} testID="catch-up-group" style={{ gap: 2 }}>
+                  <T style={{ fontFamily: 'Inter_600SemiBold' }} accessibilityRole="header">{g.name}{g.items.length > 1 ? ` · ${g.items.length} past due` : ''}</T>
+                  {g.items.map((u) => {
+                    const o = u.occurrence!;
+                    const due = formatShortDate(u.date);
+                    const verb = u.isIncome ? 'Record' : 'Mark paid';
+                    const approx = o.amountBasis !== 'fixed' && o.amountBasis !== 'override' && o.amountBasis !== 'actual' && o.amountBasis !== 'unknown';
+                    return (
+                      <View key={u.id} testID="catch-up-row" style={{ borderTopWidth: 1, borderTopColor: c.border, paddingVertical: 8, gap: 6 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <T variant="footnote" color="textSecondary" style={{ flex: 1 }}>{formatWeekdayDate(u.date)}{!u.affectsCash ? ' · charged to a card' : ''}</T>
+                          <Badge label={(u.isIncome ? INCOME_STATUS_LABEL : OCCURRENCE_STATUS_LABEL).overdue} />
+                          {o.amountBasis === 'unknown' ? <T color="textTertiary">—</T> : <T style={{ fontFamily: 'Inter_600SemiBold' }}>{approx ? '≈' : ''}{formatCents(u.cents, u.currency ?? cur, { sign: 'always' })}</T>}
+                        </View>
+                        <View style={{ flexDirection: 'row', gap: 8 }}>
+                          <Button small kind="secondary" title={verb} accessibilityLabel={CATCHUP_ACTION_LABEL(verb, g.name, due)}
+                            onPress={() => { setAddPrefill({ occurrenceRef: { recurringId: o.recurringId, originalDate: o.originalDate }, occurrenceName: u.label, ...(o.amountCents ? { amountCents: o.amountCents } : {}) }); router.push('/add'); }} />
+                          <Button small kind="ghost" title="Skip" accessibilityLabel={CATCHUP_ACTION_LABEL('Skip', g.name, due)} onPress={() => void skip(o)} />
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              ))}
+            </View>
+          )}
+        </Card>
+      )}
       {allWarnings.length > 0 && (
         <Card title={`Needs attention · ${allWarnings.length}`}>
           <View testID="all-warnings"><WarningList warnings={allWarnings} currency={cur} /></View>

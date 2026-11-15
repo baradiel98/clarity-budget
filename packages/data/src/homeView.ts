@@ -98,3 +98,45 @@ export function countedOutflows(d: Dashboard, limit = 4): { items: Dashboard['up
   const all = [...d.upcoming, ...d.upcomingLater].filter((u) => u.cents < 0 && u.affectsCash);
   return { items: all.slice(0, limit), more: Math.max(0, all.length - limit), until: d.upcomingLaterUntil };
 }
+
+/**
+ * Phase 4B.4: past-due scheduled items, for the catch-up review (Planning) and the one-line summary on Home (both
+ * apps). Nothing is decided here: these are exactly the engine's Upcoming items with status "overdue" (a bill with no
+ * payment recorded, counted as still owed today; income not recorded yet, not counted), grouped by scheduled item,
+ * oldest first. No item is assumed paid or unpaid; each is resolved only by the user's own Mark paid / Record (which
+ * can link an existing payment) or Skip, one occurrence at a time.
+ */
+export interface CatchUpGroup {
+  recurringId: string;
+  name: string;
+  isIncome: boolean;
+  items: Dashboard['upcoming'];
+}
+export interface CatchUp {
+  /** Past-due occurrences still needing a decision. */
+  count: number;
+  bills: number;
+  income: number;
+  oldest: ISODate | null;
+  groups: CatchUpGroup[];
+}
+export function catchUp(d: Dashboard): CatchUp {
+  const items = d.upcoming.filter((u) => u.status === 'overdue' && u.occurrence).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.label.localeCompare(b.label)));
+  const groups = new Map<string, CatchUpGroup>();
+  for (const u of items) {
+    const id = u.occurrence!.recurringId;
+    const g = groups.get(id) ?? { recurringId: id, name: u.label, isIncome: u.isIncome, items: [] };
+    g.items.push(u);
+    groups.set(id, g);
+  }
+  return { count: items.length, bills: items.filter((u) => !u.isIncome).length, income: items.filter((u) => u.isIncome).length, oldest: items[0]?.date ?? null, groups: [...groups.values()] };
+}
+
+/** Phase 4B.4: Home's Upcoming list without the past-due items (they are summarized in one line and reviewed in Planning). */
+export const currentUpcoming = (d: Dashboard): Dashboard['upcoming'] => d.upcoming.filter((u) => u.status !== 'overdue');
+
+/**
+ * Phase 4B.4: the warning list without the per-item "is overdue" / "not recorded" warnings, which the catch-up review
+ * lists itself (every one, with its actions). Every other warning is kept, in order.
+ */
+export const warningsBesideCatchUp = (warnings: Dashboard['warnings']): Dashboard['warnings'] => warnings.filter((w) => !w.id.startsWith('overdue:'));

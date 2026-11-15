@@ -77,6 +77,18 @@ export const BALANCE_ENTRY_HINT =
  */
 export const LOWEST_THROUGH = (date: string) => `Lowest through ${date}`;
 export const LOWEST_MONTH_SUB = (date: string, monthEnd: string) => `${date} · through ${monthEnd}`;
+/**
+ * Phase 4B.4: catching up on past-due scheduled items. Calm wording: nothing is assumed paid or unpaid, and nothing
+ * changes until the user chooses (Mark paid / Record, which can link an existing payment, or Skip).
+ */
+export const PAST_DUE_TITLE = 'Past due';
+export const CATCHUP_TITLE = 'Catch up';
+export const CATCHUP_COUNT = (n: number) => `${n} past due`;
+export const PAST_DUE_SUMMARY = (n: number, oldest: string, onlyName?: string) => (n === 1 ? `${onlyName ?? '1 item'}, due ${oldest}, needs a decision` : `${n} items since ${oldest} need a decision`);
+export const CATCHUP_HINT =
+  "Nothing is recorded for these yet, so Clarity can't tell whether they were paid. For each one: if you already paid it, use Mark paid and choose that payment (nothing is added twice); if it no longer applies, skip it; otherwise leave it here. Unpaid bills stay counted as due today; income isn't counted until you record it.";
+export const CATCHUP_DONE = 'All caught up. Nothing is past due.';
+export const CATCHUP_ACTION_LABEL = (verb: string, name: string, due: string) => `${verb}: ${name}, due ${due}`;
 /** Phase 4B.3: Planning's history of scheduled items a linked transaction settled this month (by the transaction's date). */
 export const PAID_TITLE = 'Paid this month';
 export const PAID_HINT = (month: string, open: 'Select' | 'Tap') => `Scheduled items recorded as paid or received in ${month}, by the date of the transaction. ${open} one to open it.`;

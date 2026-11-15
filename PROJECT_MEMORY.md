@@ -681,3 +681,23 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
   - Deleted or unlinked transactions, and an undone import, drop out.
   - **[Limitation]** An occurrence the schedule no longer has (item deleted or paused, schedule changed) isn't listed. Its transaction's Edit form explains the link (4A.11).
 - **[Data model]** No change. Viewing the history changes no data and no figure (tested).
+
+## Phase 4B.4 (2026-11-15): overdue-item catch-up
+- **[Verified implementation]** Web and mobile.
+  - **Shared helpers** (`packages/data/src/homeView.ts`):
+    - `catchUp(dashboard)`: the engine's own Upcoming items with status "overdue" (bills not recorded as paid; income not recorded), grouped by scheduled item, oldest first, with counts;
+    - `currentUpcoming(dashboard)`: Upcoming without them;
+    - `warningsBesideCatchUp(warnings)`: the warning list without the per-item `overdue:` warnings, which the review lists itself.
+  - **Home:** one "Past due" line at the top of Upcoming. It reads "Electricity, due Wed, Nov 18, needs a decision", or "16 items since Nov 18 need a decision", with a Review action (web: `/planning#catch-up`; mobile: the Planning tab). Upcoming lists only what is still ahead, and Needs attention no longer repeats each past-due item.
+  - **Planning:** a "Catch up · N past due" card at the top. It shows a short explanation, then groups per item. Each row shows the due date, amount (≈ for estimates), the existing status label ("Overdue" / "Not recorded", neutral badge style there) and "Charged to a card" where relevant. Actions:
+    - the existing Mark paid / Record flow, which offers to link an existing payment, including "Show older transactions";
+    - the existing Skip, with Undo.
+  - After the last item is resolved in Planning, the card says "All caught up. Nothing is past due."; it isn't shown when nothing was past due.
+- **[Rules kept]**
+  - Nothing is marked paid or skipped automatically, and an unlinked matching payment is not assumed to be the bill.
+  - Each occurrence is resolved on its own; the next one is untouched (tested).
+  - Pending stays pending; transfers and card payments keep their treatment.
+  - The 62-day overdue window is unchanged: older items age out as before.
+- **[Data model]** No change. Reviewing changes no data and no figure (tested).
+- **[Kept on purpose]** Planning's schedule still lists past-due items under today, because they explain today's projected balance.
+- **[Lesson]** Mobile component tests with a mocked `useData` don't re-render on data changes; mount the screen again after an action.
