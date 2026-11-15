@@ -2,6 +2,22 @@
 
 Nothing below could be tested in the development container: it has no iPhone or Android simulator, and no Safari or Edge. A platform is **not** considered supported until this script passes on it. Record results in the table at the end. Use a test passphrase and fictional numbers.
 
+## QA status at a glance (updated 2026-11-15)
+Only what is listed as done has evidence. Everything else has **not been performed**. Browser automation is not device testing.
+
+| Kind of testing | Status | Evidence / where |
+|---|---|---|
+| Browser automation (Chromium, Playwright) | **Done**: web app, desktop and phone widths | `apps/web/e2e/*.spec.ts`, including `phase5a.spec.ts` and `phase5a1.spec.ts` |
+| Component tests of the mobile app (Node, Jest) | **Done**: logic and screens in a test renderer | `apps/mobile/test/*.test.tsx` |
+| Mobile app rendered through React Native for Web in Chromium | **Done, Phase 4B.5 only**: a layout approximation | `docs/implementation-report.md` §7af |
+| Real iPhone (native app) | **NOT PERFORMED** | §1, §2, §2b, §2c |
+| Real Android phone (native app) | **NOT PERFORMED** | §1, §2, §2b, §2c |
+| Safari (macOS and iOS) | **NOT PERFORMED** for any listed step | §2c "Safari", §3 D3. The owner only confirmed the hosted web app loads on iPhone Safari (Results table) |
+| VoiceOver (iPhone) | **NOT PERFORMED** | §2 M10, §2b M23, §2c A1–A3 |
+| TalkBack (Android) | **NOT PERFORMED** | §2 M10, §2b M23, §2c A1–A3 |
+
+**How to record a result:** write PASS or FAIL in the Status column (or the Results table), with the device, OS version, date and tester. For a FAIL, note what you saw. Never mark a step PASS from a browser test.
+
 ## Which version am I running? (hosted web app)
 The web app works offline, so a phone or browser can keep showing the version it saved earlier. After a deploy:
 1. Open **Settings → Privacy & data → App version**. It shows `Version` plus the first 7 characters of the deployed git commit.
@@ -81,10 +97,12 @@ This needs a Mac with Xcode. Alternatively, `eas build --profile development` ne
 | M11 | Restore a backup made on the **web** app; make a backup on the phone and restore it on the **web** | Identical numbers both ways |
 | M12 | Import a CSV from Files / Drive / Downloads | Picker opens; review screen works |
 
-## 2b. Phase 4B journeys (iPhone and Android; not yet run on a simulator or device)
+## 2b. Phase 4B.5: Phase 4B journeys on iPhone and Android (NOT RUN on any device)
 Phase 4B.5 checked these only in the mobile app rendered through React Native for Web (Chromium at 360×640, 375×667, 390×844 and 393×851) and in component tests. Native keyboards, safe areas, modals, haptics, storage and screen readers were not available there.
 
 Start with **Sample data** for M13–M20 (nothing is saved). Use a new test workspace for M21. Never use real data for these steps.
+
+Status of every step M13–M25: **NOT RUN** on iPhone, Android, VoiceOver or TalkBack. Phase 4B.5 stays incomplete (no `phase4b5-complete` tag) until these are run.
 
 | # | Step | Expected |
 |---|---|---|
@@ -102,28 +120,42 @@ Start with **Sample data** for M13–M20 (nothing is saved). Use a new test work
 | M24 | Largest system text size: Home, Catch up, Add | Text scales (capped); buttons stay tappable; no overlapping text |
 | M25 | Welcome screen on a 375–390pt phone | "Restore backup" may wrap onto two lines inside its button (seen in the web rendering); note whether it does on the device |
 
-## 2c. Phase 5A daily ledger (iPhone and Android): NOT RUN
-None of these has been run on a real device, a simulator, Safari, VoiceOver or TalkBack. Browser automation (Chromium) and component tests in Node covered the logic and the web layout only (`apps/web/e2e/phase5a*.spec.ts`, `apps/mobile/test/phase5a*.test.tsx`); that is **not** device QA. Use sample data unless a step says otherwise.
+## 2c. Phase 5A: daily balance ledger on iPhone and Android (NOT RUN on any device)
+This is separate from Phase 4B.5 (§2b). None of these steps has been run on a real iPhone, a real Android phone, a simulator, Safari, VoiceOver or TalkBack. The Chromium and Node tests listed at the top cover the calculations and the web layout only.
 
-| # | Step | Expected | Status |
+**Before you start**
+- **Sample data:** on the first screen, tap **Sample data** (mobile) or **Explore sample data** (web). Nothing is saved, and a "Sample data" banner shows. Sample data is made fresh from the phone's own date, so dates and some figures differ from day to day. The steps below say what to compare rather than fixed figures.
+- **Test workspace:** for P5 and P6 you need a test workspace with fictional numbers (Get started, any test passphrase). Delete it afterwards in Settings.
+- **Where:** in the Planning tab, the schedule card has a **Show** button (mobile: a rounded chip under the card title; web: a "Show" drop-down). Each day in the schedule has a **Day details** link on the right of its date row.
+- **Adding a purchase:** the Add button (mobile: the round + in the tab bar; web: Add Transaction).
+
+| # | Steps | Expected | Status |
 |---|---|---|---|
-| P1 | Planning → "Show" → pick each account from the sheet (All spendable cash, Everyday Checking, Savings, Visa Card) | The sheet lists every account plus Cancel; the chip shows the chosen account; the schedule updates | NOT RUN |
-| P2 | Day details on today and on Wed, Nov 18 (Everyday Checking) | Lines scroll; every item shows its amount and the balance after it underneath (Nov 18: Electricity ≈ −$91.40, $2,779.83); Done returns to Planning | NOT RUN |
-| P3 | Show → Visa Card | Day ends read "Owed $…"; the note says interest and fees you haven't recorded aren't included | NOT RUN |
-| P4 | Add an $85 purchase today from Everyday Checking, reopen today's Day details | It appears once, labelled Recorded, with $2,786.23 after it | NOT RUN |
-| P5 | New workspace: Update balance on an account, then add a purchase dated the same day; open today's Day details for that account | Starts at "Confirmed balance (date)" with the figure entered; the purchase line says "recorded after you confirmed the balance" | NOT RUN |
-| P6 | Make a backup on the phone, restore it on the web (and the reverse); compare P5's Day details | Same lines and figures on both | NOT RUN |
-| P7 | Smallest phone (iPhone SE / 360dp) and the largest system text size; Planning schedule and Day details | The day header (date, amount, Day details) and badges don't clip or overlap; Day details stays tappable (44pt / 48dp) | NOT RUN |
-| P8 | Add a $6,000 purchase from Savings dated Nov 20 (Savings holds $5,200); Show → Savings | Nov 20 ends at −$800.00 with a "$800.00 counted against spendable accounts" badge; Day details explains $5,200 covered, $800 from spendable accounts, Clarity hasn't chosen which | NOT RUN |
+| P1 | Sample data → Planning → tap **Show** → pick **Everyday Checking**. Repeat for **Savings**, **Visa Card** and **All spendable cash** | A list appears with All spendable cash, Everyday Checking, Savings, Visa Card and Cancel. After each choice the chip shows that name and the schedule changes (its amounts are that account's) | NOT RUN |
+| P2 | Show → Everyday Checking. Find the first day that lists **Electricity**; tap its **Day details** | A screen titled "<that date> · Everyday Checking". The first line is "Start of day", then Electricity with "≈" (estimated) and its amount, with a smaller figure under the amount (the balance after it), then "End of day". Start of day minus the Electricity amount equals the figure under it and the End of day, and the End of day equals the amount shown for that day in the schedule. **Done** returns to Planning | NOT RUN |
+| P3 | Show → Visa Card | Each day's amount reads "Owed $…". A note above the schedule says interest and fees you haven't recorded aren't included | NOT RUN |
+| P4 | Show → Everyday Checking. Open today's Day details and write down "Recorded balance today". Close. Add an $85.00 purchase, account Everyday Checking, today's date. Open today's Day details again | The purchase appears once, marked "Recorded", and the figure under it is the noted amount minus $85.00. The End of day is $85.00 lower than before | NOT RUN |
+| P5 | Test workspace with one checking account. Settings → **Accounts** → tap the account → **Update balance** (web: Settings → Accounts → the scale icon beside it), enter its current balance, save. Then add a $10.00 purchase on that account dated today. Planning → Show → that account → today's Day details | The first line is "Confirmed balance (<today>)" with the amount you entered. The purchase line says "recorded after you confirmed the balance", and the figure under it is $10.00 lower | NOT RUN |
+| P6 | In the P5 workspace: Settings → **Backup & export** → **Save encrypted backup** (sample data can't be backed up). On a computer, open the web app in a fresh browser profile, choose **Restore backup** on the first screen with that file and the passphrase. Open the same Day details. Then the reverse (web backup → phone) | Same lines and same amounts on both | NOT RUN |
+| P7 | On the smallest phone available (iPhone SE / a 360dp-wide Android) with the largest system text size: Planning schedule with Show → Savings after P8, then a Day details screen | Date, amount and "Day details" on each day row are fully readable and don't overlap. The highlighted badge wraps rather than being cut off. "Day details" is easy to tap (at least about a fingertip, 44pt / 48dp) | NOT RUN |
+| P8 | Sample data → Planning → Show → Savings; note the Savings amount on today's row (S). Add a purchase from **Savings** of S + $800.00 (for example $6,000.00 when S is $5,200.00), dated one week from today. Show → Savings again | (a) On that day the amount is −$800.00. (b) The purchase row has a highlighted badge "$800.00 shortfall · counted against spendable accounts". (c) A note above the schedule says the balances assume the full payment is taken from Savings, the shortfall is counted against your spendable accounts (Clarity hasn't chosen which), and what your bank would do can't be known. (d) That day's Day details says Savings can cover S of the payment, the other $800.00 is a shortfall, and your bank's actual response can't be known. (e) Show → All spendable cash: that day is $800.00 lower than before the purchase; Show → Everyday Checking: the purchase isn't listed | NOT RUN |
 
 ### Accessibility (VoiceOver on iPhone, TalkBack on Android): NOT RUN
-| # | Step | Expected | Status |
-|---|---|---|---|
-| A1 | Swipe to a day's "Day details" | Reads "Day details: Wed, Nov 18, Everyday Checking" (date and scope) | NOT RUN |
-| A2 | In Day details, swipe through the lines | Each line reads its label, amount and "Balance after: $…". Known risk: each line is grouped as one element on mobile, so the "Balance after" label may not be spoken; record what is read | NOT RUN |
-| A3 | Focus the "Show" chip | Reads "Show: <account>. Change" and opens the sheet on double-tap | NOT RUN |
+Turn on VoiceOver (Settings → Accessibility → VoiceOver) or TalkBack (Settings → Accessibility → TalkBack). Swipe right to move to the next item; double-tap to activate. Write down exactly what is read.
 
-Safari (macOS and iOS): Planning's Show menu, Day details drawer, and P8 on the web app: NOT RUN.
+| # | Steps | Expected | Status |
+|---|---|---|---|
+| A1 | Sample data → Planning → Show → Everyday Checking; swipe to a day's "Day details" | It reads "Day details: <weekday, month day>, Everyday Checking" (the date and the account), and double-tap opens it | NOT RUN |
+| A2 | In Day details, swipe through each line | Each line reads its label, amount and the balance after it. Known risk: on mobile each line is one element, so the words "Balance after" may not be read, only the figure. Record what is read | NOT RUN |
+| A3 | Swipe to the Show chip | It reads "Show: <account name>. Change" and double-tap opens the account list | NOT RUN |
+| A4 | After P8, swipe to the Savings purchase row and its badge | The badge text ("$800.00 shortfall · counted against spendable accounts") is read | NOT RUN |
+
+### Safari (macOS and iOS), web app: NOT RUN
+| # | Steps | Expected | Status |
+|---|---|---|---|
+| S1 | Web app in Safari → Explore sample data → Planning → Show drop-down: pick each account | Same as P1 | NOT RUN |
+| S2 | Day details on any day; close with the × or Esc (Mac) | The panel opens from the right (Mac) or fills the screen (iPhone); lines scroll; it closes | NOT RUN |
+| S3 | P8 on the web app | Same as P8 | NOT RUN |
 
 ## 3. Desktop web only
 | # | Step | Expected |

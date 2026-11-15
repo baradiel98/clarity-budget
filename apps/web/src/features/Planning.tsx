@@ -9,7 +9,7 @@ import {
   annualEquivalentCents, applyWeekendRule, balanceOnDate, buildDailyLedger, buildDashboard, ledgerAccounts, ledgerDayExplanation, buildForecast, computeSafeToSpend, describeSchedule, monthlyEquivalentCents, nextScheduleDate, planningWindowEnd, type Occurrence,
 } from '@clarity/engine';
 import {
-  addDays, CATCHUP_ACTION_LABEL, INCOME_STATUS_LABEL, OCCURRENCE_STATUS_LABEL, STATUS_HELP, CATCHUP_COUNT, CATCHUP_DONE, CATCHUP_HINT, CATCHUP_TITLE, centsToDecimalString, LEDGER_ALL_CASH, LEDGER_COVER_BADGE, LEDGER_CARD_NOTE, LEDGER_DAY_DETAILS, LEDGER_DAY_LABEL, LEDGER_SHOW, endOfMonth, formatCents, formatShortDate, formatWeekdayDate, monthNameLong, PAID_DUE, PAID_EMPTY, PAID_HINT, PAID_TITLE, parseAmountInput, parseISO, TERMS, type RecurringAmount,
+  addDays, CATCHUP_ACTION_LABEL, INCOME_STATUS_LABEL, OCCURRENCE_STATUS_LABEL, STATUS_HELP, CATCHUP_COUNT, CATCHUP_DONE, CATCHUP_HINT, CATCHUP_TITLE, centsToDecimalString, LEDGER_ALL_CASH, LEDGER_COVER_BADGE, LEDGER_SHORTFALL_HINT, LEDGER_CARD_NOTE, LEDGER_DAY_DETAILS, LEDGER_DAY_LABEL, LEDGER_SHOW, endOfMonth, formatCents, formatShortDate, formatWeekdayDate, monthNameLong, PAID_DUE, PAID_EMPTY, PAID_HINT, PAID_TITLE, parseAmountInput, parseISO, TERMS, type RecurringAmount,
   type RecurringItem, type RecurringKind, type Schedule, type WeekendRule,
 } from '@clarity/shared';
 import { useData, useRun, useSession, useStore } from '../state/session';
@@ -106,9 +106,9 @@ export function Planning() {
       // one account: the ledger's own entries (the effect on this account), plus what isn't counted and skipped items
       const skippedHere = forecast.occurrences.filter((o) => o.status === 'skipped' && (o.accountId === scopeId || o.toAccountId === scopeId));
       return ledger.days.map((d) => {
-        const items: { key: string; label: string; cents: number; currency?: string; occ?: Occurrence; status: Occurrence['status'] | 'scheduled_tx' | 'excluded'; isIncome: boolean; covered?: number; infoOnly?: boolean }[] = d.entries.map((e) => ({
+        const items: { key: string; label: string; cents: number; currency?: string; occ?: Occurrence; status: Occurrence['status'] | 'scheduled_tx' | 'excluded'; isIncome: boolean; covered?: number; overdrawn?: boolean; infoOnly?: boolean }[] = d.entries.map((e) => ({
           key: e.eventId, label: e.label, cents: e.deltaCents, currency: scopeCur, ...(e.occurrence ? { occ: e.occurrence } : {}),
-          ...(e.coveredCents ? { covered: e.coveredCents } : {}), ...(e.deltaCents === 0 ? { infoOnly: true } : {}),
+          ...(e.coveredCents ? { covered: e.coveredCents, overdrawn: e.basis === 'overdrawn' } : {}), ...(e.deltaCents === 0 ? { infoOnly: true } : {}),
           status: (e.basis === 'planned' ? 'scheduled_tx' : e.occurrence?.status ?? 'expected') as Occurrence['status'] | 'scheduled_tx',
           isIncome: e.deltaCents > 0,
         }));
@@ -119,7 +119,7 @@ export function Planning() {
     }
     // An amount that isn't a cash effect is in the currency of the account it belongs to (Phase 4A.4.4).
     const ccy = (id?: string) => data.accounts.find((a) => a.id === id)?.currency ?? cur;
-    const days: { date: string; end: number; items: { key: string; label: string; cents: number; currency?: string; occ?: Occurrence; status: Occurrence['status'] | 'scheduled_tx' | 'excluded'; isIncome: boolean; covered?: number; infoOnly?: boolean }[] }[] = [];
+    const days: { date: string; end: number; items: { key: string; label: string; cents: number; currency?: string; occ?: Occurrence; status: Occurrence['status'] | 'scheduled_tx' | 'excluded'; isIncome: boolean; covered?: number; overdrawn?: boolean; infoOnly?: boolean }[] }[] = [];
     const occByDate = new Map<string, Occurrence[]>();
     for (const o of forecast.occurrences) if (o.status === 'skipped' || o.status === 'overdue') occByDate.set(o.status === 'overdue' ? today : o.date, [...(occByDate.get(o.status === 'overdue' ? today : o.date) ?? []), o]);
     for (const d of forecast.days) {
@@ -229,6 +229,7 @@ export function Planning() {
             </label>
           )}
           {isCard && <p className="hint" data-testid="ledger-card-note" style={{ marginTop: 0 }}>{LEDGER_CARD_NOTE}</p>}
+          {scopeAcct && ledger.days.some((d) => d.entries.some((e) => e.coveredCents && e.basis !== 'overdrawn')) && <p className="hint" data-testid="ledger-shortfall-hint" style={{ marginTop: 0 }}>{LEDGER_SHORTFALL_HINT(scopeAcct.name)}</p>}
           <p className="hint" data-testid="timeline-scope" style={{ marginTop: 0 }}>
               {horizon === stsScope.horizonEnd
                 ? `Shows what's scheduled through ${formatShortDate(horizon)}, the end of the Safe to Spend forecast. Recurring items continue after that; see the lists.`
@@ -253,7 +254,7 @@ export function Planning() {
                       <span className="tl-label">
                         <span style={{ textDecoration: it.status === 'skipped' ? 'line-through' : undefined }} className={it.status === 'skipped' ? 'faint' : ''}>{it.label}</span>
                         {it.status === 'excluded' ? <span className="badge warn">Estimated, not in Safe to Spend</span> : it.status !== 'expected' && statusBadge({ status: it.status as Occurrence['status'], isIncome: it.isIncome })}
-                        {it.covered ? <span className="badge warn" data-testid="covered-badge">{LEDGER_COVER_BADGE(formatCents(it.covered, it.currency ?? cur))}</span> : null}
+                        {it.covered ? <span className="badge warn" data-testid="covered-badge">{LEDGER_COVER_BADGE(formatCents(it.covered, it.currency ?? cur), it.overdrawn)}</span> : null}
                       </span>
                       <span className={`tl-amt num ${it.cents > 0 ? 'pos' : ''}`}>{it.status === 'unknown' || it.status === 'skipped' || it.infoOnly ? <span className="faint">—</span> : <>{it.status === 'estimated' && <span className="approx" aria-label="about">≈</span>}<Money cents={it.cents} currency={it.currency ?? cur} sign="always" /></>}</span>
                       {it.occ ? (

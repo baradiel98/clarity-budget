@@ -50,12 +50,14 @@ describe('D1/D2: a non-spendable account shows its own balance; the shortfall is
     expect(rows(sav, '2026-11-20')).toEqual([['Insurance', -12000, -7000, 7000]]);
     expect(rows(sav, '2026-12-20')).toEqual([['Insurance', -12000, -19000, 12000]]);
     expect(day(sav, '2026-11-20').lowCents).toBe(-7000);
-    expect(day(sav, '2026-11-20').entries[0]!.notes).toEqual(["Savings can cover $50.00 of it; the other $70.00 has to come from your spendable accounts (Clarity hasn't chosen which). The balance shown is what Savings would hold if nothing is moved in."]);
-    expect(day(sav, '2026-12-20').entries[0]!.notes[0]).toContain('Savings can cover $0.00 of it; the other $120.00');
+    // Phase 5A.2: three things kept apart: the projection if the whole payment is taken from Savings (−$70), the $70
+    // shortfall counted against the spendable accounts (no account chosen), and the bank's actual response (unknown)
+    expect(day(sav, '2026-11-20').entries[0]!.notes).toEqual(["Savings can cover $50.00 of this $120.00 payment. The other $70.00 is a shortfall: Safe to Spend counts it against your spendable accounts, and Clarity hasn't chosen which one covers it. The balance shown here assumes the whole $120.00 is taken from Savings with nothing moved in first. What your bank would actually do (pay it and overdraw the account, decline it, or charge a fee) depends on your bank; Clarity can't know."]);
+    expect(day(sav, '2026-12-20').entries[0]!.notes[0]).toContain('Savings can cover $0.00 of this $120.00 payment. The other $120.00 is a shortfall');
     const cash = buildDailyLedger(input, { kind: 'cash' });
     expect([day(cash, '2026-11-20').endCents, day(cash, '2026-12-20').endCents]).toEqual([93000, 81000]);
     // the combined note says the same without "the balance shown" (it isn't this account's view)
-    expect(day(cash, '2026-11-20').entries[0]!.notes).toEqual(["Savings can cover $50.00 of it; the other $70.00 has to come from your spendable accounts (Clarity hasn't chosen which)."]);
+    expect(day(cash, '2026-11-20').entries[0]!.notes).toEqual(["Savings can cover $50.00 of this $120.00 payment. The other $70.00 is a shortfall counted here against your spendable accounts; Clarity hasn't chosen which one covers it."]);
     expect(day(buildDailyLedger(input, { kind: 'account', accountId: C }), '2026-12-31').endCents).toBe(100000);
     expect(computeSafeToSpend(input).cents).toBe(81000); // unchanged from Phase 5A review (scenario A)
   });
@@ -81,7 +83,12 @@ describe('D1/D2: a non-spendable account shows its own balance; the shortfall is
     const V = b.acct('Visa', 'credit_card', 30000);
     rec(b, 'Visa from savings', 'transfer', S, 20000, 22, { toAccountId: V });
     const input = engineInput(b.data, b.today);
-    expect(rows(buildDailyLedger(input, { kind: 'account', accountId: S }), '2026-11-22')).toEqual([['Visa from savings', -20000, -15000, 15000]]);
+    const sv = buildDailyLedger(input, { kind: 'account', accountId: S });
+    expect(rows(sv, '2026-11-22')).toEqual([['Visa from savings', -20000, -15000, 15000]]);
+    // Phase 5A.2: the amounts in the note come from what Savings actually pays ($50 of $200), not the rewritten payment
+    // legs (5A.1 said "can cover −$100.00")
+    expect(day(sv, '2026-11-22').entries[0]!.notes[0]).toContain('Savings can cover $50.00 of this $200.00 payment. The other $150.00 is a shortfall');
+    expect(day(buildDailyLedger(input, { kind: 'cash' }), '2026-11-22').entries[0]!.notes[0]).toBe("Savings can cover $50.00 of this $200.00 payment. The other $150.00 is a shortfall counted here against your spendable accounts; Clarity hasn't chosen which one covers it.");
     expect(rows(buildDailyLedger(input, { kind: 'account', accountId: V }), '2026-11-22')).toEqual([['Visa from savings', 20000, -10000, 0]]);
     expect(day(buildDailyLedger(input, { kind: 'cash' }), '2026-11-22').endCents).toBe(85000);
   });

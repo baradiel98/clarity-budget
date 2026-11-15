@@ -259,7 +259,12 @@ When a non-spendable account (savings) can't pay what is due from it, or is over
 
 The account view now shows the account's own balance: working balance − (covered − repaid) for that account so far (`repaidAccountId`: money arriving later that repays a counted overdrawn balance).
 - Savings −$100 stays −$100.
-- Savings $50 paying $120 shows −$70, with "Savings can cover $50.00 of it; the other $70.00 has to come from your spendable accounts (Clarity hasn't chosen which)" and a badge.
+- Savings $50 paying $120 shows −$70. Phase 5A.2 keeps three things apart in the wording (web and mobile, shared text):
+  - the −$70 is a conservative projection assuming the whole $120 is taken from Savings with nothing moved in first;
+  - the $70 is a shortfall Safe to Spend counts against the spendable accounts, with no account chosen (badge "$70.00 shortfall · counted against spendable accounts");
+  - what the bank would actually do (pay and overdraw, decline, charge a fee) can't be known.
+
+  A note above that account's schedule says the same. The "can cover" amount is what the account itself pays in the forecast (`applied`), so a card payment from savings reads correctly (5A.1 read the rewritten payment legs and said "can cover −$100.00").
 - Money moved in later shows in full (−$100 + $30 = −$70).
 
 Spendable accounts and cards are never adjusted (tested). The combined view, Safe to Spend and every other figure are unchanged: compared with the pre-fix and pre-5A engines on 67 workspaces.

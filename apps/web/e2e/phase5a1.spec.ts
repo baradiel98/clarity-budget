@@ -31,13 +31,15 @@ test('a payment Savings can only partly cover: its own balance, the part counted
   const nov20 = page.locator('.tl-day').filter({ hasText: 'Fri, Nov 20' });
   await expect(nov20.getByTestId('tl-day-end')).toContainText('−$800.00');
   await expect(nov20.locator('.tl-item').filter({ hasText: 'Roof repair' })).toContainText('−$6,000.00');
-  await expect(nov20.getByTestId('covered-badge')).toHaveText('$800.00 counted against spendable accounts');
+  await expect(nov20.getByTestId('covered-badge')).toHaveText('$800.00 shortfall · counted against spendable accounts');
+  // Phase 5A.2: the schedule says what the negative balance assumes and that the bank's response can't be known
+  await expect(page.getByTestId('ledger-shortfall-hint')).toHaveText("Some payments here are more than Savings can cover. Its balances assume the full payment is taken from Savings; the shortfall is counted against your spendable accounts (Clarity hasn't chosen which). What your bank would actually do can't be known.");
   await expect(page.locator('.tl-day').filter({ hasText: 'Mon, Nov 30' }).getByTestId('tl-day-end')).toContainText('−$550.00');
   await nov20.getByTestId('day-details').click();
   const line = page.getByRole('dialog').locator('.explain-line').filter({ hasText: 'Roof repair' });
   await expect(line).toContainText('−$6,000.00');
   await expect(line.getByTestId('balance-after')).toContainText('−$800.00');
-  await expect(line).toContainText("Savings can cover $5,200.00 of it; the other $800.00 has to come from your spendable accounts (Clarity hasn't chosen which).");
+  await expect(line).toContainText("Savings can cover $5,200.00 of this $6,000.00 payment. The other $800.00 is a shortfall: Safe to Spend counts it against your spendable accounts, and Clarity hasn't chosen which one covers it. The balance shown here assumes the whole $6,000.00 is taken from Savings with nothing moved in first. What your bank would actually do (pay it and overdraw the account, decline it, or charge a fee) depends on your bank; Clarity can't know.");
   await expect(page.getByRole('dialog')).toContainText('in the order the forecast applies it to this account');
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/5a1-01-savings-details.png`, fullPage: false });
   await page.keyboard.press('Escape');

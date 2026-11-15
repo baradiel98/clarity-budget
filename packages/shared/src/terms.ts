@@ -243,11 +243,22 @@ export const LEDGER_OWED_AFTER = 'Owed after';
 export const LEDGER_SUMMARY = "How the end-of-day balance is worked out: the balance at the start of the day, then the day's money going out (listed largest first), then the money coming in. The forecast counts all of a day's money going out before any money coming in, so the order of the outgoing items doesn't change the day's lowest point or its end. The same numbers Safe to Spend and Planning use.";
 export const LEDGER_SUMMARY_ACCOUNT = "How this account's end-of-day balance is worked out: the balance at the start of the day, then each item in the order the forecast applies it to this account. The same forecast Safe to Spend and Planning use.";
 /** Phase 5A.1 (D1/D2): a payment or overdrawn balance a non-spendable account can't cover itself. */
-export const LEDGER_COVER_PAYMENT = (account: string, canCover: string, rest: string, own: boolean) =>
-  `${account} can cover ${canCover} of it; the other ${rest} has to come from your spendable accounts (Clarity hasn't chosen which).${own ? ` The balance shown is what ${account} would hold if nothing is moved in.` : ''}`;
+/**
+ * Phase 5A.1/5A.2: a payment or overdrawn balance a non-spendable account can't cover itself. Three things are kept
+ * apart: the account's projected balance if the whole payment is taken from it (a conservative assumption, not a
+ * prediction), the shortfall Safe to Spend counts against the spendable accounts (no account chosen), and what the bank
+ * would actually do, which Clarity can't know.
+ */
+export const LEDGER_COVER_PAYMENT = (account: string, canCover: string, total: string, rest: string, own: boolean) =>
+  own
+    ? `${account} can cover ${canCover} of this ${total} payment. The other ${rest} is a shortfall: Safe to Spend counts it against your spendable accounts, and Clarity hasn't chosen which one covers it. The balance shown here assumes the whole ${total} is taken from ${account} with nothing moved in first. What your bank would actually do (pay it and overdraw the account, decline it, or charge a fee) depends on your bank; Clarity can't know.`
+    : `${account} can cover ${canCover} of this ${total} payment. The other ${rest} is a shortfall counted here against your spendable accounts; Clarity hasn't chosen which one covers it.`;
 export const LEDGER_COVER_OVERDRAWN = (account: string, amount: string, own: boolean) =>
   `${account} is overdrawn by ${amount}. Safe to Spend counts it against your spendable accounts (Clarity hasn't chosen which).${own ? ' It stays in this account\'s balance until money is moved in.' : ''}`;
-export const LEDGER_COVER_BADGE = (amount: string) => `${amount} counted against spendable accounts`;
+export const LEDGER_COVER_BADGE = (amount: string, overdrawn = false) => `${amount} ${overdrawn ? 'overdrawn' : 'shortfall'} · counted against spendable accounts`;
+/** Phase 5A.2: shown above one account's schedule when a payment there is more than the account can cover. */
+export const LEDGER_SHORTFALL_HINT = (account: string) =>
+  `Some payments here are more than ${account} can cover. Its balances assume the full payment is taken from ${account}; the shortfall is counted against your spendable accounts (Clarity hasn't chosen which). What your bank would actually do can't be known.`;
 export const LEDGER_ANCHOR: Record<'opening' | 'confirmed' | 'confirmed_from_records' | 'posted_in_records', (date: string) => string> = {
   opening: (d) => `Opening balance (${d})`,
   confirmed: (d) => `Confirmed balance (${d})`,

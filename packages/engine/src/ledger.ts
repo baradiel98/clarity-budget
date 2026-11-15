@@ -123,9 +123,10 @@ function notesFor(e: ForecastEvent, scope: LedgerScope, cur: CurrencyCode, name:
     const own = scope.kind === 'account' && scope.accountId === e.coverAccountId;
     if (e.source === 'archived_balance') out.push(LEDGER_COVER_OVERDRAWN(who, formatCents(e.coverCents, cur), own));
     else {
-      const total = -(e.legs.find((l) => l.accountId === e.coverAccountId)?.deltaCents ?? 0);
-      const requested = total > 0 ? total : e.coverCents;
-      out.push(LEDGER_COVER_PAYMENT(who, formatCents(requested - e.coverCents, cur), formatCents(e.coverCents, cur), own));
+      // Phase 5A.2: what the account itself pays is what the forecast applied to it (a card payment's legs are rewritten,
+      // so the scheduled leg can't be used); the full payment is that plus the shortfall
+      const funded = -(e.applied?.find((l) => l.accountId === e.coverAccountId)?.deltaCents ?? 0);
+      out.push(LEDGER_COVER_PAYMENT(who, formatCents(funded, cur), formatCents(funded + e.coverCents, cur), formatCents(e.coverCents, cur), own));
     }
   } else if (e.source === 'archived_balance') out.push(LEDGER_COVERED);
   if (e.repaidCents) out.push(`${formatCents(e.repaidCents, cur)} of it repays an overdrawn balance already counted against your spendable accounts, so it isn't counted again there`);

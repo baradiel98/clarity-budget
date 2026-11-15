@@ -45,12 +45,14 @@ describe('Planning · a payment Savings can only partly cover (mobile)', () => {
     expect([cash.resultCents, cash.lines.find((l) => l.label === 'Roof repair')!.cents]).toEqual([383983, -80000]);
     expect(cash.summary).toContain('listed largest first');
     await act(async () => { fireEvent.press(ui.getByTestId('ledger-scope')); });
-    expect(ui.getByTestId('covered-badge')).toHaveTextContent('$800.00 counted against spendable accounts');
+    expect(ui.getByTestId('covered-badge')).toHaveTextContent('$800.00 shortfall · counted against spendable accounts');
+    // Phase 5A.2: the same distinction as the web app (shared wording)
+    expect(ui.getByTestId('ledger-shortfall-hint')).toHaveTextContent("Some payments here are more than Savings can cover. Its balances assume the full payment is taken from Savings; the shortfall is counted against your spendable accounts (Clarity hasn't chosen which). What your bank would actually do can't be known.");
     await act(async () => { fireEvent.press(ui.getByLabelText('Day details: Fri, Nov 20, Savings')); });
     const ex = takeExplain()!;
     const roof = ex.lines.find((l) => l.label === 'Roof repair')!;
     expect([roof.cents, roof.balanceAfterCents]).toEqual([-600000, -80000]);
-    expect(roof.note).toContain("Savings can cover $5,200.00 of it; the other $800.00 has to come from your spendable accounts (Clarity hasn't chosen which).");
+    expect(roof.note).toContain("Savings can cover $5,200.00 of this $6,000.00 payment. The other $800.00 is a shortfall: Safe to Spend counts it against your spendable accounts, and Clarity hasn't chosen which one covers it. The balance shown here assumes the whole $6,000.00 is taken from Savings with nothing moved in first. What your bank would actually do (pay it and overdraw the account, decline it, or charge a fee) depends on your bank; Clarity can't know.");
     expect(ex.resultCents).toBe(-80000);
     await act(async () => { fireEvent.press(ui.getByLabelText('Day details: Mon, Nov 30, Savings')); });
     expect(takeExplain()!.resultCents).toBe(-55000);

@@ -937,6 +937,20 @@ Base: `phase5a-complete` (1ea3d1a, unchanged).
 
 **Not run:** devices, Safari, screen readers (`docs/device-test-script.md` §2c, all NOT RUN).
 
+## 7ai. Phase 5A.2: shortfall wording and QA preparation
+
+**Owner decision:** keep the conservative negative projection in a non-spendable account's own view.
+
+**Wording:** the view now separates the projection (if the whole payment is taken from the account), the shortfall (counted against spendable accounts, no account chosen) and the bank's actual response (unknown). It does this in the item note, a badge ("… shortfall · counted against spendable accounts" / "… overdrawn · …") and a note above that account's schedule, on web and mobile.
+
+**Fixed:** the 5A.1 note gave a wrong "can cover" amount for a card payment from savings ("−$100.00"); it now uses what the account actually pays. No figure changed.
+
+**QA documentation (`docs/device-test-script.md`):**
+- status-at-a-glance table;
+- Phase 4B.5 (§2b) and Phase 5A (§2c) kept separate, all NOT RUN on devices;
+- Phase 5A steps rewritten to work on any date (sample data follows the device's date), with exact navigation;
+- A4 (badge read aloud) and Safari steps S1–S3 added.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

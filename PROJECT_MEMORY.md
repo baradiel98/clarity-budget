@@ -745,3 +745,8 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Verified]** Older confirmations are labelled reconstructed / as recorded now. Changes after a stored confirmation are named only via each transaction's own `updatedAt`; amounts per change and deleted transactions can't be known (no version history; tombstones live only in encrypted storage).
 - **[Lesson]** A JSON comparison of engine outputs must ignore read-only ledger fields that appear inside events (applied, account snapshots, cover/repaid attribution).
 - **[Open]** Device, Safari and screen-reader QA for 5A/5A.1: `docs/device-test-script.md` §2c, NOT RUN. Phase 4B.5 remains incomplete and untagged.
+
+## Phase 5A.2 (2026-11-15): shortfall wording and QA preparation
+- **[Decision, owner]** Keep the conservative negative projection in a non-spendable account's own view. The wording must separate: the projection (whole payment taken from the account), the unallocated shortfall (counted against spendable accounts, no account chosen) and the bank's actual response (unknown).
+- **[Lesson]** For notes on covered payments, use `ForecastEvent.applied` for what the account pays: card payments from savings have rewritten legs, so the scheduled legs give wrong amounts.
+- **[Lesson]** Sample data follows the device's date, so manual QA steps must not quote fixed dates or figures from test runs (they used Nov 13, 2026).
