@@ -1,6 +1,6 @@
 import { AlertTriangle, ArrowRight, Check, CircleAlert, Info, PenLine, Plus, ShieldCheck, Sparkles, Trash2 } from 'lucide-react';
 import { useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { captureTotals, chosenReturnOf, draftReturnOptions, localInterpreter, parseDrafts, reviewDraft, toCaptureItem, type CaptureContext, type CaptureDraft, type DraftKind, type Issue } from '@clarity/capture';
+import { batchAccountNote, captureTotals, chosenReturnOf, draftCardIssues, draftReturnOptions, localInterpreter, parseDrafts, reviewDraft, toCaptureItem, type CaptureContext, type CaptureDraft, type DraftKind, type Issue } from '@clarity/capture';
 import { matchOptionView, saveCaptured } from '@clarity/data';
 import { centsToDecimalString, formatCents, parseAmountInput, RETURN_ASK_LINK, RETURN_CHECK_TITLE, RETURN_DECIDE_HINT, RETURN_SEPARATE_LABEL, type WorkspaceData } from '@clarity/shared';
 import { Link } from '../lib/router';
@@ -44,6 +44,7 @@ export function CapturePage() {
   const reviews = useMemo(() => new Map(st.drafts.map((d) => [d.id, reviewDraft(d, ctx)])), [st.drafts, ctx]);
   const ready = st.drafts.filter((d) => !reviews.get(d.id)!.some((i) => i.blocking));
   const attention = st.drafts.length - ready.length;
+  const batch = useMemo(() => batchAccountNote(st.drafts, reviews, ctx), [st.drafts, reviews, ctx]);
   const totals = captureTotals(st.drafts);
 
   const read = async () => {
@@ -156,9 +157,10 @@ export function CapturePage() {
           </div>
           {demo && <p className="hint">Sample data: approving is turned off in demo mode.</p>}
           <p className="hint capture-note">Drafts don’t change your balances, budget or Safe to Spend until you approve them.</p>
+          {batch.notes.map((n) => <p key={n} className="callout capture-batch-note" data-testid="capture-batch-note"><Info size={14} aria-hidden /> {n}</p>)}
           <div className="capture-list stagger">
             {st.drafts.map((d) => (
-              <DraftCard key={d.id} d={d} issues={reviews.get(d.id)!} data={data} ctx={ctx} cur={cur} saving={saving || demo}
+              <DraftCard key={d.id} d={d} issues={draftCardIssues(reviews.get(d.id)!, d.id, batch)} data={data} ctx={ctx} cur={cur} saving={saving || demo}
                 onChange={(p) => update(d.id, p)} onRemove={() => remove(d.id)} onApprove={() => void approve([d.id])} />
             ))}
           </div>

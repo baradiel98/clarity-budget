@@ -396,7 +396,7 @@ export function computeSafeToSpend(input: EngineInput, hypotheticals?: readonly 
   const list = (xs: string[]) => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
   const afterNote =
     afterOut > 0
-      ? `${list(outs)} (${formatCents(afterOut, cur)}) come after ${formatShortDate(low.date)}${afterIn > 0 ? `, once ${formatCents(afterIn, cur)} has come in` : ''}. Your balance stays at or above the ${formatShortDate(low.date)} low through ${formatShortDate(h.end)}, so they don't lower Safe to Spend.`
+      ? `${list(outs)} (${formatCents(afterOut, cur)}) ${outs.length === 1 ? 'comes' : 'come'} after ${formatShortDate(low.date)}${afterIn > 0 ? `, once ${formatCents(afterIn, cur)} has come in` : ''}. Your balance stays at or above the ${formatShortDate(low.date)} low through ${formatShortDate(h.end)}, so ${outs.length === 1 ? "it doesn't" : "they don't"} lower Safe to Spend.`
       : null;
 
   const lines: ExplainLine[] = [

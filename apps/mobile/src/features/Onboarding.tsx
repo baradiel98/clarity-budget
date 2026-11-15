@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
-import { Share, View } from 'react-native';
+import { Pressable, Share, View } from 'react-native';
 import { countedOutflows, engineInput, onboard, type OnboardingInput } from '@clarity/data';
 import { buildDashboard } from '@clarity/engine';
-import { addDays, BALANCE_ENTRY_HINT, formatShortDate, parseBalanceEntry, monthNameLong, parseAmountInput, parseISO, TERMS, type Schedule } from '@clarity/shared';
+import { addDays, BALANCE_ENTRY_HINT, BALANCE_ENTRY_MORE, BALANCE_ENTRY_SHORT, formatShortDate, parseBalanceEntry, monthNameLong, parseAmountInput, parseISO, TERMS, type Schedule } from '@clarity/shared';
 import { useData, useRun, useSession } from '../state/session';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -54,6 +54,7 @@ export function Onboarding() {
   const [balance, setBalance] = useState('');
   // Phase 4A.5.8: the keypad has no minus key, so an overdrawn balance is an explicit choice; the sign is never dropped
   const [overdrawn, setOverdrawn] = useState(false);
+  const [balanceMore, setBalanceMore] = useState(false);
   const balanceCents = (() => { const p = parseBalanceEntry(`${overdrawn ? '-' : ''}${balance || '0'}`, cur); return p.ok ? p.cents : 0; })();
   const [freq, setFreq] = useState<Freq>('biweekly');
   const [nextPay, setNextPay] = useState(addDays(s.today, 7));
@@ -123,7 +124,12 @@ export function Onboarding() {
     return (
       <Panel step={1} footer={<Button title="Continue" onPress={() => setStep(1)} />}>
         <T variant="title1" accessibilityRole="header">What's in your checking account right now?</T>
-        <T color="textSecondary">{BALANCE_ENTRY_HINT} You can add savings, cash and cards later.</T>
+        <T color="textSecondary">{BALANCE_ENTRY_SHORT} You can add savings, cash and cards later.</T>
+        {/* Phase 4B.1: the full explanation on request (the text itself is unchanged) */}
+        <Pressable testID="balance-more-toggle" accessibilityRole="button" accessibilityState={{ expanded: balanceMore }} onPress={() => setBalanceMore((v) => !v)} hitSlop={10} style={{ alignSelf: 'flex-start', paddingVertical: 4 }}>
+          <T variant="callout" color="accent" style={{ fontFamily: 'Inter_500Medium' }}>{BALANCE_ENTRY_MORE}</T>
+        </Pressable>
+        {balanceMore && <T variant="footnote" color="textSecondary" testID="balance-more">{BALANCE_ENTRY_HINT}</T>}
         <Money cents={balanceCents} currency={cur} variant="hero" style={{ textAlign: 'center', marginVertical: 12 }} />
         <Check label="This account is overdrawn (the balance is negative)" value={overdrawn} onChange={setOverdrawn} />
         <Keypad value={balance} onChange={setBalance} />

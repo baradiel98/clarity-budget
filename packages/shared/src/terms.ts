@@ -71,6 +71,9 @@ export const UPCOMING_LATER_TITLE = 'Later · also counted in Safe to Spend';
  */
 export const BALANCE_ENTRY_HINT =
   "Enter the posted (cleared) balance your bank shows right now, without pending items. If the account is overdrawn, type a minus sign (for example -50.00). Anything you record afterwards that's dated today or later is added to it; if something dated today is already in this balance, tick “Already included” when you record it.";
+/** Phase 4B.1: the onboarding balance question keeps only this line visible; the full BALANCE_ENTRY_HINT is one tap away. */
+export const BALANCE_ENTRY_SHORT = 'The posted balance your bank shows right now.';
+export const BALANCE_ENTRY_MORE = 'More about this balance';
 /** Phase 4A.5.8: cards are entered as Owed or In credit, never with a sign. */
 export const CARD_BALANCE_ENTRY_HINT =
   "Enter the posted (cleared) balance on your card statement right now, without pending items. Choose “In credit” if the card owes you money (for example after a refund).";

@@ -599,3 +599,39 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
   - An overdue occurrence is shown only up to 62 days back, so a payment for an older bill can't be linked. Its occurrence no longer counts either.
   - An "invalid" link (the bill moved to another account) is reported but still counts as paid until the user unlinks it.
 
+
+## Phase 4A final check (2026-11-15, read-only): stale and legacy links
+- **[Verified by probe]** No path through the apps makes Safe to Spend too high:
+  - moving a bill to another account, or changing a transfer's destination: no effect;
+  - changing a schedule: the forecast is too cautious (flagged in the Edit form);
+  - changing an item's type would overstate it, but neither app lets an existing item's type change.
+- **[Open, low]** After a bill moves to another account, the Edit form flags a correct link as "no longer fits… Unlink it" and refuses other edits. Unlinking lowers Safe to Spend by the bill amount and can't be undone by re-linking.
+- **[Open, low]** Data written before 4A.9 can hold two transactions linked to one due date (two rows of one statement). Balances are unaffected and the forecast counts it once; variable-bill estimates are skewed slightly. Editing either transaction is refused until one is unlinked (the message says so). No repair is needed.
+- **[Decision]** Phase 4A financial engine declared complete at f7bcb82.
+
+## Phase 4B audit (2026-11-15, read-only): product experience priorities
+- **[Open]** In priority order:
+  1. wording and clutter fixes (done in 4B.1);
+  2. Home hierarchy and repeated figures (owner to decide whether Safe to Spend becomes the headline);
+  3. a "Paid this month" section in Planning;
+  4. a catch-up review for overdue and unrecorded items;
+  5. a mobile device test before any mobile redesign.
+- **[Keep]**
+  - onboarding flow;
+  - Capture's review-before-approval model and field-source labels;
+  - the Add dialog;
+  - "Why this number?";
+  - exact terms;
+  - the restrained visual style.
+
+## Phase 4B.1 (2026-11-15): small product experience improvements
+- **[Verified implementation]** Web and mobile:
+  1. The Safe to Spend "after the low point" sentence agrees in number: "Rent ($1,200.00) comes … so it doesn't lower Safe to Spend". Wording only (`packages/engine/src/plan.ts`).
+  2. The web "Next after …" caption has an 8px gap below the explanation (`.sts-note`). Mobile already had one.
+  3. Web Home no longer has its own header Add Transaction button. Entry stays in the sidebar (desktop), the tab bar "+" (narrow windows), the `N` shortcut and the empty-state button. Mobile Home had none (tab bar "+").
+  4. Capture says "No account was mentioned in N drafts, so X is used for them." once per batch when 2 or more drafts use the same default account (`batchAccountNote`, `draftCardIssues` in `packages/capture`). A single draft keeps its own note. Review issues, readiness, approval and field-source labels are unchanged.
+  5. The first onboarding question shows `BALANCE_ENTRY_SHORT` ("The posted balance your bank shows right now.") with a "More about this balance" disclosure (web: `aria-expanded`/`aria-controls`; mobile: `accessibilityState.expanded`). It reveals the unchanged `BALANCE_ENTRY_HINT`. Account dialogs and Update balance still show the full hint.
+- **[Data model]** No change. No calculation changed.
+- **[Tests changed on purpose]**
+  - `phase3c.spec.ts` now uses the sidebar button (the Home header button is gone).
+  - `phase4a56.spec.ts` opens the disclosure before checking the hint text.

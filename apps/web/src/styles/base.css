@@ -502,7 +502,7 @@ tr.fresh > td:first-child { animation-name: fresh; }
 @media (min-width: 1600px) { .overview { grid-template-columns: minmax(0, 1.85fr) minmax(360px, 1fr); } }
 .sts-after { margin: -6px 0 14px; max-width: 60ch; line-height: 18px; }
 /* Phase 4A.2: what Safe to Spend does not cover, visible on the card itself. */
-.sts-note { margin: -6px 0 12px; font-size: 13px; line-height: 18px; color: var(--c-text-secondary); }
+.sts-note { margin: 8px 0 12px; font-size: 13px; line-height: 18px; color: var(--c-text-secondary); }
 .stat .v.repeat { color: var(--c-text-secondary); }
 .upcoming-note { margin: -6px 0 10px; }
 /* Later items that Safe to Spend counts (after the Upcoming window): a compact list, no actions. */

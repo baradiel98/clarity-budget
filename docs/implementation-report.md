@@ -762,6 +762,26 @@ Owner policy: each transfer leg settles on its own; money in transit isn't spend
   - An "invalid" link still counts as paid until it is unlinked.
   - Not verified on simulators, devices, Safari or with a screen reader.
 
+## 7ab. Phase 4B.1: small product experience improvements (from the Phase 4B audit)
+
+Wording, spacing and duplicate actions only; no calculation or data change. Checkpoint `phase4b1-checkpoint-before` (f7bcb82).
+
+| # | Change | Where |
+|---|---|---|
+| 1 | "comes … it doesn't" when one item follows the low point; "come … they don't" otherwise | `packages/engine/src/plan.ts` (text only) |
+| 2 | 8px gap between the Safe to Spend explanation and "Next after …" (was −6px) | `apps/web/src/styles/base.css` `.sts-note` |
+| 3 | Home header "Add Transaction" removed. Still available: sidebar, tab bar "+", `N`, the empty-state button | `apps/web/src/features/Home.tsx` |
+| 4 | Default-account note said once per Capture batch (2+ drafts); one draft keeps its own | `packages/capture/src/review.ts`, web and mobile `Capture.tsx` |
+| 5 | Onboarding balance question: short line plus an accessible "More about this balance" disclosure with the unchanged full hint | `packages/shared/src/terms.ts`, web and mobile `Onboarding.tsx` |
+
+Tests:
+- **New:**
+  - `packages/capture/test/batch-notes.test.ts` (4);
+  - `packages/data/test/sts-wording.test.ts` (1; hand-checked: low $2,400 on Nov 15, $5,400 in and $1,200 out after it through Dec 31);
+  - `apps/mobile/test/phase4b1.test.tsx` (2);
+  - `apps/web/e2e/phase4b1.spec.ts` (3).
+- **Updated on purpose:** `phase3c.spec.ts` and `phase4a56.spec.ts`.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

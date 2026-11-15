@@ -131,3 +131,30 @@ export function captureTotals(drafts: readonly CaptureDraft[]): { out: Cents; in
   }
   return { out, in: inn, moved };
 }
+
+/**
+ * Phase 4B.1: the default-account note ("No account was mentioned, so … is used.") said once for the batch instead of on
+ * every draft. When two or more drafts use the same default account without naming one, returns one batch note and the
+ * drafts whose own copy of that note is left out; otherwise (a single such draft) the note stays on the draft. Only
+ * this informational note is moved: blocking issues, field-source labels ("your default") and approval are unchanged.
+ */
+export function batchAccountNote(drafts: readonly CaptureDraft[], reviews: ReadonlyMap<string, readonly Issue[]>, ctx: CaptureContext): { notes: string[]; draftIds: Set<string> } {
+  const byAccount = new Map<string, string[]>();
+  for (const d of drafts) {
+    if (!d.accountId || !reviews.get(d.id)?.some((i) => i.code === 'account_default')) continue;
+    byAccount.set(d.accountId, [...(byAccount.get(d.accountId) ?? []), d.id]);
+  }
+  const notes: string[] = [];
+  const draftIds = new Set<string>();
+  for (const [accountId, ids] of byAccount) {
+    if (ids.length < 2) continue;
+    const name = ctx.accounts.find((a) => a.id === accountId)?.name ?? 'your default account';
+    notes.push(`No account was mentioned in ${ids.length === drafts.length ? `these ${ids.length} drafts` : `${ids.length} of these drafts`}, so ${name} is used for them.`);
+    for (const id of ids) draftIds.add(id);
+  }
+  return { notes, draftIds };
+}
+
+/** Phase 4B.1: a draft's issues as its card shows them (without the default-account note when the batch says it). */
+export const draftCardIssues = (issues: readonly Issue[], draftId: string, batch: { draftIds: Set<string> }): Issue[] =>
+  batch.draftIds.has(draftId) ? issues.filter((i) => i.code !== 'account_default') : [...issues];

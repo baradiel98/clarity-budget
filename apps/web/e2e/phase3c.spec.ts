@@ -49,7 +49,7 @@ test.describe('1. destructive button contrast', () => {
 test.describe('2. dialogs return focus to the control that opened them', () => {
   test('desktop: Add Transaction (Escape and Cancel), Why this number?', async ({ page }) => {
     await sample(page, 1280);
-    const add = page.locator('.page-actions .btn-primary', { hasText: 'Add Transaction' });
+    const add = page.locator('.sidebar-add', { hasText: 'Add Transaction' });
     await add.focus();
     await page.keyboard.press('Enter');
     await expect(page.getByRole('dialog', { name: 'Add Transaction' })).toBeVisible();
@@ -229,7 +229,7 @@ test('11. Settings preferences: reserve and default-account fields line up', asy
 
 test('12. keyboard hints are decorative: button names stay clean', async ({ page }) => {
   await sample(page, 1280);
-  await expect(page.locator('.page-actions .btn-primary')).toHaveAccessibleName('Add Transaction');
+  await expect(page.locator('.sidebar-add')).toHaveAccessibleName('Add Transaction');
   for (const k of await page.locator('kbd').all()) if (await k.isVisible()) expect(await k.getAttribute('aria-hidden')).toBe('true');
   await expect(page.getByRole('link', { name: 'Home', exact: true })).toBeVisible();
 });

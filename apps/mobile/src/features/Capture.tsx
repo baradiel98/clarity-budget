@@ -1,7 +1,7 @@
 import { AlertTriangle, Check, Info, ShieldCheck, Trash2 } from 'lucide-react-native';
 import { useMemo, useState, useSyncExternalStore } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
-import { captureTotals, chosenReturnOf, draftReturnOptions, localInterpreter, parseDrafts, reviewDraft, toCaptureItem, type CaptureContext, type CaptureDraft, type DraftKind, type Issue } from '@clarity/capture';
+import { batchAccountNote, captureTotals, chosenReturnOf, draftCardIssues, draftReturnOptions, localInterpreter, parseDrafts, reviewDraft, toCaptureItem, type CaptureContext, type CaptureDraft, type DraftKind, type Issue } from '@clarity/capture';
 import { matchOptionView, type CaptureItem } from '@clarity/data';
 import { centsToDecimalString, formatCents, parseAmountInput, RETURN_ASK_LINK, RETURN_CHECK_TITLE, RETURN_DECIDE_HINT, RETURN_SEPARATE_LABEL, type WorkspaceData } from '@clarity/shared';
 import { captureStore } from '../state/capture';
@@ -69,6 +69,7 @@ export function CaptureView({ data, today, approve, onAddManually, disabled }: C
   const reviews = useMemo(() => new Map(st.drafts.map((d) => [d.id, reviewDraft(d, ctx)])), [st.drafts, ctx]);
   const ready = st.drafts.filter((d) => !reviews.get(d.id)!.some((i) => i.blocking));
   const totals = captureTotals(st.drafts);
+  const batch = useMemo(() => batchAccountNote(st.drafts, reviews, ctx), [st.drafts, reviews, ctx]);
 
   const read = async () => {
     const text = st.text.trim();
@@ -144,8 +145,14 @@ export function CaptureView({ data, today, approve, onAddManually, disabled }: C
             {totals.moved > 0 && <T color="textSecondary">{formatCents(totals.moved, cur)} moved</T>}
           </View>
           <T variant="caption" color="textTertiary">Drafts don’t change your balances, budget or Safe to Spend until you approve them.</T>
+          {batch.notes.map((n) => (
+            <View key={n} testID="capture-batch-note" style={{ flexDirection: 'row', gap: 8, alignItems: 'center', backgroundColor: c.surfaceMuted, borderRadius: 10, padding: 10 }}>
+              <Info size={14} color={c.textSecondary} />
+              <T variant="footnote" color="textSecondary" style={{ flex: 1 }}>{n}</T>
+            </View>
+          ))}
           {st.drafts.map((d) => (
-            <DraftCard key={d.id} d={d} issues={reviews.get(d.id)!} data={data} ctx={ctx} today={today} cur={cur} busy={saving || !!disabled}
+            <DraftCard key={d.id} d={d} issues={draftCardIssues(reviews.get(d.id)!, d.id, batch)} data={data} ctx={ctx} today={today} cur={cur} busy={saving || !!disabled}
               onChange={(p) => update(d.id, p)} onRemove={() => captureStore.set((s) => ({ drafts: s.drafts.filter((x) => x.id !== d.id) }))} onApprove={() => void doApprove([d.id])} />
           ))}
           <Button testID="approve-all" title={ready.length === st.drafts.length ? `Approve all ${ready.length}` : `Approve ${ready.length} ready`} disabled={ready.length === 0 || saving || disabled} busy={saving} onPress={() => void doApprove(ready.map((d) => d.id))} />

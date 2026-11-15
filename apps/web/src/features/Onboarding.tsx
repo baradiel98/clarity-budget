@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { countedOutflows, engineInput, onboard, type OnboardingInput } from '@clarity/data';
 import { buildDashboard, scheduleDates } from '@clarity/engine';
-import { addDays, BALANCE_ENTRY_HINT, parseBalanceEntry, formatMonthYear, formatShortDate, formatWeekdayDate, monthNameLong, parseAmountInput, parseISO, type ISODate, type Schedule, TERMS } from '@clarity/shared';
+import { addDays, BALANCE_ENTRY_HINT, BALANCE_ENTRY_MORE, BALANCE_ENTRY_SHORT, parseBalanceEntry, formatMonthYear, formatShortDate, formatWeekdayDate, monthNameLong, parseAmountInput, parseISO, type ISODate, type Schedule, TERMS } from '@clarity/shared';
 import { Plus, X } from 'lucide-react';
 import { useData, useRun, useSession } from '../state/session';
 import { AmountInput } from '../ui/AmountInput';
@@ -46,6 +46,7 @@ export function Onboarding() {
   const [billDate, setBillDate] = useState(addDays(session.today, 10));
   const [billMonthly, setBillMonthly] = useState(true);
   const [skipBill, setSkipBill] = useState(false);
+  const [balanceMore, setBalanceMore] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
 
@@ -162,9 +163,12 @@ export function Onboarding() {
           <>
             <h1 className="t-title1">What's in your checking account right now?</h1>
             <p className="muted t-callout">You can add savings, cash and cards later.</p>
-            <Field label="Current checking balance" hint={BALANCE_ENTRY_HINT} error={errors.balance}>
+            <Field label="Current checking balance" hint={BALANCE_ENTRY_SHORT} error={errors.balance}>
               {(id) => <AmountInput id={id} value={balance} onChange={setBalance} currency={cur} signed autoFocus />}
             </Field>
+            {/* Phase 4B.1: the full explanation on request (a disclosure; the text itself is unchanged) */}
+            <button type="button" className="btn-link" aria-expanded={balanceMore} aria-controls="balance-more" data-testid="balance-more-toggle" onClick={() => setBalanceMore((v) => !v)}>{BALANCE_ENTRY_MORE}</button>
+            {balanceMore && <p className="hint" id="balance-more" data-testid="balance-more">{BALANCE_ENTRY_HINT}</p>}
           </>
         )}
         {step === 1 && (

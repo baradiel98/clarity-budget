@@ -24,6 +24,8 @@ test('onboarding says what the balance should include', async ({ page }) => {
   await page.getByRole('checkbox', { name: /Create a recovery key/ }).uncheck();
   await page.getByRole('checkbox', { name: /cannot be recovered/ }).check();
   await page.getByRole('button', { name: 'Continue' }).click();
+  // Phase 4B.1: the full explanation is one tap away ("More about this balance"), unchanged
+  await page.getByRole('button', { name: 'More about this balance' }).click();
   await expect(page.getByText(HINT)).toBeVisible();
 });
 

@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowDownLeft, ArrowUpRight, CalendarClock, CircleAlert, CircleHelp, Info, Plus, TrendingDown, TrendingUp } from 'lucide-react';
+import { AlertTriangle, ArrowDownLeft, ArrowUpRight, CalendarClock, CircleAlert, CircleHelp, Info, TrendingDown, TrendingUp } from 'lucide-react';
 import { useMemo, useState, type CSSProperties } from 'react';
 import { backupDue, buildHomeView, recentRow, upcomingLaterPreview } from '@clarity/data';
 import { buildForecast, cashHistory, type Explanation, type UpcomingItem } from '@clarity/engine';
@@ -59,9 +59,6 @@ export function Home() {
         <div>
           <h1>{formatMonthYear(today)}</h1>
           <div className="sub muted t-callout">{formatWeekdayDate(today)}</div>
-        </div>
-        <div className="page-actions hide-mobile">
-          <button className="btn btn-primary" onClick={() => ui.openAdd()}><Plus size={16} /> {TERMS.addTransaction} <kbd aria-hidden="true">N</kbd></button>
         </div>
       </div>
 
