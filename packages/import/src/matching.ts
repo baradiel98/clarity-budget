@@ -1,5 +1,5 @@
 import { addDays, diffDays, formatCents, formatShortDate, type Account, type Cents, type ID, type ISODate, type Transaction, type TxStatus } from '@clarity/shared';
-import { similarity } from '@clarity/engine';
+import { inOpeningBalance, isReturnedPayment, isVoidedReturnLeg, similarity } from '@clarity/engine';
 
 /**
  * Phase 4A.5.12: which existing transactions a statement row could be. One place for the rules, used by the import
@@ -19,7 +19,12 @@ export const MATCH_WINDOWS = {
   // Phase 4A.5.14: the same as pending. A posted, unlinked transfer leg is one the user marked posted (or entered as
   // posted) before its statement arrived; the receiving bank can post 8–11 days after the transfer was made.
   transfer: { daysBefore: 3, daysAfter: 10 },
+  // Phase 4A.5.17: a returned / rejected / reversed card payment shows up from the payment's own date to 30 days after.
+  returned: { daysBefore: 0, daysAfter: 30 },
 } as const;
+
+/** Phase 4A.5.17: words banks use for a returned payment. Evidence that ranks a candidate first, never proof on its own. */
+const RETURN_RE = /\b(return(ed)?|revers(al|ed)?|reject(ed)?|nsf|insufficient|chargeback|refused|failed|unpaid)\b/i;
 
 export interface MatchCandidate {
   txId: ID;
@@ -27,9 +32,11 @@ export interface MatchCandidate {
    * 'pending': a pending transaction (any type, transfer legs included) inside the normal window;
    * 'transfer': a posted transfer leg inside the transfer window;
    * 'stale' (Phase 4A.5.14): a pending transaction OLDER than the normal window (e.g. a check cashed weeks later),
-   * listed separately so it can't stay pending unnoticed while the same money is imported again.
+   * listed separately so it can't stay pending unnoticed while the same money is imported again;
+   * 'return' (Phase 4A.5.17): this row may be the RETURN of a card payment recorded in Clarity (the same amount in the
+   * opposite direction, in an account the payment touched, up to 30 days after it). Choosing it records the return.
    */
-  basis: 'pending' | 'transfer' | 'stale';
+  basis: 'pending' | 'transfer' | 'stale' | 'return';
   date: ISODate;
   merchant: string;
   kind: Transaction['kind'];
@@ -95,20 +102,25 @@ export function feeOfLeg(leg: Transaction, transactions: readonly Transaction[])
  * closest date), then stale ones (same amount first, then smallest difference, then most recent). Description
  * similarity only breaks ties. Nothing is ever chosen automatically.
  */
-export function findMatchCandidates(row: MatchRow, account: Account, transactions: readonly Transaction[], opts: { alsoIds?: readonly ID[] } = {}): MatchCandidate[] {
+export function findMatchCandidates(row: MatchRow, account: Account, transactions: readonly Transaction[], opts: { alsoIds?: readonly ID[]; accounts?: readonly Account[] } = {}): MatchCandidate[] {
   const also = new Set(opts.alsoIds ?? []);
   const out: MatchCandidate[] = [];
   for (const t of transactions) {
+    // Phase 4A.5.17: the return of a card payment (needs `accounts` to know which side is the card)
+    const ret = opts.accounts ? returnCandidate(row, account, t, transactions, opts.accounts) : null;
+    if (ret) { out.push(ret); continue; }
     if (t.accountId !== account.id || t.statementMatch || t.kind === 'adjustment' || t.transferFeeOf) continue;
+    // the cancelled card side of a returned payment the issuer never posted: listed only for exactly its amount
+    if (isVoidedReturnLeg(account, t, transactions) && t.amountCents !== row.amountCents) continue;
     const fee = t.transferGroupId ? feeOfLeg(t, transactions) : undefined;
     const amount = t.amountCents + (fee?.amountCents ?? 0);
     if (Math.sign(amount) !== Math.sign(row.amountCents) || amount === 0) continue;
     const age = diffDays(row.date, t.date);
     const pending = t.status === 'pending' && inWindow(row.date, t.date, MATCH_WINDOWS.pending);
-    // a pending item dated before the account was opened isn't in its balance, so it can't be counted twice
-    const stale = t.status === 'pending' && age > MATCH_WINDOWS.pending.daysAfter && t.date >= account.openingDate;
+    // Phase 4A.5.17: a pending item dated before the account was opened counts too (it isn't in the opening balance)
+    const stale = t.status === 'pending' && age > MATCH_WINDOWS.pending.daysAfter;
     const transfer = t.status !== 'pending' && !!t.transferGroupId && inWindow(row.date, t.date, MATCH_WINDOWS.transfer);
-    const staleTransfer = t.status !== 'pending' && !!t.transferGroupId && age > MATCH_WINDOWS.transfer.daysAfter && amount === row.amountCents && t.date >= account.openingDate;
+    const staleTransfer = t.status !== 'pending' && !!t.transferGroupId && age > MATCH_WINDOWS.transfer.daysAfter && amount === row.amountCents && !inOpeningBalance(account, t);
     if (!pending && !stale && !transfer && !staleTransfer && !also.has(t.id)) continue;
     const differenceCents = row.amountCents - amount;
     const c: MatchCandidate = {
@@ -121,7 +133,9 @@ export function findMatchCandidates(row: MatchRow, account: Account, transaction
   }
   const desc = row.merchant || row.rawDescription;
   const sim = new Map(out.map((c) => [c.txId, similarity(transactions.find((t) => t.id === c.txId)!.merchant, desc)]));
-  const staleRank = (c: MatchCandidate) => Number(c.basis === 'stale');
+  // a return named as such on the statement first; normal candidates; other possible returns; stale ones last
+  const looksReturned = RETURN_RE.test(desc);
+  const staleRank = (c: MatchCandidate) => (c.basis === 'return' ? (looksReturned ? -1 : 0.5) : Number(c.basis === 'stale'));
   // normal candidates before stale ones; same amount first; closest date first (stale: most recent first);
   // then different amounts by smallest difference; description similarity only breaks ties (it is always shown)
   return out.sort((a, b) =>
@@ -130,6 +144,25 @@ export function findMatchCandidates(row: MatchRow, account: Account, transaction
     (a.differenceCents === 0 ? a.daysApart - b.daysApart : Math.abs(a.differenceCents) - Math.abs(b.differenceCents) || a.daysApart - b.daysApart) ||
     (sim.get(b.txId)! - sim.get(a.txId)!) ||
     (a.date < b.date ? -1 : a.date > b.date ? 1 : a.txId < b.txId ? -1 : 1));
+}
+
+/**
+ * Phase 4A.5.17: is this row possibly the return of the card payment `t` belongs to? Evidence required together: `t` is
+ * one leg of a transfer between a credit card and a non-card account, it is in this row's account, the row is exactly
+ * the opposite amount, dated from the payment's date to 30 days after, and the payment has no recorded return yet.
+ * The description ("RETURNED PAYMENT") only ranks it. Never chosen automatically; any settlement status.
+ */
+function returnCandidate(row: MatchRow, account: Account, t: Transaction, transactions: readonly Transaction[], accounts: readonly Account[]): MatchCandidate | null {
+  if (t.accountId !== account.id || !t.transferGroupId || t.returnOf || t.amountCents !== -row.amountCents || t.kind !== 'transfer') return null;
+  const age = diffDays(row.date, t.date);
+  if (age < 0 || age > MATCH_WINDOWS.returned.daysAfter || isReturnedPayment(t.transferGroupId, transactions)) return null;
+  const partner = transactions.find((x) => x.transferGroupId === t.transferGroupId && x.id !== t.id);
+  const other = partner && accounts.find((a) => a.id === partner.accountId);
+  if (!other || (account.type === 'credit_card') === (other.type === 'credit_card')) return null;
+  return {
+    txId: t.id, basis: 'return', date: t.date, merchant: t.merchant, kind: t.kind, accountId: t.accountId, status: t.status, amountCents: t.amountCents,
+    differenceCents: 0, daysApart: age, ageDays: age, version: t.updatedAt,
+  };
 }
 
 /**
@@ -158,6 +191,7 @@ export function candidateLabel(m: MatchCandidate, accountName: string, currency:
   const parts = [formatShortDate(m.date), m.merchant || m.kind, formatCents(m.amountCents, currency, { sign: 'always' }), accountName, m.status === 'pending' ? 'pending' : 'posted'];
   if (m.kind === 'transfer') parts.push('transfer');
   if (m.feeCents) parts.push(`includes ${formatCents(-m.feeCents, currency)} fee`);
+  if (m.basis === 'return') parts.push('card payment');
   if (m.basis === 'stale') parts.push(`entered ${m.ageDays} days before this row, outside the normal ${MATCH_WINDOWS.pending.daysAfter}-day matching window`);
   if (m.differenceCents !== 0) parts.push(`statement differs by ${formatCents(m.differenceCents, currency, { sign: 'always' })}`);
   return parts.join(' · ');

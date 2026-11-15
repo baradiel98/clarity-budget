@@ -128,3 +128,37 @@ describe('D6/D4/D8: the import review on mobile', () => {
     expect(ui.getByRole('checkbox', { name: "It's this one: Oct 20 · Check #12 · −$200.00 · Savings · pending · entered 23 days before this row, outside the normal 10-day matching window" })).toBeTruthy();
   });
 });
+
+describe('Phase 4A.5.17 on mobile: returned card payments and card wording', () => {
+  const withCardPayment = () => {
+    const d = demo();
+    const chk = acct(d, 'Everyday Checking');
+    const card = { id: 'store', name: 'Store card', type: 'credit_card', currency: 'USD', openingBalanceCents: -25000, openingDate: '2026-11-01', spendable: false, archived: false, createdAt: SAMPLE_NOW, updatedAt: SAMPLE_NOW };
+    const base = { date: '2026-11-12', kind: 'transfer', merchant: 'Transfer', categoryId: null, notes: '', transferGroupId: 'tg_c', provenance: { source: 'manual' }, createdAt: SAMPLE_NOW, updatedAt: SAMPLE_NOW };
+    return { ...d, accounts: [...d.accounts, card], transactions: [...d.transactions, { ...base, id: 'cout', accountId: chk, amountCents: -10000, status: 'confirmed' }, { ...base, id: 'cin', accountId: 'store', amountCents: 10000, status: 'pending' }] } as WorkspaceData;
+  };
+  it('the list says "awaiting posting by Store card" (not "deposit")', async () => {
+    mockData = withCardPayment();
+    const ui = await render(<Transactions />);
+    expect(ui.getByText('Sent · awaiting posting by Store card')).toBeTruthy();
+    expect(ui.getByText('Sent from Everyday Checking · awaiting posting by Store card')).toBeTruthy();
+  });
+  it('a returned-payment row offers "It\'s the return of this card payment"; confirming it records the return, not income', async () => {
+    mockData = withCardPayment();
+    mockFile = 'Date,Description,Amount,Balance\n2026-11-13,RETURNED PAYMENT STORE CARD,100.00,2871.23\n';
+    const ui = await render(<ImportScreen />);
+    await act(async () => { fireEvent.press(ui.getByText('Everyday Checking')); });
+    await act(async () => { fireEvent.press(ui.getByText('Choose CSV file')); });
+    await wait(); await wait();
+    await act(async () => { fireEvent.press(ui.getByText('Review transactions')); });
+    await wait(); await wait();
+    const label = "It's the return of this card payment: Nov 12 · Transfer · −$100.00 · Everyday Checking · posted · transfer · card payment";
+    await act(async () => { fireEvent.press(ui.getByRole('checkbox', { name: label })); });
+    expect([ui.getByTestId('match-note-2').props.children].flat().join('')).toMatch(/payment as returned: it no longer counts as paying Store card/);
+    await act(async () => { fireEvent.press(ui.getByText('Import 1 transaction')); });
+    await wait();
+    expect(ui.getByTestId('import-result').props.children).toBe('0 new transactions imported · 1 returned card payment recorded');
+    const ret = mockData.transactions.filter((t) => t.returnOf === 'tg_c');
+    expect(ret.map((t) => [t.accountId === 'store' ? 'card' : 'checking', t.amountCents, t.kind, t.status])).toEqual([['checking', 10000, 'transfer', 'confirmed'], ['card', -10000, 'transfer', 'pending']]);
+  });
+});

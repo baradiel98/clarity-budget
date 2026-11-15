@@ -2,7 +2,7 @@ import { accountBalance, computeSafeToSpend, postedBalance } from '@clarity/engi
 import { buildPreview, csvParser, findMatchCandidates, guessMapping, reconcilePreview, suggestSignConvention, type ImportCandidate } from '@clarity/import';
 import type { ID, Transaction, WorkspaceData } from '@clarity/shared';
 import {
-  addTransaction, applyOps, CommandError, commitImport, createAccount, defaultSettings, emptyWorkspace, engineInput, markTransactionPosted, matchDecision,
+  addTransaction, applyOps, CommandError, commitImport, createAccount, defaultSettings, emptyWorkspace, engineInput, isLinkChoice, markTransactionPosted, matchDecision,
   postedByMatchOf, undoImportBatch, type Ctx, type TxInput,
 } from '../../src';
 
@@ -53,7 +53,7 @@ export class Book {
   /** Live candidates of a row, as the review screens show them. */
   live(rv: ReturnType<Book['review']>, raw: string) {
     const c = row(rv, raw);
-    return findMatchCandidates(c, this.a(rv.accountId), this.data.transactions, { alsoIds: c.matchCandidates.map((m) => m.txId) });
+    return findMatchCandidates(c, this.a(rv.accountId), this.data.transactions, { alsoIds: c.matchCandidates.map((m) => m.txId), accounts: this.data.accounts });
   }
   /** The decisions the screens would send; rows not in `decide` follow the review's default (include or not). */
   decisions(rv: ReturnType<Book['review']>, decide: Decide, other: Record<string, ID> = {}) {
@@ -61,7 +61,7 @@ export class Book {
       .filter((c) => (decide[c.rawDescription] ? decide[c.rawDescription] !== 'skip' : c.include))
       .map((c) => {
         const v = decide[c.rawDescription];
-        const live = findMatchCandidates(c, this.a(rv.accountId), this.data.transactions, { alsoIds: c.matchCandidates.map((m) => m.txId) });
+        const live = findMatchCandidates(c, this.a(rv.accountId), this.data.transactions, { alsoIds: c.matchCandidates.map((m) => m.txId), accounts: this.data.accounts });
         const match = v && v !== 'auto' ? matchDecision(v, live) : undefined;
         const o = other[c.rawDescription];
         return { candidate: c, kind: o ? ('transfer' as const) : (c.kind as 'expense' | 'income' | 'refund' | 'transfer'), categoryId: null, merchant: c.merchant, linkOccurrence: false, ...(o ? { otherAccountId: o } : {}), ...(match ? { match } : {}) };
@@ -69,8 +69,8 @@ export class Book {
   }
   commit(rv: ReturnType<Book['review']>, decide: Decide = {}, opts: { other?: Record<string, ID>; applyAdjustment?: boolean; decisions?: ReturnType<Book['decisions']> } = {}) {
     const decisions = opts.decisions ?? this.decisions(rv, decide, opts.other);
-    const links = decisions.filter((d) => d.match && 'txId' in d.match).map((d) => postedByMatchOf((d.match as { txId: ID }).txId, findMatchCandidates(d.candidate, this.a(rv.accountId), this.data.transactions, { alsoIds: d.candidate.matchCandidates.map((m) => m.txId) }), d.candidate.amountCents));
-    const recon = reconcilePreview(rv.preview, decisions.filter((d) => !(d.match && 'txId' in d.match)).map((d) => d.candidate), { account: this.a(rv.accountId), transactions: this.data.transactions, postedByMatch: links });
+    const links = decisions.filter((d) => d.match && 'txId' in d.match && isLinkChoice((d.match as { txId: ID }).txId, findMatchCandidates(d.candidate, this.a(rv.accountId), this.data.transactions, { alsoIds: d.candidate.matchCandidates.map((m) => m.txId), accounts: this.data.accounts }))).map((d) => postedByMatchOf((d.match as { txId: ID }).txId, findMatchCandidates(d.candidate, this.a(rv.accountId), this.data.transactions, { alsoIds: d.candidate.matchCandidates.map((m) => m.txId), accounts: this.data.accounts }), d.candidate.amountCents));
+    const recon = reconcilePreview(rv.preview, decisions.filter((d) => !(d.match && 'txId' in d.match && isLinkChoice((d.match as { txId: ID }).txId, findMatchCandidates(d.candidate, this.a(rv.accountId), this.data.transactions, { alsoIds: d.candidate.matchCandidates.map((m) => m.txId), accounts: this.data.accounts })))).map((d) => d.candidate), { account: this.a(rv.accountId), transactions: this.data.transactions, postedByMatch: links });
     const res = commitImport(this.ctx(), {
       accountId: rv.accountId, fileName: 'statement.csv', fileHash: String(++seq), parserId: 'csv', headerSignature: 'h', delimiter: ',', settings: rv.settings, decisions,
       totalRows: rv.preview.candidates.length, excludedCount: rv.preview.candidates.length - decisions.length, duplicateCount: 0, errorCount: 0, reconciliation: recon, applyAdjustment: opts.applyAdjustment ?? false,

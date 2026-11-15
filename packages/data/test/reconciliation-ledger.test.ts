@@ -18,7 +18,7 @@ import { addTransaction, adjustBalance, applyOps, CommandError, createAccount, d
  *     (Phase 4A.5.9: a negative savings balance is owed; a positive one adds nothing). The EUR account never counts.
  * Accounts: checking and cash (spendable, may start negative), savings, a EUR checking, a card (owed or in credit).
  */
-type Item = { id: string; acct: string; cents: number; pending: boolean; history: boolean; date: string; group?: string; kind: TxInput['kind'] | 'adjustment' };
+type Item = { id: string; acct: string; cents: number; pending: boolean; history: boolean; date: string; group?: string; kind: TxInput['kind'] | 'adjustment'; openPending?: boolean };
 const NOW = Date.UTC(2026, 10, 13, 12);
 let seq = 0;
 
@@ -44,7 +44,9 @@ it('300 random sequences equal the independent ledger after every step', () => {
     const confirmed: Record<string, string> = { chk: '2026-11-01', wal: '2026-11-01', sav: '2026-11-01', eur: '2026-11-01', visa: '2026-11-01' };
     today = '2026-11-13';
     const items: Item[] = [];
-    const before = (x: Item) => x.date < '2026-11-01'; // dated before the opening date: already in the opening balance
+    // dated before the opening date and posted then: already in the opening (posted) balance. Phase 4A.5.17: one still
+    // pending when recorded isn't in it, and keeps counting after it posts.
+    const before = (x: Item) => x.date < '2026-11-01' && !x.openPending;
     const counted = (k: string) => opening[k]! + items.filter((x) => x.acct === k && !x.history && !before(x)).reduce((a, x) => a + x.cents, 0);
     const pendingOf = (k: string) => items.filter((x) => x.acct === k && !x.history && !before(x) && x.pending);
     // Phase 4A.5.14 (owner decision): a transfer leg still pending at the receiving bank is a pending credit too
@@ -86,7 +88,7 @@ it('300 random sequences equal the independent ledger after every step', () => {
         if (c.refused) { expect(() => addTransaction(ctx(), input)).toThrow(CommandError); tally.refusedFlags++; continue; }
         const res = addTransaction(ctx(), input);
         data = applyOps(data, res.ops);
-        items.push({ id: res.txs[0]!.id, acct: k, cents: credit ? cents : -cents, pending, history: c.history, date, kind });
+        items.push({ id: res.txs[0]!.id, acct: k, cents: credit ? cents : -cents, pending, history: c.history, date, kind, openPending: pending });
         if (c.history) tally.history++;
       } else if (op < 0.5) { // transfer between base accounts (a card only as the destination: a payment)
         const from = pick(['chk', 'wal', 'sav'] as const);
@@ -101,8 +103,8 @@ it('300 random sequences equal the independent ledger after every step', () => {
         const res = addTransaction(ctx(), input);
         data = applyOps(data, res.ops);
         const g = res.txs[0]!.transferGroupId!;
-        items.push({ id: res.txs.find((t) => t.amountCents < 0)!.id, acct: from, cents: -cents, pending, history: cf.history, date, group: g, kind: 'transfer' });
-        items.push({ id: res.txs.find((t) => t.amountCents > 0)!.id, acct: to, cents, pending: toPending, history: ct.history, date, group: g, kind: 'transfer' });
+        items.push({ id: res.txs.find((t) => t.amountCents < 0)!.id, acct: from, cents: -cents, pending, history: cf.history, date, group: g, kind: 'transfer', openPending: pending });
+        items.push({ id: res.txs.find((t) => t.amountCents > 0)!.id, acct: to, cents, pending: toPending, history: ct.history, date, group: g, kind: 'transfer', openPending: toPending });
         tally.transfers++;
         if (cf.history !== ct.history) tally.splitTransfers++;
       } else if (op < 0.6) { // mark a pending item posted (Phase 4A.5.14: one leg of a transfer only)

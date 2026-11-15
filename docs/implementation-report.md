@@ -546,6 +546,36 @@ Owner policy: each transfer leg settles on its own; money in transit isn't spend
   - A failed or reversed payment counts as on its way until it is deleted or its import undone.
   - Not verified on simulators, devices, Safari or with a screen reader.
 
+## 7u. Phase 4A.5.17: pending opening-balance items and returned card payments (audit 4A.5.16 F1–F4)
+
+| Case (hand-calculated truth) | Truth | Before | After |
+|---|---:|---:|---:|
+| E2: checking added Sep 12 at $1,000 posted; Visa owes $500; $200 payment of Sep 10 pending at both | $500 | $700 | **$500** |
+| E1: Visa added Sep 12 owing $500 posted; same payment | $500 | $300 | **$500** |
+| Pending $200 purchase dated before checking was added (opened at $1,000 posted) | $800 | $1,000 | **$800** |
+| F1: payment debit and its return on the checking statement, return imported as suggested | $500 | $700 (imported as income by default) | **$500** (return offered on its row, never selected by default; once confirmed: Visa owes $500, money back, not income) |
+
+- **F2:** `inOpeningBalance` (engine/balances.ts). The opening balance is the posted balance, so pending items from before the opening date count and keep counting after they post (a `postedDate` is recorded). The "Before account added" reason is reworded.
+- **F1:**
+  - Return candidates (`findMatchCandidates` with accounts): exact opposite amount, same account, 0–30 days, any status; the description only ranks.
+  - The confirmed return is a transfer back (`returnOf`); the payment is no longer in transit.
+  - When the issuer never posted the payment, the two card-side legs cancel (`isVoidedReturnLeg`).
+  - A payment's debit and its return can be in the same statement.
+  - Undo, re-import and stale commits are covered.
+- **F3:** the in-transit line in "Why this number?" says what to do if the payment is returned or rejected, matching the import workflow.
+- **F4:** card payments say "Sent · awaiting posting by Visa"; bank transfers keep "awaiting deposit".
+- **Tests (all after the final code change):**
+  - **Unit:** vitest 647 passed, 1 skipped. New: `packages/data/test/returned-payments.test.ts` (24 tests, including a 300-run randomized model of pending opening-date items, returns, undo and re-import). Updated to the policy: one statement-matching expectation and the `reconciliation-ledger` model (pending pre-opening items count).
+  - **Mobile:** jest 54 passed (new: 2 component tests in `test/transfer-settlement.test.tsx`).
+  - **Browser:** Playwright 173 passed, 10 skipped (Chromium; new `e2e/phase4a517.spec.ts`, 2 tests with a screenshot).
+  - **Checks:** typecheck and lint clean; mobile `tsc` clean; iOS and Android bundles exported.
+- **4A.5.16 audit probes re-run:** E1 and E2 fixed. The return-as-income import is now refused without a decision. All 16 settlement transitions and the earlier protections are unchanged. The audit's randomized model: 400 scenarios, 4,194 actions, 0 mismatches.
+- **Limitations:**
+  - A return typed in by hand as income isn't detected.
+  - Partial returns (a different amount) aren't offered.
+  - The return row still shows the Type/Category pickers, which are ignored for a return.
+  - Not verified on simulators, devices, Safari or with a screen reader.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

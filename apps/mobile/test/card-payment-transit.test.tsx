@@ -34,6 +34,6 @@ it('"Why this number?" names the card payment on its way and says it is counted 
   mockCurrent = sts.explanation;
   const ui = await render(<Explain />);
   expect(ui.getByText('Store card: $100.00 payment from Everyday Checking not yet posted by the card issuer')).toBeTruthy();
-  expect(ui.getByText("already counted from Everyday Checking, so the $100.00 of card debt it pays isn't counted again")).toBeTruthy();
+  expect(ui.getByText(/^already counted from Everyday Checking, so the \$100\.00 of card debt it pays isn't counted again\. If it's returned or rejected: when the returned money shows on a statement, choose "It's the return of this card payment" in the import review/)).toBeTruthy();
   expect(ui.getByText('Store card: owed now')).toBeTruthy();
 });

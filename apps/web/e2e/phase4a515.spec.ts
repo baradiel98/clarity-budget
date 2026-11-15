@@ -44,7 +44,7 @@ test('a card payment pending at both banks is counted once; "Why this number?" n
   await page.getByTestId('why-sts').click();
   const why = page.getByRole('dialog');
   await expect(why).toContainText('Store card: $100.00 payment from Everyday Checking not yet posted by the card issuer');
-  await expect(why).toContainText("already counted from Everyday Checking, so the $100.00 of card debt it pays isn't counted again");
+  await expect(why).toContainText("already counted from Everyday Checking, so the $100.00 of card debt it pays isn't counted again. If it's returned or rejected: when the returned money shows on a statement, choose \"It's the return of this card payment\" in the import review (not a separate deposit)");
   await expect(why).toContainText('Store card: owed now');
   await expect(why).toContainText('−$150.00');
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/515-01-why.png`, fullPage: false });
@@ -53,7 +53,7 @@ test('a card payment pending at both banks is counted once; "Why this number?" n
   await page.getByRole('link', { name: 'Transactions' }).first().click();
   await page.getByRole('button', { name: 'From Everyday Checking', exact: true }).first().click();
   const e = page.getByRole('dialog');
-  await e.getByTestId('transfer-status').selectOption({ label: 'Received · not yet posted by the sending bank' });
+  await e.getByTestId('transfer-status').selectOption({ label: 'Posted by the card issuer · not yet by the paying bank' }); // Phase 4A.5.17 card wording
   await e.getByTestId('save-tx').click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await go(page, '/');

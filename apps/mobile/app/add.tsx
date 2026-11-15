@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { addTransaction, deleteTransaction, updateTransaction, type TxInput } from '@clarity/data';
-import { addDays, ALREADY_INCLUDED_HINT, ALREADY_INCLUDED_LABEL, centsToDecimalString, formatCents, formatShortDate, legsPendingOf, parseAmountInput, TERMS, transferChoiceOf, TRANSFER_STATUS_HINT, TRANSFER_STATUS_LABEL, TRANSFER_STATUS_OPTIONS } from '@clarity/shared';
+import { addDays, ALREADY_INCLUDED_HINT, ALREADY_INCLUDED_LABEL, centsToDecimalString, formatCents, formatShortDate, legsPendingOf, parseAmountInput, TERMS, transferChoiceOf, TRANSFER_STATUS_HINT, TRANSFER_STATUS_LABEL, transferStatusOptions } from '@clarity/shared';
 import { balanceAsOfDate, buildMerchantMemory, inclusionProblem, expandOccurrences, findPossibleDuplicates, merchantKey, suggestOccurrenceMatch } from '@clarity/engine';
 import { Check } from '../src/features/Welcome';
 import { takeAddPrefill } from '../src/state/nav';
@@ -190,7 +190,7 @@ export default function AddScreen() {
           <View style={{ gap: 6 }} testID="transfer-status">
             <T variant="footnote" color="textSecondary">{TRANSFER_STATUS_LABEL}</T>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-              {TRANSFER_STATUS_OPTIONS.map((o) => <Chip key={o.value} label={o.label} on={transferChoiceOf(pending, toPending) === o.value} onPress={() => { const l = legsPendingOf(o.value); setPending(l.fromPending); setToPending(l.toPending); }} />)}
+              {transferStatusOptions(data.accounts.find((a) => a.id === toAccountId)?.type === 'credit_card').map((o) => <Chip key={o.value} label={o.label} on={transferChoiceOf(pending, toPending) === o.value} onPress={() => { const l = legsPendingOf(o.value); setPending(l.fromPending); setToPending(l.toPending); }} />)}
             </View>
             <T variant="footnote" color="textSecondary">{TRANSFER_STATUS_HINT}</T>
           </View>

@@ -1,5 +1,5 @@
 import {
-  defaultCategories, formatCents, formatShortDate, localISODate, MATCH_AMOUNT_NOTE, MATCH_FEE_LABEL, MATCH_FEE_NOTE, MATCH_NOT_FEE, MATCH_PENDING_NOTE, MATCH_POSTED_NOTE, MATCH_TRANSFER_NOTE, type Account, type AccountType, type Cents, type Category, type ID, type ISODate, type ImportBatch,
+  defaultCategories, formatCents, formatShortDate, localISODate, MATCH_AMOUNT_NOTE, MATCH_RETURN_LABEL, MATCH_RETURN_NOTE, MATCH_FEE_LABEL, MATCH_FEE_NOTE, MATCH_NOT_FEE, MATCH_PENDING_NOTE, MATCH_POSTED_NOTE, MATCH_TRANSFER_NOTE, type Account, type AccountType, type Cents, type Category, type ID, type ISODate, type ImportBatch,
   type MappingProfile, type OccurrenceException, type Provenance, type RecurringAmount, type RecurringItem, type RecurringKind, type Schedule, type Settings,
   type Split, type Transaction, type TxKind, type TxStatus, type WeekendRule, type WorkspaceData,
 } from '@clarity/shared';
@@ -289,7 +289,7 @@ export function markTransactionPosted(ctx: Ctx, id: ID): Op[] {
   const t = ctx.data.transactions.find((x) => x.id === id) ?? fail('Transaction not found.');
   if (t.status !== 'pending') return [];
   const fee = feeOfLeg(t, ctx.data.transactions);
-  return [t, ...(fee && fee.status === 'pending' ? [fee] : [])].map((l): Op => ({ t: 'put', table: 'transactions', value: { ...l, status: 'confirmed', updatedAt: ctx.now } }));
+  return [t, ...(fee && fee.status === 'pending' ? [fee] : [])].map((l): Op => { const pd = postedDateOnManualPosting(ctx, l.accountId, l.date); return { t: 'put', table: 'transactions', value: { ...l, status: 'confirmed', ...(pd ? { postedDate: pd } : {}), updatedAt: ctx.now } }; });
 }
 
 const INCLUSION_MESSAGE: Record<InclusionProblem, (name: string, bd: ISODate) => string> = {
@@ -370,13 +370,25 @@ function signFor(kind: TxInput['kind']): 1 | -1 {
  * its posting date. A posting date is only ever recorded from a statement row (the bank's own date); marked posted
  * by hand, the day it really posted isn't known, so the transaction counts as posted from its own date.
  */
-function settled(prev: Transaction | undefined, status: TxStatus): Pick<Transaction, 'status' | 'postedDate'> {
+function settled(ctx: Ctx, prev: Transaction | undefined, status: TxStatus, accountId: ID, date: ISODate): Pick<Transaction, 'status' | 'postedDate'> {
   if (prev?.statementMatch && status !== prev.status) {
     fail(`“${prev.merchant || prev.kind}” is linked to a statement row (${formatShortDate(prev.statementMatch.date)}), which shows it posted. To make it pending again, undo that import.`, 'status');
   }
   if (status === 'pending') return { status };
   if (prev && prev.status === status && prev.postedDate) return { status, postedDate: prev.postedDate };
+  // Phase 4A.5.17: a pending item dated before the account was added, now posted: it wasn't in the opening balance
+  if (prev && prev.status === 'pending') { const pd = postedDateOnManualPosting(ctx, accountId, date); if (pd) return { status, postedDate: pd }; }
   return { status };
+}
+
+/**
+ * Phase 4A.5.17: the posting date to record when a pending item is marked posted by hand. Usually none (the real day
+ * isn't known, so it counts from its own date); but for an item dated before its account was added, today, so it
+ * keeps counting (it wasn't in the opening balance, which is the posted balance on the opening date).
+ */
+function postedDateOnManualPosting(ctx: Ctx, accountId: ID, date: ISODate): ISODate | undefined {
+  const a = ctx.data.accounts.find((x) => x.id === accountId);
+  return a && date < a.openingDate ? (ctx.today > a.openingDate ? ctx.today : a.openingDate) : undefined;
 }
 
 function buildTxs(ctx: Ctx, input: TxInput, ids: { id?: ID; pairId?: ID; groupId?: ID; createdAt?: number; prev?: Transaction; prevPair?: Transaction }): Transaction[] {
@@ -400,8 +412,8 @@ function buildTxs(ctx: Ctx, input: TxInput, ids: { id?: ID; pairId?: ID; groupId
     const toStatus: TxStatus = input.toStatus ?? (ids.prev && ids.prevPair && ids.prev.status === status ? ids.prevPair.status : status);
     // Phase 4A.5.8: each leg is one account's effect; "already included" is decided per leg against that account's date.
     const legs: Transaction[] = [
-      { ...base, ...settled(ids.prev, status), ...inclusionFor(ctx, input.accountId, input.date, status, input.includedInBalance, ids.prev), id: ids.id ?? ctx.newId('tx'), accountId: input.accountId, amountCents: -input.amountCents, kind: 'transfer', categoryId: null, transferGroupId: groupId, merchant: base.merchant || 'Transfer' },
-      { ...base, ...settled(ids.prevPair, toStatus), ...inclusionFor(ctx, input.toAccountId!, input.date, toStatus, input.toIncludedInBalance, ids.prevPair), id: ids.pairId ?? ctx.newId('tx'), accountId: input.toAccountId!, amountCents: input.amountCents, kind: 'transfer', categoryId: null, transferGroupId: groupId, merchant: base.merchant || 'Transfer' },
+      { ...base, ...settled(ctx, ids.prev, status, input.accountId, input.date), ...inclusionFor(ctx, input.accountId, input.date, status, input.includedInBalance, ids.prev), id: ids.id ?? ctx.newId('tx'), accountId: input.accountId, amountCents: -input.amountCents, kind: 'transfer', categoryId: null, transferGroupId: groupId, merchant: base.merchant || 'Transfer' },
+      { ...base, ...settled(ctx, ids.prevPair, toStatus, input.toAccountId!, input.date), ...inclusionFor(ctx, input.toAccountId!, input.date, toStatus, input.toIncludedInBalance, ids.prevPair), id: ids.pairId ?? ctx.newId('tx'), accountId: input.toAccountId!, amountCents: input.amountCents, kind: 'transfer', categoryId: null, transferGroupId: groupId, merchant: base.merchant || 'Transfer' },
     ];
     const issues = validateTransferPair(legs, ctx.data.accounts);
     if (issues.length) throw new CommandError(issues);
@@ -413,7 +425,7 @@ function buildTxs(ctx: Ctx, input: TxInput, ids: { id?: ID; pairId?: ID; groupId
   if (input.splits && input.splits.length > 0) splits = input.splits.map((s) => ({ categoryId: s.categoryId, amountCents: sign * s.amountCents }));
   const tx: Transaction = {
     ...base,
-    ...settled(ids.prev, status),
+    ...settled(ctx, ids.prev, status, input.accountId, input.date),
     ...inclusionFor(ctx, input.accountId, input.date, status, input.includedInBalance, ids.prev),
     id: ids.id ?? ctx.newId('tx'),
     accountId: input.accountId,
@@ -718,10 +730,11 @@ export function commitImport(ctx: Ctx, input: CommitImportInput): { ops: Op[]; b
   const ops: Op[] = [];
   const txs: Transaction[] = [];
   const matchedIds = new Set<ID>();
+  const returnedIds = new Set<ID>(); // Phase 4A.5.17: payments returned by this commit
   const touched = new Map<ID, Transaction>(); // existing transactions changed by this commit (latest version)
   const get = (id: ID) => touched.get(id) ?? ctx.data.transactions.find((t) => t.id === id);
   const put = (t: Transaction) => touched.set(t.id, t);
-  let created = 0, markedPosted = 0, fees = 0;
+  let created = 0, markedPosted = 0, fees = 0, returns = 0;
   const transferGroups = new Set<ID>();
   const acctTx = ctx.data.transactions.filter((t) => t.accountId === account.id);
   const known = new Set(input.knownDuplicateIds ?? []);
@@ -735,7 +748,7 @@ export function commitImport(ctx: Ctx, input: CommitImportInput): { ops: Op[]; b
     }
     // Phase 4A.5.12: the data layer decides with the CURRENT data, not the review's: which transactions could this row
     // be? (Those listed when the review was built stay included, even if posted since.) Never merged automatically.
-    const live = findMatchCandidates(c, account, ctx.data.transactions, { alsoIds: (c.matchCandidates ?? []).map((m) => m.txId) });
+    const live = findMatchCandidates(c, account, ctx.data.transactions, { alsoIds: (c.matchCandidates ?? []).map((m) => m.txId), accounts: ctx.data.accounts });
     const legacy: ImportDecision['match'] = d.pendingResolution ? (d.pendingResolution.same ? { txId: d.pendingResolution.txId } : { none: true as const, seen: [d.pendingResolution.txId] }) : undefined;
     const choice = d.match ?? legacy;
     const label = (id: ID) => txLabel(ctx.data.transactions.find((x) => x.id === id), cur);
@@ -745,7 +758,34 @@ export function commitImport(ctx: Ctx, input: CommitImportInput): { ops: Op[]; b
       const cand = live.find((m) => m.txId === choice.txId) ?? fail(`Row ${c.rowNumber}: ${label(choice.txId)} is no longer a possible match for this row; review it again.`, 'match');
       const seenSnap = choice.snapshot ?? reviewed(choice.txId);
       if (!seenSnap || !sameSnapshot(seenSnap, snapshotOf(cand))) changed(choice.txId);
-      if (matchedIds.has(choice.txId)) fail(`Row ${c.rowNumber}: ${label(choice.txId)} is already chosen for another row of this statement.`, 'match');
+      // one link per transaction; one return per payment (Phase 4A.5.17: the same statement can hold a payment's debit
+      // AND its return, so a link and a return of the same payment may appear together)
+      const takenSet = cand.basis === 'return' ? returnedIds : matchedIds;
+      if (takenSet.has(choice.txId)) fail(`Row ${c.rowNumber}: ${label(choice.txId)} is already chosen for another row of this statement.`, 'match');
+      // Phase 4A.5.17: the user confirmed this row is the RETURN of that card payment (rejected, returned or reversed).
+      // Recorded as a transfer back (returnOf = the payment): this account's side is the statement row (posted); the
+      // other side is pending, awaiting that institution. The payment itself is not changed or posted; it simply no
+      // longer counts as paying the card. If the card issuer never posted the payment, the two card-side legs cancel.
+      if (cand.basis === 'return') {
+        if (choice.fee) fail(`Row ${c.rowNumber}: a returned payment has no transfer fee to confirm.`, 'match');
+        const leg = get(cand.txId)!;
+        const partner = ctx.data.transactions.find((t) => t.transferGroupId === leg.transferGroupId && t.id !== leg.id) ?? fail(`Row ${c.rowNumber}: the other side of ${label(leg.id)} is missing; review it again.`, 'match');
+        returnedIds.add(leg.id);
+        const groupId = ctx.newId('tg');
+        const note = `Return of the card payment “${leg.merchant || 'Transfer'}” of ${formatShortDate(leg.date)} (${formatCents(Math.abs(leg.amountCents), cur)}), confirmed when importing ${input.fileName} (row ${c.rowNumber}).`;
+        const here: Transaction = {
+          id: ctx.newId('tx'), accountId: account.id, date: c.date, amountCents: c.amountCents, kind: 'transfer', status: 'confirmed', merchant: 'Returned payment', categoryId: null, notes: note,
+          transferGroupId: groupId, returnOf: leg.transferGroupId!, createdAt: ctx.now, updatedAt: ctx.now,
+          provenance: { source: 'import', importBatchId: batchId, rowNumber: c.rowNumber, rawDescription: c.rawDescription, rowDate: c.date, rowAmountCents: c.amountCents, ...(c.externalId ? { externalId: c.externalId } : {}) },
+          ...inclusionFor(ctx, account.id, c.date, 'confirmed', undefined, undefined),
+        };
+        const there: Transaction = { id: ctx.newId('tx'), accountId: partner.accountId, date: c.date, amountCents: -c.amountCents, kind: 'transfer', status: 'pending', merchant: 'Returned payment', categoryId: null, notes: note, transferGroupId: groupId, returnOf: leg.transferGroupId!, createdAt: ctx.now, updatedAt: ctx.now, provenance: { source: 'import', importBatchId: batchId } };
+        const issues = validateTransferPair([here, there], ctx.data.accounts);
+        if (issues.length) throw new CommandError(issues.map((i) => ({ ...i, message: `Row ${c.rowNumber}: ${i.message}` })));
+        txs.push(here, there);
+        returns++;
+        continue;
+      }
       // Phase 4A.5.14: a transfer leg whose amount differs can only be linked with the difference explained as a fee
       // the user confirms; nothing else is recorded silently.
       if (cand.kind === 'transfer' && cand.differenceCents !== 0) {
@@ -860,7 +900,8 @@ export function commitImport(ctx: Ctx, input: CommitImportInput): { ops: Op[]; b
   for (const t of txs) ops.push({ t: 'put', table: 'transactions', value: t });
   // transfers this import touched whose other side is still pending (awaiting the other bank)
   const after = [...ctx.data.transactions.filter((t) => !touched.has(t.id)), ...touched.values(), ...txs];
-  const awaiting = [...transferGroups].filter((g) => after.some((t) => t.transferGroupId === g && t.status === 'pending')).length;
+  // (a payment returned in this same import isn't awaiting anything: Phase 4A.5.17)
+  const awaiting = [...transferGroups].filter((g) => after.some((t) => t.transferGroupId === g && t.status === 'pending') && !after.some((t) => t.returnOf === g)).length;
   for (const g of transferGroups) {
     const legs = after.filter((t) => t.transferGroupId === g);
     const issues = validateTransferPair(legs, ctx.data.accounts);
@@ -910,7 +951,7 @@ export function commitImport(ctx: Ctx, input: CommitImportInput): { ops: Op[]; b
     importedAt: ctx.now,
     counts: {
       rows: input.totalRows, imported: created, ...(matchedIds.size ? { matched: matchedIds.size } : {}), ...(markedPosted ? { markedPosted } : {}), ...(fees ? { fees } : {}),
-      ...(awaiting ? { awaiting } : {}), excluded: input.excludedCount, duplicates: input.duplicateCount, errors: input.errorCount,
+      ...(awaiting ? { awaiting } : {}), ...(returns ? { returns } : {}), excluded: input.excludedCount, duplicates: input.duplicateCount, errors: input.errorCount,
     },
     reconciliation: input.reconciliation
       ? {
@@ -935,12 +976,19 @@ export function commitImport(ctx: Ctx, input: CommitImportInput): { ops: Op[]; b
  * Phase 4A.5.14: one option of a row's "Is this row one of these?" choice, as both apps show it: the label, why it
  * can't be chosen (a transfer whose amount differs by something that can't be a fee), and what choosing it does.
  */
-export interface MatchOptionView { txId: ID; label: string; disabledReason: string | null; note: string; stale: boolean; fee: { feeCents: Cents } | null }
+export interface MatchOptionView { txId: ID; label: string; disabledReason: string | null; note: string; stale: boolean; fee: { feeCents: Cents } | null; isReturn: boolean }
 export function matchOptionView(m: MatchCandidate, rowAmountCents: Cents, data: WorkspaceData, currency: string): MatchOptionView {
   const name = (id: ID) => data.accounts.find((a) => a.id === id)?.name ?? '';
   const fmt = (c: Cents, sign = false) => formatCents(c, currency, sign ? { sign: 'always' } : {});
   const desc = candidateLabel(m, name(m.accountId), currency);
   const isTransfer = m.kind === 'transfer';
+  if (m.basis === 'return') {
+    const leg = data.transactions.find((t) => t.id === m.txId);
+    const partner = leg?.transferGroupId ? data.transactions.find((t) => t.transferGroupId === leg.transferGroupId && t.id !== leg.id) : undefined;
+    const card = [m.accountId, partner?.accountId].map((id) => data.accounts.find((a) => a.id === id)).find((a) => a?.type === 'credit_card');
+    const paying = [m.accountId, partner?.accountId].map((id) => data.accounts.find((a) => a.id === id)).find((a) => a && a.type !== 'credit_card');
+    return { txId: m.txId, label: `${MATCH_RETURN_LABEL}: ${desc}`, disabledReason: null, note: MATCH_RETURN_NOTE(paying?.name ?? 'the paying account', card?.name ?? 'the card'), stale: false, fee: null, isReturn: true };
+  }
   const fee = isTransfer && m.differenceCents !== 0 && m.feeOption ? m.feeOption : null;
   const leg = data.transactions.find((t) => t.id === m.txId);
   const other = leg?.transferGroupId ? data.transactions.find((t) => t.transferGroupId === leg.transferGroupId && t.id !== leg.id) : undefined;
@@ -955,6 +1003,7 @@ export function matchOptionView(m: MatchCandidate, rowAmountCents: Cents, data: 
     note: notes.join(' '),
     stale: m.basis === 'stale',
     fee: fee ? { feeCents: fee.feeCents } : null,
+    isReturn: false,
   };
 }
 
@@ -969,6 +1018,14 @@ export function matchDecision(choice: string | null, live: readonly MatchCandida
   if (!m) return { txId: choice };
   const fee = m.kind === 'transfer' && m.differenceCents !== 0 && m.feeOption ? { fee: { feeCents: m.feeOption.feeCents } } : {};
   return { txId: choice, snapshot: snapshotOf(m), ...fee };
+}
+
+/**
+ * Phase 4A.5.17: does this choice LINK the row to an existing transaction (nothing new is added)? A confirmed return
+ * is not a link: it adds the returned money (a new transaction), so the balance check counts the row like a new one.
+ */
+export function isLinkChoice(choice: string | null, live: readonly MatchCandidate[]): boolean {
+  return choice !== null && choice !== 'none' && live.find((m) => m.txId === choice)?.basis !== 'return';
 }
 
 /** Phase 4A.5.14: what a linked row does to its own account's posted balance (for the review's balance check). */
@@ -990,6 +1047,7 @@ export function describeImportResult(batch: ImportBatch): string {
   if (k.matched) parts.push(`${plural(k.matched, 'existing transaction')} linked${k.markedPosted ? ` (${k.markedPosted} marked posted)` : ''}`);
   if (k.fees) parts.push(`${plural(k.fees, 'transfer fee')} recorded`);
   if (k.awaiting) parts.push(`${plural(k.awaiting, 'transfer')} awaiting the other bank`);
+  if (k.returns) parts.push(`${plural(k.returns, 'returned card payment')} recorded`);
   return parts.join(' · ');
 }
 
@@ -1004,6 +1062,9 @@ export function describeImportUndo(data: WorkspaceData, batchId: ID): string {
   const restored = data.transactions.filter((t) => t.statementMatch?.importBatchId === batchId);
   const acct = (id: ID) => data.accounts.find((a) => a.id === id)?.name ?? 'another account';
   const parts = [`Removed ${plural(removed, 'imported transaction')}`];
+  // Phase 4A.5.17: a recorded return removed: the card payment counts as on its way (or posted) again
+  const returnsRemoved = created.filter((t) => t.returnOf && t.amountCents > 0).length;
+  if (returnsRemoved) parts.push(`${returnsRemoved === 1 ? 'the returned card payment is' : `${returnsRemoved} returned card payments are`} no longer recorded, so ${returnsRemoved === 1 ? 'that payment counts' : 'those payments count'} as paying the card again`);
   for (const t of restored) {
     const sm = t.statementMatch!;
     parts.push(`“${t.merchant || t.kind}” in ${acct(t.accountId)} is ${sm.setStatus ?? sm.previousStatus === 'pending' ? 'pending again' : 'still posted'} and no longer linked to the statement`);
@@ -1113,8 +1174,14 @@ export function transferSettlement(tx: Transaction, transactions: readonly Trans
   if (!other) return null;
   const [send, recv] = tx.amountCents < 0 ? [tx, other] : [other, tx];
   const name = (id: ID) => accounts.find((a) => a.id === id)?.name ?? 'the other account';
+  // Phase 4A.5.17: a returned card payment, and the return itself
+  if (tx.returnOf) return 'Returned card payment';
+  if (transactions.some((t) => t.returnOf === tx.transferGroupId)) return 'Payment returned';
   if (send.status !== 'pending' && recv.status !== 'pending') return null;
   if (send.status === 'pending' && recv.status === 'pending') return 'Not posted by either bank yet';
+  // Phase 4A.5.17: a card isn't deposited into; its issuer posts the payment
+  const toCard = accounts.find((a) => a.id === recv.accountId)?.type === 'credit_card';
+  if (recv.status === 'pending' && toCard) return tx === send ? `Sent · awaiting posting by ${name(recv.accountId)}` : `Sent from ${name(send.accountId)} · awaiting posting by ${name(recv.accountId)}`;
   if (recv.status === 'pending') return tx === send ? `Sent · awaiting deposit in ${name(recv.accountId)}` : `Sent from ${name(send.accountId)} · awaiting deposit`;
   return tx === recv ? `Received · not yet posted by ${name(send.accountId)}` : `Received in ${name(recv.accountId)} · not yet posted here`;
 }

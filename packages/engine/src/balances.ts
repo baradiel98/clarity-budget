@@ -9,9 +9,43 @@ export function isHistoryOnly(tx: Transaction, balanceDate: ISODate): boolean {
   return !!tx.includedInBalance && tx.status !== 'pending' && tx.date <= balanceDate;
 }
 
-/** A transaction changes an account's balance only if dated on/after the opening date and not history only. */
-export function affectsBalance(account: Account, tx: Transaction, balanceDate: ISODate = balanceDateFromAccount(account)): boolean {
-  return tx.accountId === account.id && tx.date >= account.openingDate && !isHistoryOnly(tx, balanceDate);
+/**
+ * Phase 4A.5.17 (owner decision): the opening balance is the bank's POSTED balance on the opening date; it excludes
+ * anything still pending then, whatever its date. So a transaction dated before the opening date is history (already
+ * in the opening balance) only if it had posted by then; one still pending counts, and keeps counting once it posts
+ * on or after the opening date (its postedDate). Before 4A.5.17 every transaction dated before the opening date was
+ * ignored, so a pending $200 debit made before the account was added never reduced it.
+ */
+export function inOpeningBalance(account: Account, tx: Transaction): boolean {
+  if (tx.date >= account.openingDate) return false;
+  if (tx.status === 'pending') return false;
+  return !tx.postedDate || tx.postedDate < account.openingDate;
+}
+
+/**
+ * Phase 4A.5.17: the card side of a RETURNED card payment that the card issuer never posted. The payment (group G) has
+ * a recorded return (a transfer back with returnOf = G); while BOTH card-side legs are still pending, the card never saw
+ * either, so they cancel and neither counts on the card. Once the issuer posts either, both count normally.
+ */
+export function isVoidedReturnLeg(account: Account, tx: Transaction, transactions: readonly Transaction[]): boolean {
+  if (account.type !== 'credit_card' || tx.status !== 'pending' || !tx.transferGroupId || tx.accountId !== account.id) return false;
+  // the return's card leg, while the original payment's card leg is still pending
+  if (tx.returnOf) return transactions.some((t) => t.transferGroupId === tx.returnOf && t.accountId === account.id && t.status === 'pending');
+  // the original payment's card leg, while the return's card leg is still pending
+  return transactions.some((t) => t.returnOf === tx.transferGroupId && t.accountId === account.id && t.status === 'pending');
+}
+
+/** Phase 4A.5.17: the card payment (transfer group) has a recorded return. */
+export const isReturnedPayment = (groupId: string | undefined, transactions: readonly Transaction[]): boolean =>
+  !!groupId && transactions.some((t) => t.returnOf === groupId);
+
+/**
+ * A transaction changes an account's balance only if it isn't history only: not already in the opening balance
+ * (Phase 4A.5.17, see inOpeningBalance) and not already in a confirmed balance (Phase 4A.5.8). `transactions`, when
+ * given, also leaves out the cancelled card side of a returned payment the issuer never posted (isVoidedReturnLeg).
+ */
+export function affectsBalance(account: Account, tx: Transaction, balanceDate: ISODate = balanceDateFromAccount(account), transactions?: readonly Transaction[]): boolean {
+  return tx.accountId === account.id && !inOpeningBalance(account, tx) && !isHistoryOnly(tx, balanceDate) && !(transactions && isVoidedReturnLeg(account, tx, transactions));
 }
 
 /**
@@ -40,7 +74,11 @@ export function isUnpostedAsOf(tx: Transaction, asOf: ISODate): boolean {
  * transfer counts; a scheduled (recurring) payment that hasn't been initiated follows the scheduled-payment rules.
  */
 export function isCardPaymentInTransit(account: Account | undefined, tx: Transaction, transactions: readonly Transaction[]): boolean {
-  return !!account && account.type === 'credit_card' && tx.accountId === account.id && tx.status === 'pending' && tx.amountCents > 0 && !!tx.transferGroupId &&
+  // Phase 4A.5.17: a returned payment is no longer on its way (see isVoidedReturnLeg / the return's own legs). After
+  // the opening-date rule above, a recorded paying debit always counts against its account: as a pending debit, as a
+  // posted one, or inside that account's opening or confirmed balance; so the card offset never outruns the cash side.
+  return !!account && account.type === 'credit_card' && tx.accountId === account.id && tx.status === 'pending' && tx.amountCents > 0 && !!tx.transferGroupId && !tx.returnOf &&
+    !isReturnedPayment(tx.transferGroupId, transactions) &&
     transactions.some((x) => x.transferGroupId === tx.transferGroupId && x.id !== tx.id && x.amountCents < 0);
 }
 
@@ -52,7 +90,7 @@ export function isCardPaymentInTransit(account: Account | undefined, tx: Transac
 export function pendingCreditTotal(account: Account, transactions: readonly Transaction[], asOf: ISODate): Cents {
   const bd = balanceAsOfDate(account, transactions);
   let total = 0;
-  for (const t of transactions) if (affectsBalance(account, t, bd) && t.date <= asOf && isPendingCredit(t) && !isCardPaymentInTransit(account, t, transactions)) total += t.amountCents;
+  for (const t of transactions) if (affectsBalance(account, t, bd, transactions) && t.date <= asOf && isPendingCredit(t) && !isCardPaymentInTransit(account, t, transactions)) total += t.amountCents;
   return total;
 }
 
@@ -63,7 +101,7 @@ export function cardPaymentsInTransit(accounts: readonly Account[], transactions
     if (a.type !== 'credit_card') continue;
     const bd = balanceAsOfDate(a, transactions);
     for (const t of transactions) {
-      if (!affectsBalance(a, t, bd) || t.date > asOf || !isCardPaymentInTransit(a, t, transactions)) continue;
+      if (!affectsBalance(a, t, bd, transactions) || t.date > asOf || !isCardPaymentInTransit(a, t, transactions)) continue;
       const from = transactions.find((x) => x.transferGroupId === t.transferGroupId && x.id !== t.id);
       out.push({ cardId: a.id, fromAccountId: from?.accountId ?? null, cents: t.amountCents, txId: t.id });
     }
@@ -111,7 +149,7 @@ export function inclusionProblem(account: Account, transactions: readonly Transa
  */
 export function historyStatus(account: Account | undefined, tx: Transaction, balanceDate: ISODate): { kind: 'included'; asOf: ISODate } | { kind: 'before_opening'; asOf: ISODate } | null {
   if (!account || tx.accountId !== account.id) return null;
-  if (tx.date < account.openingDate) return { kind: 'before_opening', asOf: account.openingDate };
+  if (inOpeningBalance(account, tx)) return { kind: 'before_opening', asOf: account.openingDate };
   if (isHistoryOnly(tx, balanceDate)) return { kind: 'included', asOf: tx.includedAsOf ?? balanceDate };
   return null;
 }
@@ -119,7 +157,7 @@ export function historyStatus(account: Account | undefined, tx: Transaction, bal
 /** Pending items in the account (dated on or before `asOf`), as Update balance lists them. */
 export function pendingItems(account: Account, transactions: readonly Transaction[], asOf: ISODate): Transaction[] {
   const bd = balanceAsOfDate(account, transactions);
-  return transactions.filter((t) => affectsBalance(account, t, bd) && t.date <= asOf && t.status === 'pending');
+  return transactions.filter((t) => affectsBalance(account, t, bd, transactions) && t.date <= asOf && t.status === 'pending');
 }
 
 /**
@@ -171,7 +209,7 @@ export function accountBalance(account: Account, transactions: readonly Transact
   const bd = balanceAsOfDate(account, transactions);
   let total = account.openingBalanceCents;
   for (const t of transactions) {
-    if (affectsBalance(account, t, bd) && t.date <= asOf) total += t.amountCents;
+    if (affectsBalance(account, t, bd, transactions) && t.date <= asOf) total += t.amountCents;
   }
   return total;
 }
@@ -180,7 +218,7 @@ export function pendingTotal(account: Account, transactions: readonly Transactio
   const bd = balanceAsOfDate(account, transactions);
   let total = 0;
   for (const t of transactions) {
-    if (affectsBalance(account, t, bd) && t.date <= asOf && isUnpostedAsOf(t, asOf)) total += t.amountCents;
+    if (affectsBalance(account, t, bd, transactions) && t.date <= asOf && isUnpostedAsOf(t, asOf)) total += t.amountCents;
   }
   return total;
 }

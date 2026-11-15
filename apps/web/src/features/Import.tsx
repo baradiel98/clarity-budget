@@ -1,6 +1,6 @@
 import { AlertTriangle, CheckCircle2, CopyCheck, FileUp, Link2, ListChecks, ShieldCheck, Upload } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { commitImport, describeImportResult, describeImportUndo, markTransactionPosted, matchDecision, matchOptionView, postedByMatchOf, undoImportBatch as undoImport, type ImportDecision } from '@clarity/data';
+import { commitImport, describeImportResult, describeImportUndo, markTransactionPosted, isLinkChoice, matchDecision, matchOptionView, postedByMatchOf, undoImportBatch as undoImport, type ImportDecision } from '@clarity/data';
 import {
   checkImportFile, dataRowCount, DATE_FORMATS, findMatchCandidates, headerSignature, MATCH_WINDOWS, NO_DATA_ROWS_MESSAGE, reconcilePreview, type ImportCandidate, type ImportPreview, type ImportSettings,
 } from '@clarity/import';
@@ -127,13 +127,14 @@ export function ImportPage() {
   // Phase 4A.5.10: rows confirmed as the same transaction aren't added; their pending transaction counts as posted
   // Phase 4A.5.12: candidates are recomputed from the CURRENT data on every render (a status change elsewhere shows at
   // once); those listed when the review was built stay, so nothing disappears silently.
-  const liveOf = (r: Row) => (account ? findMatchCandidates(r, account, data.transactions, { alsoIds: r.matchCandidates.map((m) => m.txId) }) : []);
-  const linked = (r: Row) => r.matchChoice !== null && r.matchChoice !== 'none';
+  const liveOf = (r: Row) => (account ? findMatchCandidates(r, account, data.transactions, { alsoIds: r.matchCandidates.map((m) => m.txId), accounts: data.accounts }) : []);
+  // Phase 4A.5.17: a confirmed return adds the returned money, so it counts as a new row, not a link
+  const linked = (r: Row) => isLinkChoice(r.matchChoice, liveOf(r));
   // Phase 4A.5.14: per leg; a confirmed transfer fee makes the linked leg's effect the statement amount
   const sameIds = included.filter(linked).map((r) => postedByMatchOf(r.matchChoice!, liveOf(r), r.amountCents));
   const recon = useMemo(() => (preview && account ? reconcilePreview(preview, included.filter((r) => !linked(r)), { account, transactions: data.transactions, postedByMatch: sameIds }) : null), [preview, included, account, data.transactions, JSON.stringify(sameIds)]);
   // a row linked to an existing transaction (e.g. an existing transfer) creates nothing, so it needs no other account
-  const blocking = included.filter((r) => r.editKind === 'transfer' && !r.otherAccountId && !linked(r));
+  const blocking = included.filter((r) => r.editKind === 'transfer' && !r.otherAccountId && (r.matchChoice === null || r.matchChoice === 'none'));
   // Phase 4A.5.9: pending items that could explain the statement difference (cleared at the bank, still pending here)
   const reconPending = recon && !recon.note && recon.differenceCents !== 0 ? [...new Map([...(recon.pendingMatches ?? []).flat(), ...(recon.pendingPartial ?? [])].map((t) => [t.id, t])).values()] : [];
   // a pending item that is a candidate of a row is resolved in that row only (one place to decide)
@@ -360,7 +361,8 @@ export function ImportPage() {
                           const views = live.map((m) => matchOptionView(m, r.amountCents, data, cur));
                           const chosen = views.find((v) => v.txId === r.matchChoice);
                           const option = (v: typeof views[number]) => {
-                            const taken = rows.find((o) => o !== r && o.include && o.matchChoice === v.txId);
+                            // Phase 4A.5.17: a link and a return of the same payment can be in one statement; two of the same kind can't
+                        const taken = rows.find((o) => o !== r && o.include && o.matchChoice === v.txId && (liveOf(o).find((m) => m.txId === v.txId)?.basis === 'return') === v.isReturn);
                             return (
                               <label key={v.txId} className="check" style={{ fontSize: 12.5 }}>
                                 <input type="radio" name={`match-${r.rowNumber}`} checked={r.matchChoice === v.txId} disabled={!!taken || !!v.disabledReason} onChange={() => setRow(i, { matchChoice: v.txId, include: true })} />

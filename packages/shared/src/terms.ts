@@ -86,7 +86,7 @@ export const ALREADY_INCLUDED_HINT = "Kept in your history but not added to the 
 export const HISTORY_ONLY_BADGE = 'Already in balance';
 export const HISTORY_ONLY_REASON = (date: string) => `Already included in balance as of ${date}. Kept in history, not added again.`;
 export const BEFORE_OPENING_BADGE = 'Before account added';
-export const BEFORE_OPENING_REASON = (date: string) => `Dated before this account was added on ${date}, so it's already reflected in the opening balance. Kept in history, not added again.`;
+export const BEFORE_OPENING_REASON = (date: string) => `Dated before this account was added on ${date} and posted by then, so it's already in the opening (posted) balance. Kept in history, not added again. (A transaction that was still pending then isn't in it, and counts.)`;
 /** Phase 4A.5.8: Update balance safeguards. */
 export const PENDING_MATCH_TITLE = 'This difference matches pending items';
 export const PENDING_MATCH_NOTE =
@@ -112,6 +112,10 @@ export const MATCH_TRANSFER_NOTE = (other: string) => `Only this account's side 
 export const MATCH_FEE_LABEL = (fee: string, account: string) => `It's this one, and the bank charged a ${fee} transfer fee (recorded as spending in ${account})`;
 export const MATCH_FEE_NOTE = (fee: string, principal: string, account: string) =>
   `Clarity records the transfer as ${principal} and the ${fee} fee as a separate expense in ${account}. Nothing else is changed. If you aren't sure the difference is a fee, leave the row out and check with your bank.`;
+/** Phase 4A.5.17: a statement row that may be the return of a card payment recorded in Clarity. */
+export const MATCH_RETURN_LABEL = "It's the return of this card payment";
+export const MATCH_RETURN_NOTE = (paying: string, card: string) =>
+  `Clarity records the money coming back to ${paying} and the payment as returned: it no longer counts as paying ${card}, so ${card}'s debt is counted in full again. It isn't counted as income. The payment itself is kept (with its history); undoing this import removes the return.`;
 export const MATCH_NOT_FEE = (difference: string) =>
   `Can't be linked: the statement differs from this transfer by ${difference}, which can't be a transfer fee (more arrived, or less left, than was transferred). Leave the row out and check the transfer.`;
 /** Phase 4A.5.12: the import button says what it will do (rows linked to existing transactions add nothing). */
@@ -132,6 +136,9 @@ export const TRANSFER_STATUS_OPTIONS: readonly { value: TransferSettlementChoice
   { value: 'received', label: 'Received · not yet posted by the sending bank' },
   { value: 'none', label: 'Not posted by either bank yet' },
 ];
+/** Phase 4A.5.17: the same choices for a card payment (a card's issuer posts a payment; nothing is "deposited"). */
+export const transferStatusOptions = (toCard: boolean): readonly { value: TransferSettlementChoice; label: string }[] =>
+  toCard ? TRANSFER_STATUS_OPTIONS.map((o) => (o.value === 'sent' ? { ...o, label: 'Sent · awaiting posting by the card issuer' } : o.value === 'received' ? { ...o, label: 'Posted by the card issuer · not yet by the paying bank' } : o)) : TRANSFER_STATUS_OPTIONS;
 export const TRANSFER_STATUS_HINT = "Each side of a transfer posts on its own. Money on its way in isn't counted as available until the receiving bank posts it; money going out counts at once.";
 export const transferChoiceOf = (fromPending: boolean, toPending: boolean): TransferSettlementChoice =>
   fromPending ? (toPending ? 'none' : 'received') : toPending ? 'sent' : 'both';

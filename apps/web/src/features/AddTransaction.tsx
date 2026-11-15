@@ -2,7 +2,7 @@ import { AlertTriangle, Plus, Trash2, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { addTransaction, deleteTransaction, updateTransaction, type TxInput } from '@clarity/data';
 import { balanceAsOfDate, buildMerchantMemory, inclusionProblem, expandOccurrences, findPossibleDuplicates, merchantKey, suggestOccurrenceMatch } from '@clarity/engine';
-import { addDays, ALREADY_INCLUDED_HINT, ALREADY_INCLUDED_LABEL, centsToDecimalString, formatCents, formatShortDate, legsPendingOf, parseAmountInput, TERMS, transferChoiceOf, TRANSFER_STATUS_HINT, TRANSFER_STATUS_LABEL, TRANSFER_STATUS_OPTIONS, type Transaction, type TransferSettlementChoice } from '@clarity/shared';
+import { addDays, ALREADY_INCLUDED_HINT, ALREADY_INCLUDED_LABEL, centsToDecimalString, formatCents, formatShortDate, legsPendingOf, parseAmountInput, TERMS, transferChoiceOf, TRANSFER_STATUS_HINT, TRANSFER_STATUS_LABEL, transferStatusOptions, type Transaction, type TransferSettlementChoice } from '@clarity/shared';
 import { useData, useRun, useSession, useStore } from '../state/session';
 import type { AddPrefill } from '../state/ui';
 import { AmountInput } from '../ui/AmountInput';
@@ -316,7 +316,7 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
             <Field label={TRANSFER_STATUS_LABEL} hint={TRANSFER_STATUS_HINT}>
               {(id) => (
                 <select id={id} className="select" data-testid="transfer-status" value={transferChoiceOf(pending, toPending)} onChange={(e) => { const l = legsPendingOf(e.target.value as TransferSettlementChoice); setPending(l.fromPending); setToPending(l.toPending); }}>
-                  {TRANSFER_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  {transferStatusOptions(data.accounts.find((a) => a.id === toAccountId)?.type === 'credit_card').map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
               )}
             </Field>

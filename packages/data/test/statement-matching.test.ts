@@ -143,16 +143,18 @@ describe('F1/F2: every same-amount candidate is listed; the user chooses; file o
     const r = w.review(c, H + '09/09/2026,REFUND X,300.00,1600.00\n09/08/2026,REFUND Y,300.00,1300.00\n', undefined, { 'REFUND X': d.id, 'REFUND Y': d.id });
     expect(errorOf(() => w.commit(c, r))).toMatchObject({ field: 'match', message: expect.stringMatching(/already chosen for another row/) });
   });
-  it('not candidates: another account, another currency (its own account), the opposite direction, dated before the account was opened, more than 3 days after the row', () => {
+  it('not candidates: another account, another currency (its own account), the opposite direction, more than 3 days after the row; a pending item from before the account was opened is a stale one (Phase 4A.5.17)', () => {
     const { w, c } = setup();
     w.at('2026-09-01');
     const s = w.acct('Savings', 'savings', 0);
     w.at('2026-09-12');
     pendingDeposit(w, s, 30000);
     pendingPurchase(w, c, 30000);
-    pendingDeposit(w, c, 30000, '2026-08-25', 'Too early'); // before the account was opened (Sep 1): not in its balance (an older one inside the account period is a stale candidate: see Phase 4A.5.14 D4)
+    // Phase 4A.5.17: a deposit still pending, dated before the account was opened (Sep 1), isn't in the opening (posted)
+    // balance, so it counts and is listed as an older (stale) candidate, 15 days before the row
+    const early = pendingDeposit(w, c, 30000, '2026-08-25', 'Too early');
     pendingDeposit(w, c, 30000, '2026-09-20', 'Too late'); // row is 11 days before (> 3)
-    expect(cands(w.review(c, H + '09/09/2026,AMAZON REFUND,300.00,1300.00\n'), 'AMAZON REFUND')).toEqual([]);
+    expect(cands(w.review(c, H + '09/09/2026,AMAZON REFUND,300.00,1300.00\n'), 'AMAZON REFUND').map((m) => [m.txId, m.basis, m.ageDays])).toEqual([[early.id, 'stale', 15]]);
   });
 });
 

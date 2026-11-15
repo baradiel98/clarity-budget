@@ -219,7 +219,8 @@ function startLines(f: Forecast, accounts: readonly Account[], cur: CurrencyCode
     // Phase 4A.5.15: a card payment on its way is counted once: from the account it comes from, not again as card debt
     ...f.cardPaymentsInTransit.map((p): ExplainLine => ({
       kind: 'info', label: `${name(p.cardId)}: ${formatCents(p.cents, cur)} payment${p.fromAccountId ? ` from ${name(p.fromAccountId)}` : ''} not yet posted by the card issuer`,
-      note: `already counted from ${p.fromAccountId ? name(p.fromAccountId) : 'the paying account'}, so the ${formatCents(p.cents, cur)} of card debt it pays isn't counted again`,
+      // Phase 4A.5.17: what to do if it fails (the workflow the import review offers)
+      note: `already counted from ${p.fromAccountId ? name(p.fromAccountId) : 'the paying account'}, so the ${formatCents(p.cents, cur)} of card debt it pays isn't counted again. If it's returned or rejected: when the returned money shows on a statement, choose "It's the return of this card payment" in the import review (not a separate deposit), and the card debt is counted in full again; if the money never left ${p.fromAccountId ? name(p.fromAccountId) : 'the paying account'}, delete the payment`,
     })),
   ];
 }

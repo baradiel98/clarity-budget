@@ -170,7 +170,7 @@ describe('edits, statements, undo, archived cards, dates', () => {
     const { b, c, v } = setup();
     pay(b, c, v, 20000);
     const l = lines(b).find((x) => x.label === 'Visa: $200.00 payment from Checking not yet posted by the card issuer')!;
-    expect(l.note).toBe("already counted from Checking, so the $200.00 of card debt it pays isn't counted again");
+    expect(l.note).toBe("already counted from Checking, so the $200.00 of card debt it pays isn't counted again. If it's returned or rejected: when the returned money shows on a statement, choose \"It's the return of this card payment\" in the import review (not a separate deposit), and the card debt is counted in full again; if the money never left Checking, delete the payment");
     void c;
   });
 });

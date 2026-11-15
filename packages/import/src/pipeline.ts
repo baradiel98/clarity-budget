@@ -274,7 +274,7 @@ export function buildPreview(table: RawTable, s: ImportSettings, ctx: PreviewCon
     // Phase 4A.5.12: every existing transaction this row could be (pending items of any amount in the same direction,
     // posted transfer legs of the same amount), all listed, none chosen: the user picks one or says it's different.
     // Not "consumed" by an earlier row, so the file's order never decides which row is paired with which item.
-    const matchCandidates = exact ? [] : findMatchCandidates(p, account, ctx.transactions);
+    const matchCandidates = exact ? [] : findMatchCandidates(p, account, ctx.transactions, { accounts: ctx.accounts });
     const candidateIds = new Set(matchCandidates.map((m) => m.txId));
     if (exact?.statementMatch && !(p.externalId && exact.provenance.externalId === p.externalId)) {
       consumed.add(exact.id);

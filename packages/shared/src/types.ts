@@ -137,6 +137,12 @@ export interface Transaction {
    * the user when the amounts on the two statements differed). It is spending, never part of the transfer.
    */
   transferFeeOf?: ID;
+  /**
+   * Phase 4A.5.17: this transfer (both legs) is the RETURN of the card payment with this transferGroupId (rejected,
+   * returned or reversed), confirmed by the user from a statement row. The money goes back to the paying account; the
+   * payment no longer counts as paying the card. Undoing the import that recorded it removes it.
+   */
+  returnOf?: ID;
   provenance: Provenance;
   createdAt: number;
   updatedAt: number;
@@ -292,7 +298,8 @@ export interface ImportBatch {
   counts: { rows: number; imported: number; excluded: number; duplicates: number; errors: number; /** Phase 4A.5.10: rows confirmed as a pending transaction clearing (linked, not added). */ matched?: number;
     /** Phase 4A.5.14: of the linked rows, how many changed an existing transaction from pending to posted. */ markedPosted?: number;
     /** Phase 4A.5.14: transfer fees confirmed with this import. */ fees?: number;
-    /** Phase 4A.5.14: transfers touched by this import whose other side is still pending (awaiting the other bank). */ awaiting?: number };
+    /** Phase 4A.5.14: transfers touched by this import whose other side is still pending (awaiting the other bank). */ awaiting?: number;
+    /** Phase 4A.5.17: card payments this import recorded as returned. */ returns?: number };
   reconciliation: ReconciliationResult | null;
   undoneAt: number | null;
   createdAt: number;

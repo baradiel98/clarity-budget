@@ -429,3 +429,25 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Known limitations]**
   - A failed or reversed payment counts as on its way until the user deletes it or undoes its import.
   - The card leg dated before the card's opening date is history and doesn't offset (the usual opening-date rule).
+
+## Phase 4A.5.17 (2026-11-15): pending opening-balance items and returned card payments (audit 4A.5.16 F1–F4)
+- **[Confirmed decision, owner]** The opening balance is the bank's posted balance on the opening date, so it excludes pending items, whatever their date.
+- **[Fixed] F2:**
+  - What was wrong: `affectsBalance` ignored everything dated before the opening date. A pending $200 debit gave $1,000 instead of $800, and with a card payment E2 gave $700 instead of $500 and E1 $300 instead of $500.
+  - Fix: `inOpeningBalance` treats a pre-opening item as history only if it posted by the opening date.
+  - A pending item counts, and keeps counting after it posts. A `postedDate` is now recorded when a pre-opening item is marked posted by hand (today) or linked (row date).
+  - The "Before account added" reason now says it was posted by then.
+- **[Fixed] F1, returned card payments:**
+  - A statement row of exactly the opposite amount, in an account the payment touched, within 0–30 days, is a 'return' candidate. It is never included by default.
+  - Confirming it creates a transfer back (`returnOf`): this side is the posted row, the other side is pending.
+  - The payment is no longer in transit. If the issuer never posted it, both card-side legs are pending and cancel (`isVoidedReturnLeg`).
+  - A link and a return of the same payment may be in one statement; two of the same kind may not.
+  - Undo and re-import are safe. `describeImportResult` adds "N returned card payment(s) recorded".
+- **[Fixed] F3:** the "Why this number?" line for a payment in transit now says what to do if it is returned or rejected.
+- **[Fixed] F4:** card payments say "Sent · awaiting posting by Visa". The Add form's card options say "awaiting posting by the card issuer"; bank transfers still say "awaiting deposit".
+- **[Lesson]** My first randomized model assumed a returned payment that was already inside the card's opening balance wouldn't restore the debt. That was wrong: the issuer reverses it, so the card owes it again. The engine was right, and I fixed the model.
+- **[Known limitations]**
+  - A return typed in by hand as income (not imported) isn't detected.
+  - A partial return (a different amount) isn't offered.
+  - The review still shows the Type/Category pickers on a return row, although they are ignored for a return.
+  - A pending item from before an account was added that later turns out to have been in the entered balance must be marked posted with a statement row dated before the opening date (or deleted).
