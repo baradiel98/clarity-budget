@@ -48,7 +48,8 @@ it('300 random sequences equal the independent ledger after every step', () => {
     const counted = (k: string) => opening[k]! + items.filter((x) => x.acct === k && !x.history && !before(x)).reduce((a, x) => a + x.cents, 0);
     const pendingOf = (k: string) => items.filter((x) => x.acct === k && !x.history && !before(x) && x.pending);
     // Phase 4A.5.14 (owner decision): a transfer leg still pending at the receiving bank is a pending credit too
-    const pendingCredits = (k: string) => pendingOf(k).filter((x) => x.cents > 0).reduce((a, x) => a + x.cents, 0);
+    // Phase 4A.5.15: except the card side of a payment from another account (counted once, from where it came)
+    const pendingCredits = (k: string) => pendingOf(k).filter((x) => x.cents > 0 && !(k === 'visa' && x.group)).reduce((a, x) => a + x.cents, 0);
     const posted = (k: string) => counted(k) - pendingOf(k).reduce((a, x) => a + x.cents, 0);
     const expectedSts = () => (counted('chk') - pendingCredits('chk')) + (counted('wal') - pendingCredits('wal')) - Math.max(0, pendingCredits('visa') - counted('visa')) - Math.max(0, pendingCredits('sav') - counted('sav'));
     const eligible = (k: string, date: string, pending: boolean) => !pending && date >= '2026-11-01' && date <= confirmed[k]! && date <= today;
@@ -186,7 +187,7 @@ it('300 random sequences equal the independent ledger after every step', () => {
       const sts = computeSafeToSpend(i).cents;
       expect(sts, `${where} Safe to Spend`).toBe(expectedSts());
       // pending credits never raise it; the EUR account never changes it
-      expect(computeSafeToSpend({ ...i, transactions: i.transactions.filter((t) => !(t.status === 'pending' && t.amountCents > 0)) }).cents, `${where} pending credits`).toBe(sts);
+      expect(computeSafeToSpend({ ...i, transactions: i.transactions.filter((t) => !(t.status === 'pending' && t.amountCents > 0 && !(t.accountId === ids.visa && t.transferGroupId))) }).cents, `${where} pending credits`).toBe(sts);
       expect(computeSafeToSpend({ ...i, transactions: i.transactions.filter((t) => t.accountId !== ids.eur) }).cents, `${where} EUR`).toBe(sts);
       // a transfer whose two sides are both counted moves money without creating or destroying any
       for (const g of new Set(items.filter((x) => x.group).map((x) => x.group!))) {

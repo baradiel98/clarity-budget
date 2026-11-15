@@ -216,6 +216,11 @@ function startLines(f: Forecast, accounts: readonly Account[], cur: CurrencyCode
     ...f.pendingCredits.map((p): ExplainLine => p.spendable
       ? { kind: 'out', label: `${name(p.accountId)}: pending credit not yet available`, cents: -p.cents, note: "pending; it's in your recorded balance but not counted until it clears" }
       : { kind: 'info', label: `${name(p.accountId)}: ${formatCents(p.cents, cur)} pending credit`, note: "pending; not counted (it can't fund transfers or bills) until it clears" }),
+    // Phase 4A.5.15: a card payment on its way is counted once: from the account it comes from, not again as card debt
+    ...f.cardPaymentsInTransit.map((p): ExplainLine => ({
+      kind: 'info', label: `${name(p.cardId)}: ${formatCents(p.cents, cur)} payment${p.fromAccountId ? ` from ${name(p.fromAccountId)}` : ''} not yet posted by the card issuer`,
+      note: `already counted from ${p.fromAccountId ? name(p.fromAccountId) : 'the paying account'}, so the ${formatCents(p.cents, cur)} of card debt it pays isn't counted again`,
+    })),
   ];
 }
 

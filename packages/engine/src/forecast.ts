@@ -10,7 +10,7 @@ import {
   type RecurringItem,
   type Transaction,
 } from '@clarity/shared';
-import { accountBalance, isCashAccount, isPendingCredit, pendingCreditTotal } from './balances';
+import { accountBalance, cardPaymentsInTransit, isCardPaymentInTransit, isCashAccount, isPendingCredit, pendingCreditTotal } from './balances';
 import { expandOccurrences, OVERDUE_LOOKBACK_DAYS, type Occurrence } from './occurrences';
 
 export interface Hypothetical {
@@ -196,6 +196,8 @@ export interface Forecast {
   recordedStartCashCents: Cents;
   /** Phase 4A.5.6: pending credits held back on non-card accounts (spendable = counted in the combined cash). */
   pendingCredits: { accountId: ID; cents: Cents; spendable: boolean }[];
+  /** Phase 4A.5.15: card payments in transit today (counted from the paying account; not reserved again as card debt). */
+  cardPaymentsInTransit: { cardId: ID; fromAccountId: ID | null; cents: Cents; txId: ID }[];
 }
 
 function legsForOccurrence(o: Occurrence, amount: Cents): Leg[] {
@@ -275,8 +277,9 @@ export function buildForecast(input: ForecastInput): Forecast {
     // Phase 4A.5.8: an "already included" flag on a future-dated transaction is invalid (it can't be in a balance
     // confirmed today or earlier), so it is ignored and the transaction is counted, never silently dropped.
     if (!acct || t.date < acct.openingDate) continue;
-    // Phase 4A.5.6: a future-dated credit still marked pending isn't counted until it is posted.
-    if (isPendingCredit(t)) {
+    // Phase 4A.5.6: a future-dated credit still marked pending isn't counted until it is posted. Phase 4A.5.15: except
+    // the card side of a card payment from another account: it moves with its sending leg, counted once.
+    if (isPendingCredit(t) && !isCardPaymentInTransit(acct, t, transactions)) {
       excluded.push({ id: `tx:${t.id}`, date: t.date, label: t.merchant || 'Pending credit', source: 'scheduled_tx', legs: [], cashDeltaCents: 0, txId: t.id, estimated: false, excluded: 'pending_credit' });
       continue;
     }
@@ -627,6 +630,7 @@ export function buildForecast(input: ForecastInput): Forecast {
     pendingCardCredits: Object.fromEntries([...pendingCredits].filter(([id]) => baseCards.has(id))),
     recordedStartCashCents: recordedCash,
     pendingCredits: [...pendingCredits].filter(([id]) => accountById.get(id)?.type !== 'credit_card').map(([accountId, cents]) => ({ accountId, cents, spendable: cashIds.has(accountId) })),
+    cardPaymentsInTransit: cardPaymentsInTransit(accounts.filter((a) => baseCards.has(a.id)), transactions, today),
   };
 }
 

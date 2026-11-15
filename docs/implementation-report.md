@@ -521,6 +521,31 @@ Owner policy: each transfer leg settles on its own; money in transit isn't spend
   - **Checks:** typecheck and lint clean; mobile `tsc` clean; iOS and Android bundles exported.
 - **Not verified:** simulator, physical device, Safari, Firefox, screen reader; multiple tabs outside Chromium.
 
+## 7t. Phase 4A.5.15: card payments in transit counted once
+
+| Case (checking $1,000, card owes $500, no payment scheduled) | Truth | 4A.5.14 | After |
+|---|---:|---:|---:|
+| $200 payment pending at both banks | $500 | $300 (counted twice) | **$500** |
+| Checking posted, card issuer not yet | $500 | $300 | **$500** |
+| Card issuer posted, checking pending | $500 | $500 | **$500** |
+| Owes $100, pays $300 (overpayment) | $700 | $500 | **$700** (the $200 credit isn't spendable) |
+| Pending $100 refund on the card (not a payment) | $500 | $500 | **$500** (still held back) |
+
+- **Root cause:**
+  - `pendingCreditTotal` adds a card's pending credits back to its debt (Phase 4A.5.4, for refunds).
+  - Since 4A.5.14 that included the card side of a pending payment, whose checking side was already counted.
+  - Future-dated pending payments had the same problem in the forecast.
+- **Fix:** `isCardPaymentInTransit` (engine/balances.ts) is used by every calculation, plus a "Why this number?" line (`Forecast.cardPaymentsInTransit`). This is a reservation rule only: no status, posted balance, id or link changes.
+- **Tests (after the final code change):**
+  - **Unit:** vitest 623 passed, 1 skipped, including all 4A.5.14 transfer-settlement and reconciliation tests. New: `packages/data/test/card-payment-transit.test.ts`, 20 tests including a 300-run randomized model (3,600 steps; Safe to Spend never moved when either leg posted; recorded balances unchanged by posting).
+    - Updated to the policy: the card-credits engine test ($100, counted once) and the `reconciliation-ledger` model (a card payment in transit isn't a pending credit).
+  - **Mobile:** jest 52 passed. New: `apps/mobile/test/card-payment-transit.test.tsx`, the explanation screen in Node.
+  - **Browser:** Playwright 171 passed, 10 skipped (Chromium, production and test-mode builds). New: `e2e/phase4a515.spec.ts` (Safe to Spend, "Why this number?", card side posted).
+  - **Checks:** typecheck and lint clean; mobile `tsc` clean; iOS and Android bundles exported.
+- **Limitations:**
+  - A failed or reversed payment counts as on its way until it is deleted or its import undone.
+  - Not verified on simulators, devices, Safari or with a screen reader.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

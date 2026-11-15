@@ -407,10 +407,25 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Decision, mine; documented]**
   - Posted, unlinked transfer legs match over −3/+10 days (was +7), plus as stale when the amount is exact. This covers a leg the user marked posted by hand before an 8–11-day settlement.
   - A posting date is recorded only from a statement row. When marked posted by hand, the transaction counts from its own date.
-- **[Consequence to review]** A card payment still pending at the card issuer counts against checking AND the card debt until the issuer posts it. It was counted once before; this is the literal reading of the owner's rules 2 and 4.
+- **[Superseded by 4A.5.15]** A card payment pending at the card issuer was counted against checking AND the card debt (twice). Corrected in Phase 4A.5.15 (owner decision).
 - **[Lesson]** In web `Transactions.tsx`, helpers after the component's `return` must be function declarations: a `const` there crashed the page ("settlement is not defined"), found by the browser suite.
 - **[Known limitations]**
   - A fee can be confirmed only for a sender-charged difference: less arrived, or more left. A receiving-bank fee isn't modelled.
   - A leg marked posted by hand whose statement arrives more than 10 days later with a different amount isn't listed.
   - A toast "Undo" from an out-of-date tab is refused without a message (data is reloaded).
   - Cross-tab safety relies on IndexedDB read-write transactions being serialized per store, which is browser behaviour. It was tested in Chromium only.
+
+## Phase 4A.5.15 (2026-11-15): card payments in transit counted once
+- **[Confirmed decision, owner]** An initiated card payment not yet fully settled counts exactly once against Safe to Spend: from the paying account (its sending leg, pending or posted), never again as card debt. It is a forecast-reservation rule only: no status, posted balance, id or link changes. 4A.5.14 independent settlement stays; incoming pending transfers to cash accounts stay unspendable.
+- **[Root cause, verified]**
+  - `pendingCreditTotal` adds a card's pending credits back to its debt (Phase 4A.5.4, for pending refunds).
+  - Since 4A.5.14 the card leg of a pending payment was one of them, while checking's pending debit also counted it.
+  - Future-dated pending payments were also excluded from the forecast (`isPendingCredit` in step 1).
+- **[Fix]** `isCardPaymentInTransit` (engine/balances.ts): the pending card side of a recorded transfer whose sending leg exists.
+  - It is excluded from card pending credits and from the forecast exclusion.
+  - `Forecast.cardPaymentsInTransit` feeds a "Why this number?" line.
+  - Same engine path for Safe to Spend, afford, warnings, forecast, explanations; web and mobile render the same lines.
+- **[Verified]** 20 data tests (both settlement orders, every transition, partial/multiple/multi-card, overpayment, card in credit, savings source, refunds, scheduled payments, failed payments, edit, statement links and undo, archived, same day, past/future dates, shortfall/afford/explanation) including a 300-run randomized model (3,600 steps; Safe to Spend never moved when a leg posted). Plus 1 browser test and 1 mobile component test.
+- **[Known limitations]**
+  - A failed or reversed payment counts as on its way until the user deletes it or undoes its import.
+  - The card leg dated before the card's opening date is history and doesn't offset (the usual opening-date rule).

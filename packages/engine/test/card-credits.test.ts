@@ -82,11 +82,10 @@ describe('payments still cover debt; credits only on their day', () => {
     // today: owed 400 (incl. pending), payment 200 covers 200 → 200 owed now: 300. Dec 20: 300, still 200 → 100.
     expect(sts(mk([chk(50000), visa(40000)], [fullPay('visa', '2026-12-20')], [refund('visa', TODAY, 20000, { status: 'pending' })]))).toBe(10000);
   });
-  it('Phase 4A.5.14 (owner decision: each leg settles on its own; neutrality only once both legs posted): a card payment pending at both banks → −$100', () => {
-    // The sending leg counts at once (checking 500 − 200 = 300); the card's receiving leg is a pending credit, so the card
-    // still owes 400 until the card issuer posts the payment: 300 − 400 = −100. (Before 4A.5.14: counted once, $100.)
+  it('Phase 4A.5.15 (owner decision): a card payment pending at both banks is counted once → $100 (4A.5.14 counted it twice: −$100)', () => {
+    // checking 500 − 200 pending debit = 300; the card owes 400 − 200 already counted from checking = 200: 300 − 200
     const i = mk([chk(50000), visa(40000)], [], transfer('chk', 'visa', TODAY, 20000, { status: 'pending' }));
-    expect(sts(i)).toBe(-10000);
+    expect(sts(i)).toBe(10000);
   });
   it('Phase 4A.5.14: the same payment once the card has posted it (checking still pending) → $100, counted once', () => {
     const [out, inc] = transfer('chk', 'visa', TODAY, 20000, { status: 'pending' });

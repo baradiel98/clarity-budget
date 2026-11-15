@@ -32,12 +32,43 @@ export function isUnpostedAsOf(tx: Transaction, asOf: ISODate): boolean {
   return tx.status === 'pending' || (!!tx.postedDate && tx.postedDate > asOf);
 }
 
-/** Pending credits (dated on or before `asOf`) included in the recorded balance but not yet spendable. */
+/**
+ * Phase 4A.5.15 (owner decision): the card side of a card PAYMENT already initiated from another account and not yet
+ * posted by the card issuer. Its sending leg is recorded (pending or posted) and is already counted against the
+ * account it comes from, so the card debt it pays is not reserved a second time. A pending refund or other credit on
+ * the card (not a transfer) is not a payment: it is still held back until it posts (Phase 4A.5.4). Only a recorded
+ * transfer counts; a scheduled (recurring) payment that hasn't been initiated follows the scheduled-payment rules.
+ */
+export function isCardPaymentInTransit(account: Account | undefined, tx: Transaction, transactions: readonly Transaction[]): boolean {
+  return !!account && account.type === 'credit_card' && tx.accountId === account.id && tx.status === 'pending' && tx.amountCents > 0 && !!tx.transferGroupId &&
+    transactions.some((x) => x.transferGroupId === tx.transferGroupId && x.id !== tx.id && x.amountCents < 0);
+}
+
+/**
+ * Pending credits (dated on or before `asOf`) included in the recorded balance but not yet spendable.
+ * Phase 4A.5.15: on a card, a payment in transit (see isCardPaymentInTransit) is not one: it stays in the card's recorded
+ * balance and lowers what is owed, because the money is already counted where it came from (counted exactly once).
+ */
 export function pendingCreditTotal(account: Account, transactions: readonly Transaction[], asOf: ISODate): Cents {
   const bd = balanceAsOfDate(account, transactions);
   let total = 0;
-  for (const t of transactions) if (affectsBalance(account, t, bd) && t.date <= asOf && isPendingCredit(t)) total += t.amountCents;
+  for (const t of transactions) if (affectsBalance(account, t, bd) && t.date <= asOf && isPendingCredit(t) && !isCardPaymentInTransit(account, t, transactions)) total += t.amountCents;
   return total;
+}
+
+/** Phase 4A.5.15: card payments in transit (dated on or before `asOf`), for explanations. */
+export function cardPaymentsInTransit(accounts: readonly Account[], transactions: readonly Transaction[], asOf: ISODate): { cardId: ID; fromAccountId: ID | null; cents: Cents; txId: ID }[] {
+  const out: { cardId: ID; fromAccountId: ID | null; cents: Cents; txId: ID }[] = [];
+  for (const a of accounts) {
+    if (a.type !== 'credit_card') continue;
+    const bd = balanceAsOfDate(a, transactions);
+    for (const t of transactions) {
+      if (!affectsBalance(a, t, bd) || t.date > asOf || !isCardPaymentInTransit(a, t, transactions)) continue;
+      const from = transactions.find((x) => x.transferGroupId === t.transferGroupId && x.id !== t.id);
+      out.push({ cardId: a.id, fromAccountId: from?.accountId ?? null, cents: t.amountCents, txId: t.id });
+    }
+  }
+  return out;
 }
 
 /** Posted balance: the recorded balance without any pending items (what "Update balance" compares with the bank). */

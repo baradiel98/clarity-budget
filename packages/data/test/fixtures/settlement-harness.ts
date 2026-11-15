@@ -27,7 +27,7 @@ export class Book {
   today = '2026-09-01';
   ctx = (): Ctx => ({ data: this.data, now: NOW + seq, today: this.today, newId: (p) => `${p}_${++seq}` });
   at(d: string) { this.today = d; return this; }
-  acct(name: string, type: 'checking' | 'savings' | 'cash', cents: number) { const r = createAccount(this.ctx(), { name, type, currentBalanceCents: cents }); this.data = applyOps(this.data, r.ops); return r.account.id; }
+  acct(name: string, type: 'checking' | 'savings' | 'cash' | 'credit_card', cents: number) { const r = createAccount(this.ctx(), { name, type, currentBalanceCents: cents }); this.data = applyOps(this.data, r.ops); return r.account.id; }
   add(i: TxInput) { const r = addTransaction(this.ctx(), i); this.data = applyOps(this.data, r.ops); return r.txs; }
   transfer(from: ID, to: ID, date: string, cents: number, status: 'pending' | 'confirmed' = 'pending', toStatus = status) {
     const legs = this.add({ kind: 'transfer', accountId: from, toAccountId: to, date, amountCents: cents, merchant: 'Transfer', categoryId: null, status, toStatus });
