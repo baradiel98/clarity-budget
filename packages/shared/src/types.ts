@@ -57,6 +57,12 @@ export interface Provenance {
    * could have been (the candidates they reviewed). Kept for the record; all are counted.
    */
   separateFrom?: ID[];
+  /**
+   * Phase 4A.5.14: the statement row's own date and amount for an imported transaction, so re-importing the statement
+   * still recognises it after the user edits the transaction's date or amount (no duplicate is added).
+   */
+  rowDate?: ISODate;
+  rowAmountCents?: Cents;
 }
 
 /**
@@ -71,6 +77,20 @@ export interface StatementMatch {
   rawDescription: string;
   externalId?: string;
   previousStatus: TxStatus;
+  /**
+   * Phase 4A.5.14: the statement row's amount, so the row is still recognised as this transaction's after the user
+   * edits the amount, date or description (re-importing the statement never adds it again). Missing on older links:
+   * the transaction's own amount is used instead.
+   */
+  amountCents?: Cents;
+  /** Phase 4A.5.14: true when this import changed the status (pending → posted); undo restores only that. */
+  setStatus?: boolean;
+  /** Phase 4A.5.14: the posting date before this import (undo restores it). */
+  previousPostedDate?: ISODate;
+  /** Phase 4A.5.14: a transfer fee confirmed with this row (see Transaction.transferFeeOf); undo removes it. */
+  fee?: { feeTxId: ID; /** the transfer amount (both sides, unsigned) before the fee was confirmed */ previousPrincipalCents: Cents | null };
+  /** Phase 4A.5.14: an existing fee on this transfer leg that this import marked posted together with the leg. */
+  postedFeeTxId?: ID;
 }
 
 export interface OccurrenceRef {
@@ -106,6 +126,17 @@ export interface Transaction {
   includedAsOf?: ISODate;
   /** Phase 4A.5.10: the statement row this transaction was matched to (see StatementMatch). */
   statementMatch?: StatementMatch;
+  /**
+   * Phase 4A.5.14: the date this transaction posted at the bank (the statement row's date, or the day it was marked
+   * posted), when that is later than `date`. Each transfer leg has its own. A posted balance "as of" an earlier
+   * date leaves it out, like the bank's balance on that day.
+   */
+  postedDate?: ISODate;
+  /**
+   * Phase 4A.5.14: this expense is a fee the bank charged for the transfer with this transferGroupId (confirmed by
+   * the user when the amounts on the two statements differed). It is spending, never part of the transfer.
+   */
+  transferFeeOf?: ID;
   provenance: Provenance;
   createdAt: number;
   updatedAt: number;
@@ -258,7 +289,10 @@ export interface ImportBatch {
   mappingProfileId: ID | null;
   accountId: ID;
   importedAt: number;
-  counts: { rows: number; imported: number; excluded: number; duplicates: number; errors: number; /** Phase 4A.5.10: rows confirmed as a pending transaction clearing (linked, not added). */ matched?: number };
+  counts: { rows: number; imported: number; excluded: number; duplicates: number; errors: number; /** Phase 4A.5.10: rows confirmed as a pending transaction clearing (linked, not added). */ matched?: number;
+    /** Phase 4A.5.14: of the linked rows, how many changed an existing transaction from pending to posted. */ markedPosted?: number;
+    /** Phase 4A.5.14: transfer fees confirmed with this import. */ fees?: number;
+    /** Phase 4A.5.14: transfers touched by this import whose other side is still pending (awaiting the other bank). */ awaiting?: number };
   reconciliation: ReconciliationResult | null;
   undoneAt: number | null;
   createdAt: number;

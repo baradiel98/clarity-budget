@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { accountBalance, computeSafeToSpend, historyStatus, balanceAsOfDate } from '@clarity/engine';
-import { buildPreview, csvParser, findMatchCandidates, guessMapping, reconcilePreview, suggestSignConvention, type ImportCandidate, type ReconciliationPreview } from '@clarity/import';
+import { buildPreview, csvParser, findMatchCandidates, guessMapping, reconcilePreview, snapshotOf, suggestSignConvention, type CandidateSnapshot, type ImportCandidate, type ReconciliationPreview } from '@clarity/import';
 import type { WorkspaceData } from '@clarity/shared';
 import {
   addTransaction, adjustBalance, applyOps, CommandError, commitImport, createAccount, defaultSettings, deleteTransaction, emptyWorkspace, engineInput,
@@ -41,17 +41,19 @@ class W {
     const preview = buildPreview(table, settings, { account: this.a(accountId), accounts: this.data.accounts, transactions: this.data.transactions, recurring: [], exceptions: [], importBatches: this.data.importBatches, fileHash: csv, today: this.today });
     const live = (c: ImportCandidate) => findMatchCandidates(c, this.a(accountId), this.data.transactions, { alsoIds: c.matchCandidates.map((m) => m.txId) });
     const decided = (c: ImportCandidate) => decide[c.rawDescription] !== undefined && (c.matchCandidates.length > 0 || live(c).length > 0);
-    const matchOf = (c: ImportCandidate): { txId: string } | { none: true; seen: string[] } => {
+    // like the review screens: the decision carries what the user sees now (the live candidate's snapshot)
+    const matchOf = (c: ImportCandidate): { txId: string; snapshot?: CandidateSnapshot; fee?: { feeCents: number } } | { none: true; seen: CandidateSnapshot[] } => {
       const v = decide[c.rawDescription]!;
-      if (typeof v === 'string') return { txId: v };
-      if (v === false) return { none: true, seen: live(c).map((m) => m.txId) };
+      const snap = (id: string) => { const m = live(c).find((x) => x.txId === id); return m ? { snapshot: snapshotOf(m), ...(m.feeOption ? { fee: { feeCents: m.feeOption.feeCents } } : {}) } : {}; };
+      if (typeof v === 'string') return { txId: v, ...snap(v) };
+      if (v === false) return { none: true, seen: live(c).map(snapshotOf) };
       const exact = live(c).filter((m) => m.differenceCents === 0);
       if (exact.length !== 1) throw new Error(`test setup: ${c.rawDescription} has ${exact.length} same-amount candidates`);
-      return { txId: exact[0]!.txId };
+      return { txId: exact[0]!.txId, ...snap(exact[0]!.txId) };
     };
     const chosen = () => preview.candidates.filter((c) => decided(c) || (pick ?? ((x: ImportCandidate) => x.include))(c));
     // rows confirmed as an existing transaction aren't added; that transaction counts as posted
-    const sameIds = () => chosen().filter((c) => decided(c) && 'txId' in matchOf(c)).map((c) => (matchOf(c) as { txId: string }).txId);
+    const sameIds = () => chosen().filter((c) => decided(c) && 'txId' in matchOf(c)).map((c) => { const m = matchOf(c) as { txId: string; fee?: unknown }; return m.fee ? { txId: m.txId, effectCents: c.amountCents } : m.txId; });
     const recon = () => reconcilePreview(preview, chosen().filter((c) => !(decided(c) && 'txId' in matchOf(c))), { account: this.a(accountId), transactions: this.data.transactions, postedByMatch: sameIds() })!;
     return { preview, settings, chosen, recon, decide, decided, matchOf };
   }
@@ -60,6 +62,7 @@ class W {
       accountId, fileName: 'statement.csv', fileHash: String(++seq), parserId: 'csv', headerSignature: 'h', delimiter: ',', settings: r.settings,
       decisions: r.chosen().map((c) => ({ candidate: c, kind: opts.other?.[c.rawDescription] ? 'transfer' : c.kind, categoryId: null, merchant: c.merchant, linkOccurrence: false, ...(opts.other?.[c.rawDescription] ? { otherAccountId: opts.other[c.rawDescription]! } : {}), ...(r.decided(c) ? { match: r.matchOf(c) } : {}) })),
       totalRows: 0, excludedCount: 0, duplicateCount: 0, errorCount: 0, reconciliation: r.recon(), applyAdjustment: opts.applyAdjustment ?? true, adjustmentUnrelatedToPending: opts.unrelated,
+      knownDuplicateIds: r.preview.candidates.flatMap((c) => (c.duplicate?.level === 'exact' ? [c.duplicate.txId] : [])),
     });
     this.data = applyOps(this.data, res.ops);
     return res;
@@ -271,7 +274,7 @@ describe('Phase 4A.5.10: a statement row and a pending transaction — the user 
     expect(r.recon().differenceCents).toBe(0); // 1,000 + 300 (now posted) − 10 = 1,290
     const res = w.commit(c, r);
     const t = w.data.transactions.find((x) => x.id === dep.id)!;
-    expect([t.status, t.merchant, t.date, t.statementMatch]).toEqual(['confirmed', 'Store return', '2026-09-05', { importBatchId: res.batch.id, rowNumber: 2, date: '2026-09-09', rawDescription: 'AMAZON REFUND', previousStatus: 'pending' }]);
+    expect([t.status, t.merchant, t.date, t.statementMatch]).toEqual(['confirmed', 'Store return', '2026-09-05', { importBatchId: res.batch.id, rowNumber: 2, date: '2026-09-09', rawDescription: 'AMAZON REFUND', previousStatus: 'pending', amountCents: 30000, setStatus: true }]);
     expect([count(w, 30000), w.rec(c), w.sts(), res.batch.counts.imported, res.batch.counts.matched]).toEqual([1, 129000, 129000, 1, 1]);
     w.post(dep.id);
     expect([count(w, 30000), w.rec(c), w.sts()]).toEqual([1, 129000, 129000]);
@@ -340,7 +343,7 @@ describe('Phase 4A.5.10: a statement row and a pending transaction — the user 
     w.data = applyOps(w.data, deleteTransaction(w.ctx(), imported.id));
     expect([w.data.transactions.find((x) => x.id === dep.id)!.status, w.rec(c), w.sts()]).toEqual(['pending', 129000, 99000]);
   });
-  it('a pending transfer (checking → savings) cleared on the checking statement: "Same" posts both legs once; savings counts it by its own date; undo restores both to pending', () => {
+  it('a pending transfer (checking → savings) cleared on the checking statement: "Same" posts the CHECKING leg only (Phase 4A.5.14: savings awaits its own bank); undo restores it to pending', () => {
     const { w, c } = setup();
     w.at('2026-09-01');
     const s = w.acct('Savings', 'savings', 50000);
@@ -349,7 +352,8 @@ describe('Phase 4A.5.10: a statement row and a pending transaction — the user 
     const r = w.review(c, H + '09/08/2026,ONLINE TRANSFER 9921,-100.00,900.00\n', undefined, { 'ONLINE TRANSFER 9921': true });
     expect(r.recon().differenceCents).toBe(0);
     const res = w.commit(c, r);
-    expect([w.data.transactions.filter((t) => t.transferGroupId).map((t) => t.status), w.rec(c), w.rec(s), w.data.transactions.length]).toEqual([['confirmed', 'confirmed'], 90000, 60000, 2]);
+    expect([w.data.transactions.filter((t) => t.transferGroupId).map((t) => t.status), w.rec(c), w.rec(s), w.data.transactions.length]).toEqual([['confirmed', 'pending'], 90000, 60000, 2]);
+    expect(res.batch.counts).toMatchObject({ imported: 0, matched: 1, markedPosted: 1, awaiting: 1 });
     w.data = applyOps(w.data, undoImportBatch(w.ctx(), res.batch.id));
     expect([w.data.transactions.filter((t) => t.transferGroupId).map((t) => t.status), legs.length]).toEqual([['pending', 'pending'], 2]);
   });

@@ -1,10 +1,10 @@
 import {
-  defaultCategories, formatCents, formatShortDate, localISODate, type Account, type AccountType, type Cents, type Category, type ID, type ISODate, type ImportBatch,
+  defaultCategories, formatCents, formatShortDate, localISODate, MATCH_AMOUNT_NOTE, MATCH_FEE_LABEL, MATCH_FEE_NOTE, MATCH_NOT_FEE, MATCH_PENDING_NOTE, MATCH_POSTED_NOTE, MATCH_TRANSFER_NOTE, type Account, type AccountType, type Cents, type Category, type ID, type ISODate, type ImportBatch,
   type MappingProfile, type OccurrenceException, type Provenance, type RecurringAmount, type RecurringItem, type RecurringKind, type Schedule, type Settings,
   type Split, type Transaction, type TxKind, type TxStatus, type WeekendRule, type WorkspaceData,
 } from '@clarity/shared';
 import { accountBalance, balanceAsOfDate, inclusionProblem, pendingMatches, pendingPartialMatches, postedBalance, validateTransaction, validateTransferPair, type InclusionProblem, type Occurrence, type ValidationIssue } from '@clarity/engine';
-import { findMatchCandidates, type ImportCandidate, type ImportSettings, type ReconciliationPreview } from '@clarity/import';
+import { candidateLabel, feeOfLeg, findExactDuplicate, findMatchCandidates, sameSnapshot, snapshotOf, type CandidateSnapshot, type ImportCandidate, type ImportSettings, type MatchCandidate, type ReconciliationPreview } from '@clarity/import';
 import { applyOps as applyLocal, type Op } from './ops';
 
 /**
@@ -280,11 +280,16 @@ export function adjustBalance(
   return { ops: [{ t: 'put', table: 'transactions', value: tx }, confirmOp, ...bumpBackupCounter(ctx, 1)], tx, reconciled: true };
 }
 
-/** Phase 4A.5.8: mark a pending transaction (both legs of a transfer) posted. Ids, amounts and history are unchanged. */
+/**
+ * Phase 4A.5.8: mark a pending transaction posted. Phase 4A.5.14: ONE leg only: a transfer's other leg settles on its
+ * own (the receiving bank may not have posted it yet). A transfer fee recorded on this leg's account posts with it
+ * (the bank shows them as one row). Ids, amounts and history are unchanged.
+ */
 export function markTransactionPosted(ctx: Ctx, id: ID): Op[] {
   const t = ctx.data.transactions.find((x) => x.id === id) ?? fail('Transaction not found.');
-  const legs = t.transferGroupId ? ctx.data.transactions.filter((x) => x.transferGroupId === t.transferGroupId) : [t];
-  return legs.map((l): Op => ({ t: 'put', table: 'transactions', value: { ...l, status: 'confirmed', updatedAt: ctx.now } }));
+  if (t.status !== 'pending') return [];
+  const fee = feeOfLeg(t, ctx.data.transactions);
+  return [t, ...(fee && fee.status === 'pending' ? [fee] : [])].map((l): Op => ({ t: 'put', table: 'transactions', value: { ...l, status: 'confirmed', updatedAt: ctx.now } }));
 }
 
 const INCLUSION_MESSAGE: Record<InclusionProblem, (name: string, bd: ISODate) => string> = {
@@ -343,6 +348,12 @@ export interface TxInput {
   includedInBalance?: boolean;
   /** Phase 4A.5.8: the same for the RECEIVING account of a transfer, decided against that account's own balance date. */
   toIncludedInBalance?: boolean;
+  /**
+   * Phase 4A.5.14: for a transfer, the RECEIVING leg's status (each leg settles on its own: "Sent · awaiting deposit"
+   * is a posted sending leg with a pending receiving leg). `status` is the sending leg's. Omitted: on a new transfer,
+   * the same as `status`; on an edit, the receiving leg keeps its own status unless `status` changed.
+   */
+  toStatus?: TxStatus;
 }
 
 function bumpBackupCounter(ctx: Ctx, n: number): Op[] {
@@ -351,6 +362,21 @@ function bumpBackupCounter(ctx: Ctx, n: number): Op[] {
 
 function signFor(kind: TxInput['kind']): 1 | -1 {
   return kind === 'expense' ? -1 : 1;
+}
+
+/**
+ * Phase 4A.5.14: one leg's (or transaction's) status and posting date on save. A transaction linked to a statement row
+ * can't be made pending here: the statement shows it posted (undo that import instead). An unchanged status keeps
+ * its posting date. A posting date is only ever recorded from a statement row (the bank's own date); marked posted
+ * by hand, the day it really posted isn't known, so the transaction counts as posted from its own date.
+ */
+function settled(prev: Transaction | undefined, status: TxStatus): Pick<Transaction, 'status' | 'postedDate'> {
+  if (prev?.statementMatch && status !== prev.status) {
+    fail(`“${prev.merchant || prev.kind}” is linked to a statement row (${formatShortDate(prev.statementMatch.date)}), which shows it posted. To make it pending again, undo that import.`, 'status');
+  }
+  if (status === 'pending') return { status };
+  if (prev && prev.status === status && prev.postedDate) return { status, postedDate: prev.postedDate };
+  return { status };
 }
 
 function buildTxs(ctx: Ctx, input: TxInput, ids: { id?: ID; pairId?: ID; groupId?: ID; createdAt?: number; prev?: Transaction; prevPair?: Transaction }): Transaction[] {
@@ -369,10 +395,13 @@ function buildTxs(ctx: Ctx, input: TxInput, ids: { id?: ID; pairId?: ID; groupId
   if (input.kind === 'transfer') {
     if (!input.toAccountId) fail('Choose the account the money goes to.', 'toAccountId');
     const groupId = ids.groupId ?? ctx.newId('tg');
+    // Phase 4A.5.14: each leg has its own status. On an edit that doesn't change the sending status, the receiving leg
+    // keeps its own (an older caller that doesn't know about legs can't post or un-post the other side by accident).
+    const toStatus: TxStatus = input.toStatus ?? (ids.prev && ids.prevPair && ids.prev.status === status ? ids.prevPair.status : status);
     // Phase 4A.5.8: each leg is one account's effect; "already included" is decided per leg against that account's date.
     const legs: Transaction[] = [
-      { ...base, ...inclusionFor(ctx, input.accountId, input.date, status, input.includedInBalance, ids.prev), id: ids.id ?? ctx.newId('tx'), accountId: input.accountId, amountCents: -input.amountCents, kind: 'transfer', categoryId: null, transferGroupId: groupId, merchant: base.merchant || 'Transfer' },
-      { ...base, ...inclusionFor(ctx, input.toAccountId!, input.date, status, input.toIncludedInBalance, ids.prevPair), id: ids.pairId ?? ctx.newId('tx'), accountId: input.toAccountId!, amountCents: input.amountCents, kind: 'transfer', categoryId: null, transferGroupId: groupId, merchant: base.merchant || 'Transfer' },
+      { ...base, ...settled(ids.prev, status), ...inclusionFor(ctx, input.accountId, input.date, status, input.includedInBalance, ids.prev), id: ids.id ?? ctx.newId('tx'), accountId: input.accountId, amountCents: -input.amountCents, kind: 'transfer', categoryId: null, transferGroupId: groupId, merchant: base.merchant || 'Transfer' },
+      { ...base, ...settled(ids.prevPair, toStatus), ...inclusionFor(ctx, input.toAccountId!, input.date, toStatus, input.toIncludedInBalance, ids.prevPair), id: ids.pairId ?? ctx.newId('tx'), accountId: input.toAccountId!, amountCents: input.amountCents, kind: 'transfer', categoryId: null, transferGroupId: groupId, merchant: base.merchant || 'Transfer' },
     ];
     const issues = validateTransferPair(legs, ctx.data.accounts);
     if (issues.length) throw new CommandError(issues);
@@ -384,6 +413,7 @@ function buildTxs(ctx: Ctx, input: TxInput, ids: { id?: ID; pairId?: ID; groupId
   if (input.splits && input.splits.length > 0) splits = input.splits.map((s) => ({ categoryId: s.categoryId, amountCents: sign * s.amountCents }));
   const tx: Transaction = {
     ...base,
+    ...settled(ids.prev, status),
     ...inclusionFor(ctx, input.accountId, input.date, status, input.includedInBalance, ids.prev),
     id: ids.id ?? ctx.newId('tx'),
     accountId: input.accountId,
@@ -460,7 +490,8 @@ export function updateTransaction(ctx: Ctx, id: ID, input: TxInput): { ops: Op[]
 
 export function deleteTransaction(ctx: Ctx, id: ID): Op[] {
   const t = ctx.data.transactions.find((x) => x.id === id) ?? fail('Transaction not found.');
-  const legs = t.transferGroupId ? ctx.data.transactions.filter((x) => x.transferGroupId === t.transferGroupId) : [t];
+  // Phase 4A.5.14: a transfer's confirmed fee belongs to it and goes with it
+  const legs = t.transferGroupId ? ctx.data.transactions.filter((x) => x.transferGroupId === t.transferGroupId || x.transferFeeOf === t.transferGroupId) : [t];
   return legs.map((l) => ({ t: 'del', table: 'transactions', id: l.id }));
 }
 
@@ -631,10 +662,13 @@ export interface ImportDecision {
   linkOccurrence: boolean;
   /**
    * Phase 4A.5.12: required when the row could be an existing transaction (its live match candidates, recomputed here
-   * from the current data). { txId }: the row IS that transaction (pending → posted; posted transfer leg → linked);
+   * from the current data). { txId }: the row IS that transaction (pending → posted; a posted transfer leg → linked);
    * nothing new is added. { none, seen }: a different transaction, imported; `seen` must list EVERY current candidate.
+   * Phase 4A.5.14: `snapshot` / `seen` carry what the user saw (CandidateSnapshot); a decision about a candidate that
+   * changed since (amount, date, status, account, any edit, or linked by another import) is refused. A bare id is
+   * checked against the review's own snapshot. `fee`: the user confirmed the difference on a transfer leg is a fee.
    */
-  match?: { txId: ID } | { none: true; seen: ID[] };
+  match?: { txId: ID; snapshot?: CandidateSnapshot; fee?: { feeCents: Cents } } | { none: true; seen: (ID | CandidateSnapshot)[] };
   /** Phase 4A.5.10 form, still accepted: same → { txId }; not same → { none, seen: [txId] }. */
   pendingResolution?: { txId: ID; same: boolean };
 }
@@ -657,44 +691,123 @@ export interface CommitImportInput {
   applyAdjustment: boolean;
   /** Phase 4A.5.9: the user confirmed the difference isn't explained by the pending items the reconciliation names. */
   adjustmentUnrelatedToPending?: boolean;
+  /**
+   * Phase 4A.5.14: ids of existing transactions the review recognised as rows of this statement already in Clarity
+   * (exact duplicates, left out). The commit re-checks every other row against the current data and refuses one that
+   * is now already in Clarity (added or linked since the review opened, e.g. in another tab).
+   */
+  knownDuplicateIds?: ID[];
 }
 
-/** Writes every approved row, the batch record and the saved column mapping in one atomic batch. */
+const txLabel = (t: Transaction | undefined, currency: string) => (t ? `“${t.merchant || t.kind}” (${formatShortDate(t.date)}, ${formatCents(t.amountCents, currency, { sign: 'always' })})` : 'a transaction that no longer exists');
+
+/** Phase 4A.5.14: the category a confirmed transfer fee is filed under (the default "Fees & interest", if present). */
+const feeCategory = (ctx: Ctx): ID | null => ctx.data.categories.find((c) => c.id === 'cat_fees' && !c.archived)?.id ?? null;
+
+/**
+ * Writes every approved row, the batch record and the saved column mapping in one atomic batch.
+ * Phase 4A.5.14: each statement row affects only ITS account: linking a transfer leg posts that leg alone; a transfer
+ * created from a row posts this account's leg and leaves the other account's leg pending (awaiting that bank), unless
+ * that account's confirmed balance already includes it. Decisions are checked against the current data and refused
+ * if anything they depend on changed since the review was built.
+ */
 export function commitImport(ctx: Ctx, input: CommitImportInput): { ops: Op[]; batch: ImportBatch; txs: Transaction[] } {
   const account = ctx.data.accounts.find((a) => a.id === input.accountId) ?? fail('Account not found.');
+  const cur = account.currency;
   const batchId = ctx.newId('imp');
   const ops: Op[] = [];
   const txs: Transaction[] = [];
   const matchedIds = new Set<ID>();
+  const touched = new Map<ID, Transaction>(); // existing transactions changed by this commit (latest version)
+  const get = (id: ID) => touched.get(id) ?? ctx.data.transactions.find((t) => t.id === id);
+  const put = (t: Transaction) => touched.set(t.id, t);
+  let created = 0, markedPosted = 0, fees = 0;
+  const transferGroups = new Set<ID>();
+  const acctTx = ctx.data.transactions.filter((t) => t.accountId === account.id);
+  const known = new Set(input.knownDuplicateIds ?? []);
   for (const d of input.decisions) {
     const c = d.candidate;
+    // Phase 4A.5.14 (D9): a row that wasn't already in Clarity when the review was built must not be now; otherwise
+    // something else (another tab, an earlier commit of the same review) added or linked it since.
+    if (c.duplicate?.level !== 'exact') {
+      const ex = findExactDuplicate(c, acctTx, known);
+      if (ex) fail(`Row ${c.rowNumber}: this statement row is already in Clarity as ${txLabel(ex, cur)}; it was added or linked after this review was opened (for example in another tab). Review the statement again.`, 'stale');
+    }
     // Phase 4A.5.12: the data layer decides with the CURRENT data, not the review's: which transactions could this row
     // be? (Those listed when the review was built stay included, even if posted since.) Never merged automatically.
     const live = findMatchCandidates(c, account, ctx.data.transactions, { alsoIds: (c.matchCandidates ?? []).map((m) => m.txId) });
-    const legacy = d.pendingResolution ? (d.pendingResolution.same ? { txId: d.pendingResolution.txId } : { none: true as const, seen: [d.pendingResolution.txId] }) : undefined;
+    const legacy: ImportDecision['match'] = d.pendingResolution ? (d.pendingResolution.same ? { txId: d.pendingResolution.txId } : { none: true as const, seen: [d.pendingResolution.txId] }) : undefined;
     const choice = d.match ?? legacy;
-    const label = (id: ID) => { const t = ctx.data.transactions.find((x) => x.id === id); return t ? `“${t.merchant || t.kind}” (${formatShortDate(t.date)}, ${formatCents(t.amountCents, account.currency, { sign: 'always' })})` : 'a transaction that no longer exists'; };
+    const label = (id: ID) => txLabel(ctx.data.transactions.find((x) => x.id === id), cur);
+    const reviewed = (id: ID): CandidateSnapshot | undefined => { const m = (c.matchCandidates ?? []).find((x) => x.txId === id); return m && snapshotOf(m); };
+    const changed = (id: ID) => fail(`Row ${c.rowNumber}: ${label(id)} changed after you reviewed this row (its amount, date, status or details, or it was linked to another statement row). Review it again.`, 'stale');
     if (choice && 'txId' in choice) {
-      if (!live.some((m) => m.txId === choice.txId)) fail(`Row ${c.rowNumber}: ${label(choice.txId)} is no longer a possible match for this row; review it again.`, 'match');
+      const cand = live.find((m) => m.txId === choice.txId) ?? fail(`Row ${c.rowNumber}: ${label(choice.txId)} is no longer a possible match for this row; review it again.`, 'match');
+      const seenSnap = choice.snapshot ?? reviewed(choice.txId);
+      if (!seenSnap || !sameSnapshot(seenSnap, snapshotOf(cand))) changed(choice.txId);
       if (matchedIds.has(choice.txId)) fail(`Row ${c.rowNumber}: ${label(choice.txId)} is already chosen for another row of this statement.`, 'match');
-      const twin = ctx.data.transactions.find((t) => t.id === choice.txId)!;
-      matchedIds.add(twin.id);
-      const legs = twin.transferGroupId ? ctx.data.transactions.filter((t) => t.transferGroupId === twin.transferGroupId) : [twin];
-      for (const l of legs) {
-        const updated: Transaction = { ...l, status: 'confirmed', updatedAt: ctx.now };
-        if (l.id === twin.id) updated.statementMatch = { importBatchId: batchId, rowNumber: c.rowNumber, date: c.date, rawDescription: c.rawDescription, ...(c.externalId ? { externalId: c.externalId } : {}), previousStatus: twin.status };
-        ops.push({ t: 'put', table: 'transactions', value: updated });
+      // Phase 4A.5.14: a transfer leg whose amount differs can only be linked with the difference explained as a fee
+      // the user confirms; nothing else is recorded silently.
+      if (cand.kind === 'transfer' && cand.differenceCents !== 0) {
+        if (!cand.feeOption) fail(`Row ${c.rowNumber}: ${label(cand.txId)} is a transfer of ${formatCents(cand.amountCents, cur, { sign: 'always' })}; the statement shows ${formatCents(c.amountCents, cur, { sign: 'always' })}. That difference can't be a transfer fee, so the row can't be linked to it. Leave the row out and check the transfer.`, 'match');
+        if (choice.fee?.feeCents !== cand.feeOption!.feeCents) fail(`Row ${c.rowNumber}: the statement shows ${formatCents(c.amountCents, cur, { sign: 'always' })} for the transfer ${label(cand.txId)}. Confirm the ${formatCents(cand.feeOption!.feeCents, cur)} transfer fee, or leave the row out.`, 'match');
+      } else if (choice.fee) fail(`Row ${c.rowNumber}: there is no difference to record as a transfer fee.`, 'match');
+      const leg = get(choice.txId)!;
+      matchedIds.add(leg.id);
+      const wasPending = leg.status === 'pending';
+      if (wasPending) markedPosted++;
+      const sm: NonNullable<Transaction['statementMatch']> = {
+        importBatchId: batchId, rowNumber: c.rowNumber, date: c.date, rawDescription: c.rawDescription, ...(c.externalId ? { externalId: c.externalId } : {}),
+        previousStatus: leg.status, amountCents: c.amountCents, setStatus: wasPending, ...(leg.postedDate ? { previousPostedDate: leg.postedDate } : {}),
+      };
+      const postedDate = wasPending ? (c.date > leg.date ? c.date : undefined) : leg.postedDate;
+      const updated: Transaction = { ...leg, status: 'confirmed', updatedAt: ctx.now, statementMatch: sm };
+      if (postedDate) updated.postedDate = postedDate; else delete updated.postedDate;
+      const existingFee = feeOfLeg(leg, ctx.data.transactions);
+      if (existingFee && existingFee.status === 'pending') {
+        put({ ...existingFee, status: 'confirmed', ...(postedDate ? { postedDate } : {}), updatedAt: ctx.now });
+        sm.postedFeeTxId = existingFee.id;
       }
+      if (cand.feeOption && choice.fee) {
+        const opt = cand.feeOption;
+        const partner = get(ctx.data.transactions.find((t) => t.transferGroupId === leg.transferGroupId && t.id !== leg.id)!.id)!;
+        const feeTx: Transaction = {
+          id: ctx.newId('tx'), accountId: opt.chargedToAccountId, date: leg.date, amountCents: -opt.feeCents, kind: 'expense', status: 'confirmed',
+          merchant: 'Transfer fee', categoryId: feeCategory(ctx), notes: `Fee on the transfer “${leg.merchant || 'Transfer'}”, confirmed when importing ${input.fileName} (row ${c.rowNumber}).`,
+          transferFeeOf: leg.transferGroupId!, provenance: { source: 'import', importBatchId: batchId }, createdAt: ctx.now, updatedAt: ctx.now,
+        };
+        if (leg.amountCents > 0) {
+          // receiving leg: what arrived is the transfer amount (both sides); the fee is charged to the sending account
+          // with the sending leg's own status, so the sending total (and that bank's balance) is unchanged
+          sm.fee = { feeTxId: feeTx.id, previousPrincipalCents: leg.amountCents };
+          updated.amountCents = c.amountCents;
+          put({ ...partner, amountCents: -c.amountCents, updatedAt: ctx.now });
+          feeTx.status = partner.status;
+          if (partner.postedDate) feeTx.postedDate = partner.postedDate;
+        } else {
+          // sending leg: more left this account than was transferred; the fee is charged here, the transfer is unchanged
+          sm.fee = { feeTxId: feeTx.id, previousPrincipalCents: null };
+          if (postedDate) feeTx.postedDate = postedDate;
+        }
+        assertValid(feeTx, ctx);
+        txs.push(feeTx);
+        fees++;
+      }
+      put(updated);
+      if (leg.transferGroupId) transferGroups.add(leg.transferGroupId);
       continue;
     }
     // a row that had candidates when the review was built always needs a decision, even if they have been linked
     // since (e.g. the same review committed twice): it is never imported silently
     if (!choice && !live.length && c.matchCandidates?.length) fail(`Row ${c.rowNumber}: this row needed a decision and the transactions it could be have changed; review it again.`, 'match');
-    if (live.length) {
-      if (!choice) fail(`Row ${c.rowNumber}: this could be ${live.length === 1 ? label(live[0]!.txId) : `one of ${live.length} transactions already in Clarity (${live.map((m) => label(m.txId)).join('; ')})`}. Choose which one, or confirm it's a different transaction.`, 'match');
-      const seen = choice && 'none' in choice ? choice.seen : [];
-      const unseen = live.filter((m) => !seen.includes(m.txId));
+    if (live.length && !choice) fail(`Row ${c.rowNumber}: this could be ${live.length === 1 ? label(live[0]!.txId) : `one of ${live.length} transactions already in Clarity (${live.map((m) => label(m.txId)).join('; ')})`}. Choose which one, or confirm it's a different transaction.`, 'match');
+    if (choice && 'none' in choice) {
+      const seen = choice.seen.map((x) => (typeof x === 'string' ? reviewed(x) ?? ({ txId: x } as CandidateSnapshot) : x));
+      const unseen = live.filter((m) => !seen.some((s) => s.txId === m.txId));
       if (unseen.length) fail(`Row ${c.rowNumber}: ${unseen.map((m) => label(m.txId)).join('; ')} could also be this row and wasn't reviewed; review it again.`, 'match');
+      // Phase 4A.5.14 (D9): every candidate the user ruled out must be exactly as they saw it, and still a candidate
+      // (not edited, posted, deleted, or linked to another statement row since).
+      for (const s of seen) { const m = live.find((x) => x.txId === s.txId); if (!m || !sameSnapshot(s, snapshotOf(m))) changed(s.txId); }
     }
     const separateFrom = choice && 'none' in choice ? live.map((m) => m.txId) : [];
     const provenance = {
@@ -702,23 +815,31 @@ export function commitImport(ctx: Ctx, input: CommitImportInput): { ops: Op[]; b
       importBatchId: batchId,
       rowNumber: c.rowNumber,
       rawDescription: c.rawDescription,
+      rowDate: c.date,
+      rowAmountCents: c.amountCents,
       ...(c.externalId ? { externalId: c.externalId } : {}),
     };
     const occurrenceRef = d.linkOccurrence && c.occurrenceMatch ? { occurrenceRef: { recurringId: c.occurrenceMatch.recurringId, originalDate: c.occurrenceMatch.originalDate } } : {};
+    created++;
     if (d.kind === 'transfer') {
       if (!d.otherAccountId) fail(`Row ${c.rowNumber}: choose the other account for this transfer.`);
       const groupId = ctx.newId('tg');
       const legA: Transaction = {
         id: ctx.newId('tx'), accountId: account.id, date: c.date, amountCents: c.amountCents, kind: 'transfer', status: 'confirmed',
-        merchant: d.merchant || c.merchant || 'Transfer', categoryId: null, notes: '', transferGroupId: groupId, provenance, createdAt: ctx.now, updatedAt: ctx.now, ...occurrenceRef,
+        merchant: d.merchant || c.merchant || 'Transfer', categoryId: null, notes: '', transferGroupId: groupId, provenance: { ...provenance, ...(separateFrom.length ? { separateFrom } : {}) }, createdAt: ctx.now, updatedAt: ctx.now, ...occurrenceRef,
       };
       // Phase 4A.5.8: "already included" is decided per leg against each account's confirmed balance date (D6, D5).
       Object.assign(legA, inclusionFor(ctx, account.id, c.date, 'confirmed', undefined, undefined));
-      const legB: Transaction = { ...legA, includedInBalance: undefined, includedAsOf: undefined, ...inclusionFor(ctx, d.otherAccountId!, c.date, 'confirmed', undefined, undefined), id: ctx.newId('tx'), accountId: d.otherAccountId!, amountCents: -c.amountCents, provenance: { source: 'import', importBatchId: batchId } };
+      // Phase 4A.5.14: the other account's bank hasn't necessarily posted its side: that leg is pending (awaiting its
+      // statement), unless it is dated before that account's confirmed balance, which already includes it.
+      const otherInc = inclusionFor(ctx, d.otherAccountId!, c.date, 'confirmed', undefined, undefined);
+      const legB: Transaction = { ...legA, includedInBalance: undefined, includedAsOf: undefined, ...otherInc, status: otherInc.includedInBalance ? 'confirmed' : 'pending', id: ctx.newId('tx'), accountId: d.otherAccountId!, amountCents: -c.amountCents, provenance: { source: 'import', importBatchId: batchId } };
       if (!legB.includedInBalance) { delete legB.includedInBalance; delete legB.includedAsOf; }
+      delete legB.occurrenceRef;
       const issues = validateTransferPair([legA, legB], ctx.data.accounts);
       if (issues.length) throw new CommandError(issues.map((i) => ({ ...i, message: `Row ${c.rowNumber}: ${i.message}` })));
       txs.push(legA, legB);
+      transferGroups.add(groupId);
       continue;
     }
     const amount = d.kind === 'expense' ? -Math.abs(c.amountCents) : Math.abs(c.amountCents);
@@ -735,7 +856,16 @@ export function commitImport(ctx: Ctx, input: CommitImportInput): { ops: Op[]; b
     if (issues.length) throw new CommandError(issues.map((i) => ({ ...i, message: `Row ${c.rowNumber}: ${i.message}` })));
     txs.push(tx);
   }
+  for (const t of touched.values()) ops.push({ t: 'put', table: 'transactions', value: t });
   for (const t of txs) ops.push({ t: 'put', table: 'transactions', value: t });
+  // transfers this import touched whose other side is still pending (awaiting the other bank)
+  const after = [...ctx.data.transactions.filter((t) => !touched.has(t.id)), ...touched.values(), ...txs];
+  const awaiting = [...transferGroups].filter((g) => after.some((t) => t.transferGroupId === g && t.status === 'pending')).length;
+  for (const g of transferGroups) {
+    const legs = after.filter((t) => t.transferGroupId === g);
+    const issues = validateTransferPair(legs, ctx.data.accounts);
+    if (issues.length) throw new CommandError(issues);
+  }
 
   let adjustmentId: ID | undefined;
   if (input.applyAdjustment && input.reconciliation && input.reconciliation.differenceCents !== 0 && !input.reconciliation.note) {
@@ -778,7 +908,10 @@ export function commitImport(ctx: Ctx, input: CommitImportInput): { ops: Op[]; b
     mappingProfileId: input.settings.hasHeader ? profile.id : null,
     accountId: account.id,
     importedAt: ctx.now,
-    counts: { rows: input.totalRows, imported: input.decisions.length - matchedIds.size, ...(matchedIds.size ? { matched: matchedIds.size } : {}), excluded: input.excludedCount, duplicates: input.duplicateCount, errors: input.errorCount },
+    counts: {
+      rows: input.totalRows, imported: created, ...(matchedIds.size ? { matched: matchedIds.size } : {}), ...(markedPosted ? { markedPosted } : {}), ...(fees ? { fees } : {}),
+      ...(awaiting ? { awaiting } : {}), excluded: input.excludedCount, duplicates: input.duplicateCount, errors: input.errorCount,
+    },
     reconciliation: input.reconciliation
       ? {
           statementBalanceCents: input.reconciliation.statementBalanceCents,
@@ -798,47 +931,192 @@ export function commitImport(ctx: Ctx, input: CommitImportInput): { ops: Op[]; b
   return { ops, batch, txs };
 }
 
-/** Remove every transaction created by an import (including transfer legs and adjustment). */
 /**
- * Phase 4A.5.12: what undoing an import will do, in words, so the screens can say exactly what was reverted:
- * how many imported transactions are removed and which matched transactions go back to their previous status.
+ * Phase 4A.5.14: one option of a row's "Is this row one of these?" choice, as both apps show it: the label, why it
+ * can't be chosen (a transfer whose amount differs by something that can't be a fee), and what choosing it does.
+ */
+export interface MatchOptionView { txId: ID; label: string; disabledReason: string | null; note: string; stale: boolean; fee: { feeCents: Cents } | null }
+export function matchOptionView(m: MatchCandidate, rowAmountCents: Cents, data: WorkspaceData, currency: string): MatchOptionView {
+  const name = (id: ID) => data.accounts.find((a) => a.id === id)?.name ?? '';
+  const fmt = (c: Cents, sign = false) => formatCents(c, currency, sign ? { sign: 'always' } : {});
+  const desc = candidateLabel(m, name(m.accountId), currency);
+  const isTransfer = m.kind === 'transfer';
+  const fee = isTransfer && m.differenceCents !== 0 && m.feeOption ? m.feeOption : null;
+  const leg = data.transactions.find((t) => t.id === m.txId);
+  const other = leg?.transferGroupId ? data.transactions.find((t) => t.transferGroupId === leg.transferGroupId && t.id !== leg.id) : undefined;
+  const notes = [m.status === 'pending' ? MATCH_PENDING_NOTE : MATCH_POSTED_NOTE];
+  if (other) notes.push(MATCH_TRANSFER_NOTE(name(other.accountId)));
+  if (fee) notes.push(MATCH_FEE_NOTE(fmt(fee.feeCents), fmt(fee.principalCents), name(fee.chargedToAccountId)));
+  else if (m.differenceCents !== 0 && !isTransfer) notes.push(MATCH_AMOUNT_NOTE(fmt(m.amountCents, true), fmt(rowAmountCents, true), fmt(m.differenceCents, true)));
+  return {
+    txId: m.txId,
+    label: fee ? `${MATCH_FEE_LABEL(fmt(fee.feeCents), name(fee.chargedToAccountId))}: ${desc}` : `It's this one: ${desc}`,
+    disabledReason: isTransfer && m.differenceCents !== 0 && !fee ? MATCH_NOT_FEE(fmt(m.differenceCents, true)) : null,
+    note: notes.join(' '),
+    stale: m.basis === 'stale',
+    fee: fee ? { feeCents: fee.feeCents } : null,
+  };
+}
+
+/**
+ * Phase 4A.5.14: the decision a review screen sends for a row, built from the candidates the user is looking at now
+ * (their snapshots), so the data layer can refuse it if anything changed before the commit.
+ */
+export function matchDecision(choice: string | null, live: readonly MatchCandidate[]): ImportDecision['match'] {
+  if (choice === null) return undefined;
+  if (choice === 'none') return { none: true, seen: live.map(snapshotOf) };
+  const m = live.find((x) => x.txId === choice);
+  if (!m) return { txId: choice };
+  const fee = m.kind === 'transfer' && m.differenceCents !== 0 && m.feeOption ? { fee: { feeCents: m.feeOption.feeCents } } : {};
+  return { txId: choice, snapshot: snapshotOf(m), ...fee };
+}
+
+/** Phase 4A.5.14: what a linked row does to its own account's posted balance (for the review's balance check). */
+export function postedByMatchOf(choice: string, live: readonly MatchCandidate[], rowAmountCents: Cents): ID | { txId: ID; effectCents: Cents } {
+  const m = live.find((x) => x.txId === choice);
+  return m && m.kind === 'transfer' && m.differenceCents !== 0 && m.feeOption ? { txId: choice, effectCents: rowAmountCents } : choice;
+}
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * Phase 4A.5.14: what an import did, in words (the done screen and the import history). New transactions, existing
+ * ones linked (and how many of those it marked posted), confirmed transfer fees, and transfers still awaiting the
+ * other bank are reported separately: linking is never called importing.
+ */
+export function describeImportResult(batch: ImportBatch): string {
+  const k = batch.counts;
+  const parts = [`${plural(k.imported, 'new transaction')} imported`];
+  if (k.matched) parts.push(`${plural(k.matched, 'existing transaction')} linked${k.markedPosted ? ` (${k.markedPosted} marked posted)` : ''}`);
+  if (k.fees) parts.push(`${plural(k.fees, 'transfer fee')} recorded`);
+  if (k.awaiting) parts.push(`${plural(k.awaiting, 'transfer')} awaiting the other bank`);
+  return parts.join(' · ');
+}
+
+/**
+ * Phase 4A.5.12: what undoing an import will do, in words, so the screens can say exactly what was reverted.
+ * Phase 4A.5.14: per leg; the other side of a transfer is never changed by undo, and that is said.
  */
 export function describeImportUndo(data: WorkspaceData, batchId: ID): string {
-  const removed = data.transactions.filter((t) => t.provenance.importBatchId === batchId && !(t.transferGroupId && t.amountCents > 0 && data.transactions.some((x) => x.transferGroupId === t.transferGroupId && x.id !== t.id && x.provenance.importBatchId === batchId))).length;
+  const created = data.transactions.filter((t) => t.provenance.importBatchId === batchId);
+  const fees = created.filter((t) => t.transferFeeOf);
+  const removed = created.filter((t) => !t.transferFeeOf && !(t.transferGroupId && t.amountCents > 0 && created.some((x) => x.transferGroupId === t.transferGroupId && x.id !== t.id))).length;
   const restored = data.transactions.filter((t) => t.statementMatch?.importBatchId === batchId);
-  const parts = [`Removed ${removed} imported transaction${removed === 1 ? '' : 's'}`];
-  for (const t of restored) parts.push(`“${t.merchant || t.kind}” is ${t.statementMatch!.previousStatus === 'pending' ? 'pending again' : 'still posted'} and no longer linked to the statement`);
+  const acct = (id: ID) => data.accounts.find((a) => a.id === id)?.name ?? 'another account';
+  const parts = [`Removed ${plural(removed, 'imported transaction')}`];
+  for (const t of restored) {
+    const sm = t.statementMatch!;
+    parts.push(`“${t.merchant || t.kind}” in ${acct(t.accountId)} is ${sm.setStatus ?? sm.previousStatus === 'pending' ? 'pending again' : 'still posted'} and no longer linked to the statement`);
+    if (sm.fee) {
+      const fee = fees.find((f) => f.id === sm.fee!.feeTxId) ?? data.transactions.find((f) => f.id === sm.fee!.feeTxId);
+      const cur = data.accounts.find((a) => a.id === t.accountId)?.currency ?? data.settings.baseCurrency;
+      parts.push(`the ${fee ? formatCents(-fee.amountCents, cur) : ''} transfer fee is removed${sm.fee.previousPrincipalCents !== null ? ` and the transfer is ${formatCents(sm.fee.previousPrincipalCents, cur)} again` : ''}`.replace('the  transfer', 'the transfer'));
+    }
+    if (t.transferGroupId) {
+      const other = data.transactions.find((x) => x.transferGroupId === t.transferGroupId && x.id !== t.id);
+      if (other) parts.push(`the other side in ${acct(other.accountId)} is unchanged (${other.status === 'pending' ? 'pending' : 'posted'})`);
+    }
+  }
   return `Import undone. ${parts.join('; ')}.`;
 }
 
+/**
+ * Phase 4A.5.14: why undoing this import would be unsafe now, or null. Undo never reverses something a later import
+ * built on (a transaction this import created that a later statement row is linked to), and never restores a transfer
+ * amount the user edited after confirming a fee.
+ */
+export function importUndoProblem(data: WorkspaceData, batchId: ID): string | null {
+  const batches = (id: ID) => data.importBatches.find((b) => b.id === id);
+  for (const t of data.transactions) {
+    if (t.provenance.importBatchId === batchId && t.statementMatch && t.statementMatch.importBatchId !== batchId) {
+      const later = batches(t.statementMatch.importBatchId);
+      return `“${t.merchant || t.kind}” was added by this import and is now linked to a row of a later import${later ? ` (${later.fileName})` : ''}. Undo that import first.`;
+    }
+  }
+  for (const t of data.transactions) {
+    const fee = t.statementMatch?.importBatchId === batchId ? t.statementMatch.fee : undefined;
+    if (!fee || fee.previousPrincipalCents === null) continue;
+    const legs = data.transactions.filter((x) => x.transferGroupId === t.transferGroupId);
+    if (legs.some((l) => Math.abs(l.amountCents) !== Math.abs(t.statementMatch!.amountCents ?? t.amountCents))) {
+      return `The transfer “${t.merchant || 'Transfer'}” was edited after this import confirmed its fee, so undo can't restore its original amount safely. Edit the transfer and the fee instead.`;
+    }
+  }
+  return null;
+}
+
+/**
+ * Remove every transaction created by this import (including transfer legs, fees and the adjustment) and undo its
+ * links. Phase 4A.5.14: per leg: a linked leg goes back to the status it had before THIS import (only if this import
+ * changed it) and its link is removed; the other leg of a transfer, links made by other imports and later edits are
+ * left as they are. Refused (nothing changed) when that would be unsafe; see importUndoProblem.
+ */
 export function undoImportBatch(ctx: Ctx, batchId: ID): Op[] {
   const batch = ctx.data.importBatches.find((b) => b.id === batchId) ?? fail('Import not found.');
   if (batch.undoneAt) fail('This import was already undone.');
+  const problem = importUndoProblem(ctx.data, batchId);
+  if (problem) fail(`This import can't be undone: ${problem}`, 'undo');
   const ops: Op[] = [];
+  const deleted = new Set<ID>();
   const groups = new Set<string>();
   for (const t of ctx.data.transactions) {
     if (t.provenance.importBatchId === batchId) {
-      ops.push({ t: 'del', table: 'transactions', id: t.id });
+      deleted.add(t.id);
       if (t.transferGroupId) groups.add(t.transferGroupId);
     }
   }
   for (const t of ctx.data.transactions) {
-    if (t.transferGroupId && groups.has(t.transferGroupId) && t.provenance.importBatchId !== batchId) ops.push({ t: 'del', table: 'transactions', id: t.id });
+    if (t.transferGroupId && groups.has(t.transferGroupId)) deleted.add(t.id);
+    if (t.transferFeeOf && groups.has(t.transferFeeOf)) deleted.add(t.id);
   }
-  // Phase 4A.5.10: transactions this import matched (and marked posted) go back to how they were; the link is removed.
-  // One that was deleted since simply isn't there to restore.
+  const puts = new Map<ID, Transaction>();
+  const cur = (id: ID) => puts.get(id) ?? ctx.data.transactions.find((x) => x.id === id);
   for (const t of ctx.data.transactions) {
-    if (t.statementMatch?.importBatchId !== batchId) continue;
-    const prev = t.statementMatch.previousStatus;
-    const legs = t.transferGroupId ? ctx.data.transactions.filter((x) => x.transferGroupId === t.transferGroupId) : [t];
-    for (const l of legs) {
-      const restored: Transaction = { ...l, status: prev, updatedAt: ctx.now };
-      if (l.id === t.id) delete restored.statementMatch;
-      ops.push({ t: 'put', table: 'transactions', value: restored });
+    const sm = t.statementMatch;
+    if (sm?.importBatchId !== batchId || deleted.has(t.id)) continue;
+    const restored: Transaction = { ...cur(t.id)!, updatedAt: ctx.now };
+    delete restored.statementMatch;
+    // only what THIS import changed: older links (Phase 4A.5.10/12) have no setStatus, so previousStatus decides
+    if (sm.setStatus ?? sm.previousStatus === 'pending') {
+      restored.status = 'pending';
+      if (sm.previousPostedDate) restored.postedDate = sm.previousPostedDate; else delete restored.postedDate;
+    }
+    puts.set(t.id, restored);
+    if (sm.postedFeeTxId) {
+      const f = cur(sm.postedFeeTxId);
+      if (f && !deleted.has(f.id)) { const rf: Transaction = { ...f, status: 'pending', updatedAt: ctx.now }; delete rf.postedDate; puts.set(rf.id, rf); }
+    }
+    if (sm.fee) {
+      deleted.add(sm.fee.feeTxId);
+      if (sm.fee.previousPrincipalCents !== null) {
+        const p = sm.fee.previousPrincipalCents;
+        for (const l of ctx.data.transactions.filter((x) => x.transferGroupId === t.transferGroupId)) {
+          const base = { ...cur(l.id)!, updatedAt: ctx.now };
+          base.amountCents = l.amountCents < 0 ? -p : p;
+          puts.set(l.id, base);
+        }
+      }
     }
   }
+  for (const id of deleted) ops.push({ t: 'del', table: 'transactions', id });
+  for (const t of puts.values()) if (!deleted.has(t.id)) ops.push({ t: 'put', table: 'transactions', value: t });
   ops.push({ t: 'put', table: 'importBatches', value: { ...batch, undoneAt: ctx.now, updatedAt: ctx.now } });
   return ops;
+}
+
+/**
+ * Phase 4A.5.14: where a transfer leg is in its settlement, in words, or null when nothing needs saying (both posted,
+ * or not a transfer). Each leg settles on its own; one side posting never means the other bank has posted.
+ */
+export function transferSettlement(tx: Transaction, transactions: readonly Transaction[], accounts: readonly Account[]): string | null {
+  if (!tx.transferGroupId) return null;
+  const other = transactions.find((t) => t.transferGroupId === tx.transferGroupId && t.id !== tx.id);
+  if (!other) return null;
+  const [send, recv] = tx.amountCents < 0 ? [tx, other] : [other, tx];
+  const name = (id: ID) => accounts.find((a) => a.id === id)?.name ?? 'the other account';
+  if (send.status !== 'pending' && recv.status !== 'pending') return null;
+  if (send.status === 'pending' && recv.status === 'pending') return 'Not posted by either bank yet';
+  if (recv.status === 'pending') return tx === send ? `Sent · awaiting deposit in ${name(recv.accountId)}` : `Sent from ${name(send.accountId)} · awaiting deposit`;
+  return tx === recv ? `Received · not yet posted by ${name(send.accountId)}` : `Received in ${name(recv.accountId)} · not yet posted here`;
 }
 
 // ───────────────────────── onboarding ─────────────────────────

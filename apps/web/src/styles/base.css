@@ -290,6 +290,7 @@ input[type='checkbox'], input[type='radio'] { accent-color: var(--c-accent); }
 .badge.accent { background: var(--c-accent-soft); color: var(--c-accent); }
 .badge.pos { background: var(--c-positive-soft); color: var(--c-positive); }
 .badge.warn { background: var(--c-warning-soft); color: var(--c-warning); }
+.badge.wrap { white-space: normal; height: auto; min-height: 20px; padding-top: 2px; padding-bottom: 2px; }
 .badge.neg { background: var(--c-negative-soft); color: var(--c-negative); }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; background: var(--c-chart-neutral); }
 

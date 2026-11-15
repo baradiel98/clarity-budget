@@ -89,8 +89,15 @@ describe('pending credit lifecycle', () => {
   it('with a scheduled $400 transfer to savings: 500 − 400 = $100 (the pending $300 doesn\'t fund it)', () => {
     expect(sts(mk([chk(50000), A('sav', 'Savings', 'savings', 0)], [once('m', 'transfer', '2026-11-20', 40000, { accountId: 'chk', toAccountId: 'sav' })], [pend('chk', '2026-11-12', 30000)]))).toBe(10000);
   });
-  it('a pending transfer between own accounts is not a pending credit (both legs counted) → $800', () => {
-    expect(sts(mk([chk(50000), A('sav', 'Savings', 'savings', 30000)], [], transfer('sav', 'chk', '2026-11-12', 30000, { status: 'pending' })))).toBe(80000);
+  it('Phase 4A.5.14 (owner decision): a transfer from savings still pending at checking is NOT spendable → $500 (was $800)', () => {
+    expect(sts(mk([chk(50000), A('sav', 'Savings', 'savings', 30000)], [], transfer('sav', 'chk', '2026-11-12', 30000, { status: 'pending' })))).toBe(50000);
+  });
+  it('Phase 4A.5.14: once checking has posted its side (savings side still pending) → $800', () => {
+    const [out, inc] = transfer('sav', 'chk', '2026-11-12', 30000, { status: 'pending' });
+    expect(sts(mk([chk(50000), A('sav', 'Savings', 'savings', 30000)], [], [out!, { ...inc!, status: 'confirmed' }]))).toBe(80000);
+  });
+  it('Phase 4A.5.14: checking → savings pending at both banks: the debit counts at once → $200', () => {
+    expect(sts(mk([chk(50000), A('sav', 'Savings', 'savings', 0)], [], transfer('chk', 'sav', '2026-11-12', 30000, { status: 'pending' })))).toBe(20000);
   });
   it('a pending credit on an archived (positive) account: never spendable, nothing changes → $500', () => {
     expect(sts(mk([chk(50000), A('old', 'Old', 'checking', 10000, { archived: true })], [], [pend('old', '2026-11-12', 30000)]))).toBe(50000);

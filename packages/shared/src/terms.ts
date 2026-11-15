@@ -104,8 +104,36 @@ export const MATCH_POSTED_NOTE = 'Already posted in Clarity: this row will be li
 export const MATCH_AMOUNT_NOTE = (clarity: string, statement: string, difference: string) =>
   `Clarity has ${clarity}; the statement shows ${statement} (difference ${difference}). If they're the same event (a tip, a fee, a partial deposit), Clarity keeps the original amount; the balance check below shows the ${difference} so you can record it or edit the transaction.`;
 export const MATCH_TAKEN = (row: number) => `already chosen for row ${row}`;
+/** Phase 4A.5.14: pending items older than the normal window, listed separately (never chosen automatically). */
+export const MATCH_STALE_TITLE = (days: number) => `Older pending transactions (outside the normal ${days}-day matching window)`;
+/** Phase 4A.5.14: linking one transfer leg never posts the other account's side. */
+export const MATCH_TRANSFER_NOTE = (other: string) => `Only this account's side of the transfer is linked. The ${other} side stays as it is until its own statement shows it (or you mark it posted).`;
+/** Phase 4A.5.14: a transfer leg whose amount differs can be linked only with the difference explained as a fee. */
+export const MATCH_FEE_LABEL = (fee: string, account: string) => `It's this one, and the bank charged a ${fee} transfer fee (recorded as spending in ${account})`;
+export const MATCH_FEE_NOTE = (fee: string, principal: string, account: string) =>
+  `Clarity records the transfer as ${principal} and the ${fee} fee as a separate expense in ${account}. Nothing else is changed. If you aren't sure the difference is a fee, leave the row out and check with your bank.`;
+export const MATCH_NOT_FEE = (difference: string) =>
+  `Can't be linked: the statement differs from this transfer by ${difference}, which can't be a transfer fee (more arrived, or less left, than was transferred). Leave the row out and check the transfer.`;
 /** Phase 4A.5.12: the import button says what it will do (rows linked to existing transactions add nothing). */
 export const IMPORT_BUTTON = (added: number, linked: number) =>
   [added || !linked ? `Import ${added} transaction${added === 1 ? '' : 's'}` : '', linked ? `${added ? 'link' : 'Link'} ${linked} to existing` : ''].filter(Boolean).join(' and ');
 export const PENDING_MATCH_UNRELATED = "The difference isn't related to these pending items; record the adjustment and keep them pending";
 export const RECONCILED_MESSAGE = (account: string, date: string) => `${account} matches your bank's posted balance as of ${date}. No adjustment needed.`;
+
+/**
+ * Phase 4A.5.14: a transfer's settlement, chosen per leg in the Add/Edit form (each leg posts on its own). The form
+ * shows this control for every transfer, so no pending state is ever hidden.
+ */
+export type TransferSettlementChoice = 'both' | 'sent' | 'received' | 'none';
+export const TRANSFER_STATUS_LABEL = 'Status';
+export const TRANSFER_STATUS_OPTIONS: readonly { value: TransferSettlementChoice; label: string }[] = [
+  { value: 'both', label: 'Posted by both banks' },
+  { value: 'sent', label: 'Sent · awaiting deposit' },
+  { value: 'received', label: 'Received · not yet posted by the sending bank' },
+  { value: 'none', label: 'Not posted by either bank yet' },
+];
+export const TRANSFER_STATUS_HINT = "Each side of a transfer posts on its own. Money on its way in isn't counted as available until the receiving bank posts it; money going out counts at once.";
+export const transferChoiceOf = (fromPending: boolean, toPending: boolean): TransferSettlementChoice =>
+  fromPending ? (toPending ? 'none' : 'received') : toPending ? 'sent' : 'both';
+export const legsPendingOf = (c: TransferSettlementChoice): { fromPending: boolean; toPending: boolean } =>
+  ({ both: { fromPending: false, toPending: false }, sent: { fromPending: false, toPending: true }, received: { fromPending: true, toPending: false }, none: { fromPending: true, toPending: true } })[c];

@@ -15,11 +15,21 @@ export function affectsBalance(account: Account, tx: Transaction, balanceDate: I
 }
 
 /**
- * Phase 4A.5.6: a pending credit not yet available to spend: a pending refund, income or other money in
- * (not a transfer between the user's own accounts, whose sending leg is counted the same way).
+ * Phase 4A.5.6: a pending credit not yet available to spend: a pending refund, income or other money in.
+ * Phase 4A.5.14 (owner decision): this includes the RECEIVING leg of a transfer between the user's own accounts.
+ * Each leg settles on its own; money in transit is not spendable until the receiving bank posts it, while the
+ * sending leg (a debit) counts as soon as it is recorded. Transfer neutrality therefore holds once both legs posted.
  */
 export function isPendingCredit(tx: Transaction): boolean {
-  return tx.status === 'pending' && tx.amountCents > 0 && !tx.transferGroupId && tx.kind !== 'transfer';
+  return tx.status === 'pending' && tx.amountCents > 0;
+}
+
+/**
+ * Phase 4A.5.14: not yet posted at the bank as of `asOf`: still pending, or posted on a later day (its own
+ * postedDate; each transfer leg has one), like the bank's posted balance on that day.
+ */
+export function isUnpostedAsOf(tx: Transaction, asOf: ISODate): boolean {
+  return tx.status === 'pending' || (!!tx.postedDate && tx.postedDate > asOf);
 }
 
 /** Pending credits (dated on or before `asOf`) included in the recorded balance but not yet spendable. */
@@ -139,7 +149,7 @@ export function pendingTotal(account: Account, transactions: readonly Transactio
   const bd = balanceAsOfDate(account, transactions);
   let total = 0;
   for (const t of transactions) {
-    if (affectsBalance(account, t, bd) && t.date <= asOf && t.status === 'pending') total += t.amountCents;
+    if (affectsBalance(account, t, bd) && t.date <= asOf && isUnpostedAsOf(t, asOf)) total += t.amountCents;
   }
   return total;
 }
@@ -197,8 +207,9 @@ export function balanceSummary(
     const bal = accountBalance(a, transactions, asOf);
     if (a.archived) {
       // Archiving never hides debt (Phase 4A.4.4): an archived account that is overdrawn, or a card that still owes
-      // money, stays in the totals. A positive archived balance does not (it isn't spendable).
-      if (bal >= 0) continue;
+      // money, stays in the totals. A positive archived balance does not (it isn't spendable). Phase 4A.5.14: a
+      // pending credit (e.g. a transfer still on its way in) doesn't clear the debt until it posts.
+      if (bal - (a.type === 'credit_card' ? 0 : pendingCreditTotal(a, transactions, asOf)) >= 0) continue;
       if (a.type === 'credit_card') owed += -bal;
       else assets += bal;
       lines.push({ accountId: a.id, name: a.name, type: a.type, balanceCents: bal, pendingCents: pendingTotal(a, transactions, asOf), countsAsCash: false, archived: true });

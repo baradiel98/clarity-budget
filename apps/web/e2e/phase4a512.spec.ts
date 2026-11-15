@@ -57,7 +57,7 @@ test('two identical pending refunds: both listed, closest first, none pre-select
   await page.getByTestId('commit-import').click();
   await expect(page.getByTestId('import-done')).toBeVisible();
   await page.getByRole('button', { name: 'Undo import' }).click();
-  await expect(page.getByText('Import undone. Removed 0 imported transactions; “Refund A” is pending again and no longer linked to the statement.')).toBeVisible();
+  await expect(page.getByText('Import undone. Removed 0 imported transactions; “Refund A” in Everyday Checking is pending again and no longer linked to the statement.')).toBeVisible();
   await go(page, '/');
   await expect(page.getByTestId('safe-to-spend')).toHaveText('$2,427.17');
 });
@@ -87,7 +87,8 @@ test('an existing transfer to Savings: the Savings statement row is linked to it
   await expect(choice).toContainText("It's this one: Nov 9 · Transfer · +$100.00 · Savings · posted · transfer");
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/512-03-transfer.png`, fullPage: true });
   await choice.getByLabel(/^It's this one: Nov 9 · Transfer/).check();
-  await expect(page.getByTestId('match-note-2')).toHaveText('Already posted in Clarity: this row will be linked to it. Nothing new is added.');
+  // Phase 4A.5.14: the note also says the other account's side isn't changed
+  await expect(page.getByTestId('match-note-2')).toHaveText("Already posted in Clarity: this row will be linked to it. Nothing new is added. Only this account's side of the transfer is linked. The Everyday Checking side stays as it is until its own statement shows it (or you mark it posted).");
   await expect(page.getByTestId('reconciliation')).toContainText('Matches');
   await page.getByTestId('commit-import').click();
   await expect(page.getByTestId('import-done')).toBeVisible();

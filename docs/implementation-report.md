@@ -489,6 +489,38 @@ The step-by-step checklist is in `docs/device-test-script.md`.
 - **Tests:** data `statement-matching.test.ts` (24, incl. 400-run randomized comparison: 380 runs with statement rows, 380 correct, 0 incorrect; 421 ambiguous rows); `import-reconciliation.test.ts` updated to the candidate model; web `e2e/phase4a512.spec.ts` (3, with screenshots) and updated 4A.5.9/4A.5.10 specs; mobile `test/import-matching.test.tsx` (2, the real import screen with the file picker mocked).
 - **Not verified:** physical devices, simulators, Safari.
 
+## 7s. Phase 4A.5.14: independent transfer settlement and reconciliation integrity
+
+Owner policy: each transfer leg settles on its own; money in transit isn't spendable until the receiving bank posts it, and money going out counts at once; transfer fees are explicit; undo reverses only its own leg and its own changes; stale pending items stay discoverable; stale or conflicting commits from other tabs are refused.
+
+| Audit case (4A.5.13) | Truth (each bank) | Before | After |
+|---|---:|---:|---:|
+| D1: checking statement links the checking leg; savings not yet posted | savings posted $1,000 | $1,100 | **$1,000** (savings leg stays pending) |
+| D1 (A1b): savings deposit posts 9 days later; user follows the hint | checking $1,100 / savings $900 | $1,200 / $800 (second transfer) | **$1,100 / $900** (leg still pending, listed, linked) |
+| D2: savings → checking $100 pending at checking | Safe to Spend $1,000 | $1,100 | **$1,000** |
+| D2 (A3): savings −$50, $100 on its way in | $850 | $900 | **$850** |
+| D3: undo savings import after both legs were linked | checking posted $1,100 | $1,000 (stuck) | **$1,100** (checking link untouched) |
+| D4: check entered Sep 2, cashed Sep 17 | $800 | $600 (silent) | **$800** (stale candidate, linked) |
+| D5: linked dinner edited $50 → $55, statement re-imported | $940 | $885 | **$940** (row recognised) |
+| D6: $100 sent, $95 received | checking −$100, savings +$95 | second transfer offered | **transfer $95 + fee $5**, one transfer |
+| D7: Pending ticked, then Transfer | visible state | hidden pending transfer | **visible Status choice** (web and mobile) |
+| D8: link-only import | "0 new, 1 linked" | "Imported 1 transaction" | **"0 new transactions imported · 1 existing transaction linked …"** |
+| D9: two tabs commit against the same data | one link, no duplicate | last write wins | **second commit refused, tab refreshed** |
+
+- **Rules:** see calculation-rules.md, "Transfer settlement (Phase 4A.5.14)" and the 4A.5.14 additions under "Statement matching".
+- **Data model:** optional fields only, so no migration is needed; existing data is valid (legs had equal statuses).
+- **Storage:** `StorageAdapter.loadRevision` and `writeRowsIfRevision` provide an atomic compare-and-write over the rows and the revision.
+  - Dexie runs it as one read-write transaction over the rows and meta stores; SQLite as an exclusive transaction.
+  - `WorkspaceStore.apply` refuses with `StaleDataError` and reloads the latest data. A restore gives the store a new revision.
+- **Tests (all after the final code change):**
+  - **Unit:** vitest 603 passed, 1 skipped. New: `packages/data/test/transfer-settlement.test.ts` (35 tests, D1–D9 plus every requested case) and `settlement-ledger.test.ts`, a 250-run randomized comparison with independent bank ledgers, checked after every action.
+    - Randomized result: 250 correct, 0 mismatches. Coverage: 1,694 imports, 1,400 ambiguous rows, 391 rows with stale candidates, 153 fees confirmed, 158 undos, 120 stale commits refused, 84 manual postings, 0 rows whose transaction wasn't listed.
+    - Updated to the owner's policy: engine `pending-credits` and `card-credits` tests, data `reconciliation-ledger` (independent model: per-leg), `statement-matching` and `import-reconciliation`.
+  - **Mobile:** jest 51 passed. New: `apps/mobile/test/transfer-settlement.test.tsx` (5 tests, the real screens in Node) and a SQLite guarded-write test in `storage.test.ts`.
+  - **Browser:** Playwright 170 passed, 10 skipped (Chromium, production and test-mode builds). New: `e2e/phase4a514.spec.ts` (5) and `e2e/phase4a514-test-mode.spec.ts` (two real tabs on one IndexedDB vault).
+  - **Checks:** typecheck and lint clean; mobile `tsc` clean; iOS and Android bundles exported.
+- **Not verified:** simulator, physical device, Safari, Firefox, screen reader; multiple tabs outside Chromium.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

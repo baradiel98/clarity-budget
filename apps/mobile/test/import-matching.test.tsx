@@ -70,7 +70,7 @@ it('two identical pending refunds: both listed, closest first, "Leave it out" se
   expect(ui.getByRole('checkbox', { name: 'Leave it out' }).props.accessibilityState.checked).toBe(true);
   expect(ui.getByText('Import 0 transactions')).toBeTruthy();
   await act(async () => { fireEvent.press(ui.getByRole('checkbox', { name: "It's this one: Nov 10 · Refund A · +$300.00 · Everyday Checking · pending" })); });
-  expect(ui.getByTestId('match-note-2').props.children.join('')).toBe('It will be marked posted and linked to this row. Nothing new is added.');
+  expect([ui.getByTestId('match-note-2').props.children].flat().join('')).toBe('It will be marked posted and linked to this row. Nothing new is added.');
   expect(ui.getByText('Link 1 to existing')).toBeTruthy();
   void group;
 });
@@ -80,5 +80,5 @@ it('a $300 pending refund cleared as $290: listed with the difference; the note 
   const ui = await toReview('2026-11-13,AMAZON REFUND 8812,290.00,3161.23\n');
   const label = "It's this one: Nov 11 · Store return · +$300.00 · Everyday Checking · pending · statement differs by −$10.00";
   await act(async () => { fireEvent.press(ui.getByRole('checkbox', { name: label })); });
-  expect(ui.getByTestId('match-note-2').props.children.join('')).toMatch(/Clarity has \+\$300\.00; the statement shows \+\$290\.00 \(difference −\$10\.00\)/);
+  expect([ui.getByTestId('match-note-2').props.children].flat().join('')).toMatch(/Clarity has \+\$300\.00; the statement shows \+\$290\.00 \(difference −\$10\.00\)/);
 });

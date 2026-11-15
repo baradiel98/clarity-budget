@@ -2,7 +2,7 @@ import { AlertTriangle, Plus, Trash2, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { addTransaction, deleteTransaction, updateTransaction, type TxInput } from '@clarity/data';
 import { balanceAsOfDate, buildMerchantMemory, inclusionProblem, expandOccurrences, findPossibleDuplicates, merchantKey, suggestOccurrenceMatch } from '@clarity/engine';
-import { addDays, ALREADY_INCLUDED_HINT, ALREADY_INCLUDED_LABEL, centsToDecimalString, formatCents, formatShortDate, parseAmountInput, TERMS, type Transaction } from '@clarity/shared';
+import { addDays, ALREADY_INCLUDED_HINT, ALREADY_INCLUDED_LABEL, centsToDecimalString, formatCents, formatShortDate, legsPendingOf, parseAmountInput, TERMS, transferChoiceOf, TRANSFER_STATUS_HINT, TRANSFER_STATUS_LABEL, TRANSFER_STATUS_OPTIONS, type Transaction, type TransferSettlementChoice } from '@clarity/shared';
 import { useData, useRun, useSession, useStore } from '../state/session';
 import type { AddPrefill } from '../state/ui';
 import { AmountInput } from '../ui/AmountInput';
@@ -67,6 +67,8 @@ function initialFrom(prefill: AddPrefill | undefined, existing: Transaction[] | 
       date: src.date,
       notes: src.notes,
       pending: src.status === 'pending',
+      // Phase 4A.5.14: the receiving leg's own status
+      toPending: (other ?? src).status === 'pending',
       included: !!src.includedInBalance as boolean | null,
       toIncluded: !!other?.includedInBalance as boolean | null,
       splits: src.splits?.map((s) => ({ categoryId: s.categoryId, amount: centsToDecimalString(Math.abs(s.amountCents)) })) ?? [],
@@ -84,6 +86,7 @@ function initialFrom(prefill: AddPrefill | undefined, existing: Transaction[] | 
     date: prefill?.date ?? defaults.today,
     notes: '',
     pending: false,
+    toPending: false,
     // Phase 4A.5.8 (D6): null = not chosen yet, so the default rule applies (ticked when dated before the confirmed date)
     included: null as boolean | null,
     toIncluded: null as boolean | null,
@@ -117,6 +120,9 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
   const [date, setDate] = useState(init.date);
   const [notes, setNotes] = useState(init.notes);
   const [pending, setPending] = useState(init.pending);
+  // Phase 4A.5.14: for a transfer, `pending` is the sending leg and `toPending` the receiving leg (shown as one visible
+  // "Status" choice); switching the type carries the state over visibly, never as a hidden setting
+  const [toPending, setToPending] = useState(init.toPending);
   const [splits, setSplits] = useState(init.splits);
   const [more, setMore] = useState(init.splits.length > 0 || !!init.notes || init.pending);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -128,21 +134,30 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
   const [busy, setBusy] = useState(false);
 
   const isEdit = !!existing;
+  // Phase 4A.5.14 (D7): switching the type never keeps a hidden pending setting. To a transfer: a pending item becomes
+  // "Not posted by either bank yet", shown in the transfer's Status choice. From a transfer: if either side was
+  // pending, the item is pending and the Pending checkbox is shown (the notes/pending section opens).
+  const changeKind = (k: Kind) => {
+    if (k === kind) return;
+    if (k === 'transfer') setToPending(pending);
+    else if (kind === 'transfer') { const p = pending || toPending; setPending(p); if (p) setMore(true); }
+    setKind(k);
+  };
   // Phase 4A.5.8: a reconciliation record; the data layer refuses edits too
   const isAdjustment = !!existing?.some((t) => t.kind === 'adjustment');
   // Phase 4A.5.6/4A.5.8: a posted transaction dated from the opening date through the account's confirmed balance date
   // may already be in that balance. Never offered for pending or future-dated items; for a transfer, each account is
   // decided against its own balance date. Default (D6): ticked when dated before that date; unticked on the date itself.
   const status = pending ? 'pending' : 'confirmed';
-  const inclusion = (acctId: string, chosen: boolean | null) => {
+  const inclusion = (acctId: string, chosen: boolean | null, legStatus: 'pending' | 'confirmed' = status) => {
     const a = data.accounts.find((x) => x.id === acctId);
     if (!a) return null;
-    if (inclusionProblem(a, data.transactions, date, status, today)) return null;
+    if (inclusionProblem(a, data.transactions, date, legStatus, today)) return null;
     const bd = balanceAsOfDate(a, data.transactions);
     return { account: a, date: bd, checked: chosen ?? date < bd }; // default: ticked only when dated before the confirmed date
   };
   const fromInc = inclusion(accountId, included);
-  const toInc = kind === 'transfer' && toAccountId ? inclusion(toAccountId, toIncluded) : null;
+  const toInc = kind === 'transfer' && toAccountId ? inclusion(toAccountId, toIncluded, toPending ? 'pending' : 'confirmed') : null;
   const cents = parseAmountInput(amount, cur);
   const memory = useMemo(() => buildMerchantMemory(data.transactions, merchantKey), [data.transactions]);
   const merchants = useMemo(() => {
@@ -192,6 +207,7 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
       categoryId: kind === 'transfer' ? null : categoryId,
       notes,
       status: pending ? 'pending' : 'confirmed',
+      ...(kind === 'transfer' ? { toStatus: toPending ? 'pending' : 'confirmed' } : {}),
       includedInBalance: !!fromInc?.checked,
       ...(kind === 'transfer' ? { toIncludedInBalance: !!toInc?.checked } : {}),
       ...(splits.length ? { splits: splits.map((s) => ({ categoryId: s.categoryId, amountCents: parseAmountInput(s.amount, cur)! })) } : {}),
@@ -246,7 +262,7 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
     >
       <form id="tx-form" onSubmit={(e) => { e.preventDefault(); void save(); }} className="stack">
         {isAdjustment && <div className="callout warn" role="alert" data-testid="adjustment-locked">Balance adjustments can’t be edited: changing it here would turn it into an expense or income and could flip its sign. Delete it, or use Update balance again in Settings.</div>}
-        {!prefill?.occurrenceRef && !isEdit && <Segmented label="Type" value={kind} options={KINDS} onChange={(k) => { setKind(k); if (!categoryTouched) setCategoryId(k === 'income' ? 'cat_paycheck' : null); }} block />}
+        {!prefill?.occurrenceRef && !isEdit && <Segmented label="Type" value={kind} options={KINDS} onChange={(k) => { changeKind(k); if (!categoryTouched) setCategoryId(k === 'income' ? 'cat_paycheck' : null); }} block />}
         <Field label="Amount" error={errors.amount}>
           {(id) => <AmountInput id={id} value={amount} onChange={setAmount} currency={cur} large autoFocus aria-invalid={!!errors.amount} data-testid="amount" />}
         </Field>
@@ -296,6 +312,15 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
             </Field>
           )}
           <Field label="Date">{(id) => <input id={id} className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />}</Field>
+          {kind === 'transfer' && (
+            <Field label={TRANSFER_STATUS_LABEL} hint={TRANSFER_STATUS_HINT}>
+              {(id) => (
+                <select id={id} className="select" data-testid="transfer-status" value={transferChoiceOf(pending, toPending)} onChange={(e) => { const l = legsPendingOf(e.target.value as TransferSettlementChoice); setPending(l.fromPending); setToPending(l.toPending); }}>
+                  {TRANSFER_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              )}
+            </Field>
+          )}
         </div>
 
         {occurrence && (
@@ -351,7 +376,8 @@ export function AddTransactionDialog({ prefill, onClose }: { prefill?: AddPrefil
             )}
           </div>
         )}
-        {(errors.form ?? errors.includedInBalance) && <div className="error-text" role="alert">{errors.form ?? errors.includedInBalance}</div>}
+        {/* Phase 4A.5.14: also changes refused because another tab changed the data (stale) or because a linked item can't be made pending (status) */}
+        {(errors.form ?? errors.includedInBalance ?? errors.stale ?? errors.status ?? errors.transfer) && <div className="error-text" role="alert" data-testid="form-error">{errors.form ?? errors.includedInBalance ?? errors.stale ?? errors.status ?? errors.transfer}</div>}
       </form>
     </Dialog>
   );

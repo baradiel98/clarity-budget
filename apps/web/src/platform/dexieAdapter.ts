@@ -49,8 +49,28 @@ export class DexieAdapter implements StorageAdapter {
     });
   }
 
+  async loadRevision(): Promise<string | null> {
+    return ((await this.db.meta.get('revision'))?.value as string | undefined) ?? null;
+  }
+
+  /**
+   * Phase 4A.5.14: compare-and-write in one IndexedDB read-write transaction over the rows and meta stores. IndexedDB
+   * runs read-write transactions on the same stores one at a time, also across tabs, so two tabs can't both pass the
+   * check with the same revision.
+   */
+  async writeRowsIfRevision(rows: EncryptedRow[], expected: string | null, next: string): Promise<boolean> {
+    return this.db.transaction('rw', this.db.rows, this.db.meta, async () => {
+      const current = ((await this.db.meta.get('revision'))?.value as string | undefined) ?? null;
+      if (current !== expected) return false;
+      if (rows.length) await this.db.rows.bulkPut(rows);
+      await this.db.meta.put({ key: 'revision', value: next });
+      return true;
+    });
+  }
+
   async replaceAll(meta: VaultMeta, rows: EncryptedRow[]): Promise<void> {
     await this.db.transaction('rw', this.db.rows, this.db.meta, async () => {
+      await this.db.meta.delete('revision');
       await this.db.rows.clear();
       await this.db.rows.bulkPut(rows);
       await this.db.meta.put({ key: 'vault', value: meta });

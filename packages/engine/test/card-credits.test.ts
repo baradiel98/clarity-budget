@@ -67,7 +67,7 @@ describe('the Phase 4A.5.3 audit scenarios ($500 checking, Visa owes $400 unless
     const i = mk([chk(50000), visa(40000)], [], [refund('visa', TODAY, 20000, { status: 'pending' })]);
     expect(sts(i)).toBe(10000);
     expect(buildDashboard(i).balances.cardOwedCents).toBe(20000); // the recorded balance is not changed
-    expect(warns(i).find((w) => w.id === 'card-unscheduled:visa')!.detail).toBe("No payment is scheduled, so Safe to Spend counts the $400.00 as owed now. That includes $200.00 of pending refunds, which aren't counted until they post.");
+    expect(warns(i).find((w) => w.id === 'card-unscheduled:visa')!.detail).toBe("No payment is scheduled, so Safe to Spend counts the $400.00 as owed now. That includes $200.00 of pending refunds or payments, which aren't counted until they post.");
   });
 });
 
@@ -82,9 +82,16 @@ describe('payments still cover debt; credits only on their day', () => {
     // today: owed 400 (incl. pending), payment 200 covers 200 → 200 owed now: 300. Dec 20: 300, still 200 → 100.
     expect(sts(mk([chk(50000), visa(40000)], [fullPay('visa', '2026-12-20')], [refund('visa', TODAY, 20000, { status: 'pending' })]))).toBe(10000);
   });
-  it('a pending PAYMENT already made from checking is not treated as a pending refund (counted once) → $100', () => {
+  it('Phase 4A.5.14 (owner decision: each leg settles on its own; neutrality only once both legs posted): a card payment pending at both banks → −$100', () => {
+    // The sending leg counts at once (checking 500 − 200 = 300); the card's receiving leg is a pending credit, so the card
+    // still owes 400 until the card issuer posts the payment: 300 − 400 = −100. (Before 4A.5.14: counted once, $100.)
     const i = mk([chk(50000), visa(40000)], [], transfer('chk', 'visa', TODAY, 20000, { status: 'pending' }));
-    expect(sts(i)).toBe(10000); // checking 300, card owes 200: 300 − 200
+    expect(sts(i)).toBe(-10000);
+  });
+  it('Phase 4A.5.14: the same payment once the card has posted it (checking still pending) → $100, counted once', () => {
+    const [out, inc] = transfer('chk', 'visa', TODAY, 20000, { status: 'pending' });
+    const i = mk([chk(50000), visa(40000)], [], [out!, { ...inc!, status: 'confirmed' }]);
+    expect(sts(i)).toBe(10000); // checking 300 (pending debit counted), card owes 200
   });
   it('a refund beyond the 62-day lookahead (Mar 10) changes nothing → $100', () => {
     expect(sts(mk([chk(50000), visa(40000)], [pay('2026-12-04', 100000)], [refund('visa', '2027-03-10', 40000)]))).toBe(10000);
@@ -117,7 +124,7 @@ describe('explanations and affordability match the calculation', () => {
   });
   it('a pending refund is named', () => {
     const l = lines(mk([chk(50000), visa(40000)], [], [refund('visa', TODAY, 20000, { status: 'pending' })]));
-    expect(l.find((x) => x.label === 'Visa: $200.00 pending refund or credit')!.note).toBe("not counted until it posts; it is included in what's owed above");
+    expect(l.find((x) => x.label === 'Visa: $200.00 pending refund, deposit or incoming transfer')!.note).toBe("not counted until it posts; it is included in what's owed above");
   });
   it('a payment planned after the forecast ends is described as set aside on Dec 31', () => {
     const l = lines(mk([chk(50000), visa(40000)], [pay('2026-12-04', 100000), fullPay('visa', '2027-02-25')]));

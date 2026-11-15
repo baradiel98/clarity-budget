@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { addTransaction, deleteTransaction, updateTransaction, type TxInput } from '@clarity/data';
-import { addDays, ALREADY_INCLUDED_HINT, ALREADY_INCLUDED_LABEL, centsToDecimalString, formatCents, formatShortDate, parseAmountInput, TERMS } from '@clarity/shared';
+import { addDays, ALREADY_INCLUDED_HINT, ALREADY_INCLUDED_LABEL, centsToDecimalString, formatCents, formatShortDate, legsPendingOf, parseAmountInput, TERMS, transferChoiceOf, TRANSFER_STATUS_HINT, TRANSFER_STATUS_LABEL, TRANSFER_STATUS_OPTIONS } from '@clarity/shared';
 import { balanceAsOfDate, buildMerchantMemory, inclusionProblem, expandOccurrences, findPossibleDuplicates, merchantKey, suggestOccurrenceMatch } from '@clarity/engine';
 import { Check } from '../src/features/Welcome';
 import { takeAddPrefill } from '../src/state/nav';
@@ -61,6 +61,8 @@ export default function AddScreen() {
   const [date, setDate] = useState(src?.date ?? prefill.date ?? today);
   const [notes, setNotes] = useState(src?.notes ?? '');
   const [pending, setPending] = useState(src?.status === 'pending');
+  // Phase 4A.5.14: for a transfer, `pending` is the sending leg and `toPending` the receiving leg (one visible Status choice)
+  const [toPending, setToPending] = useState((existing?.find((t) => t.id !== src?.id) ?? src)?.status === 'pending');
   // Phase 4A.5.8: null = not chosen yet → default rule (ticked when dated before the confirmed date, D6); edits start from the stored state
   const [included, setIncluded] = useState<boolean | null>(src ? !!src.includedInBalance : null);
   const [toIncluded, setToIncluded] = useState<boolean | null>(src ? !!existing?.find((t) => t.id !== src.id)?.includedInBalance : null);
@@ -74,14 +76,21 @@ export default function AddScreen() {
   const isAdjustment = !!existing?.some((t) => t.kind === 'adjustment');
   // Phase 4A.5.6/4A.5.8: only a posted transaction dated from the opening date through the account's confirmed balance
   // date can already be in that balance; never pending or future-dated; a transfer decides each account separately.
-  const inclusion = (acctId: string, chosen: boolean | null) => {
+  const inclusion = (acctId: string, chosen: boolean | null, legPending = pending) => {
     const a = data.accounts.find((x) => x.id === acctId);
-    if (!a || inclusionProblem(a, data.transactions, date, pending ? 'pending' : 'confirmed', today)) return null;
+    if (!a || inclusionProblem(a, data.transactions, date, legPending ? 'pending' : 'confirmed', today)) return null;
     const bd = balanceAsOfDate(a, data.transactions);
     return { account: a, date: bd, checked: chosen ?? date < bd }; // default: ticked only when dated before the confirmed date
   };
   const fromInc = inclusion(accountId, included);
-  const toInc = kind === 'transfer' && toAccountId ? inclusion(toAccountId, toIncluded) : null;
+  const toInc = kind === 'transfer' && toAccountId ? inclusion(toAccountId, toIncluded, toPending) : null;
+  // Phase 4A.5.14 (D7): switching the type never keeps a hidden pending setting (the same rule as the web form)
+  const changeKind = (k: Kind) => {
+    if (k === kind) return;
+    if (k === 'transfer') setToPending(pending);
+    else if (kind === 'transfer') { const p = pending || toPending; setPending(p); if (p) setMore(true); }
+    setKind(k);
+  };
 
   const cents = parseAmountInput(amount || '0', cur) ?? 0;
   const memory = useMemo(() => buildMerchantMemory(data.transactions, merchantKey), [data.transactions]);
@@ -122,6 +131,7 @@ export default function AddScreen() {
     const input: TxInput = {
       kind, accountId, ...(kind === 'transfer' ? { toAccountId } : {}), date, amountCents: cents, merchant, categoryId: kind === 'transfer' ? null : categoryId, notes,
       status: pending ? 'pending' : 'confirmed',
+      ...(kind === 'transfer' ? { toStatus: toPending ? 'pending' : 'confirmed' } : {}),
       includedInBalance: !!fromInc?.checked,
       ...(kind === 'transfer' ? { toIncludedInBalance: !!toInc?.checked } : {}),
       // Splits are edited on the web app in Phase 1; keep them intact when editing here.
@@ -152,7 +162,7 @@ export default function AddScreen() {
         ) : <View style={{ width: 52 }} />}
       </View>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 16, gap: 14, paddingBottom: 16 }}>
-        {!prefill.occurrenceRef && !isEdit && <Segmented label="Type" value={kind} onChange={(k) => { setKind(k); setCategoryId(k === 'income' ? 'cat_paycheck' : null); }} options={[{ value: 'expense', label: 'Expense' }, { value: 'income', label: 'Income' }, { value: 'transfer', label: 'Transfer' }, { value: 'refund', label: 'Refund' }]} />}
+        {!prefill.occurrenceRef && !isEdit && <Segmented label="Type" value={kind} onChange={(k) => { changeKind(k); setCategoryId(k === 'income' ? 'cat_paycheck' : null); }} options={[{ value: 'expense', label: 'Expense' }, { value: 'income', label: 'Income' }, { value: 'transfer', label: 'Transfer' }, { value: 'refund', label: 'Refund' }]} />}
         <Money cents={cents} currency={cur} variant="hero" style={{ textAlign: 'center' }} accessibilityRole="text" />
         {kind !== 'transfer' && (
           <>
@@ -176,6 +186,15 @@ export default function AddScreen() {
           </ScrollView>
         )}
         <DateField label="Date" value={date} onChange={setDate} />
+        {kind === 'transfer' && (
+          <View style={{ gap: 6 }} testID="transfer-status">
+            <T variant="footnote" color="textSecondary">{TRANSFER_STATUS_LABEL}</T>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {TRANSFER_STATUS_OPTIONS.map((o) => <Chip key={o.value} label={o.label} on={transferChoiceOf(pending, toPending) === o.value} onPress={() => { const l = legsPendingOf(o.value); setPending(l.fromPending); setToPending(l.toPending); }} />)}
+            </View>
+            <T variant="footnote" color="textSecondary">{TRANSFER_STATUS_HINT}</T>
+          </View>
+        )}
         {fromInc && (
           <View testID="already-included">
             <Check label={ALREADY_INCLUDED_LABEL(formatShortDate(fromInc.date), kind === 'transfer' ? fromInc.account.name : undefined)} value={fromInc.checked} onChange={setIncluded} />
@@ -194,7 +213,7 @@ export default function AddScreen() {
         {more ? (
           <View style={{ gap: 12 }}>
             <Field label="Notes"><Input value={notes} onChangeText={setNotes} multiline style={{ minHeight: 72, paddingTop: 12 }} /></Field>
-            <Check label="Pending (not yet cleared)" value={pending} onChange={setPending} />
+            {kind !== 'transfer' && <Check label="Pending (not yet cleared)" value={pending} onChange={setPending} />}
           </View>
         ) : (
           kind !== 'transfer' && <LinkButton title="Notes or pending" onPress={() => setMore(true)} />

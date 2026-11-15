@@ -10,7 +10,7 @@ import { CARD_PAYMENT_RE, REFUND_RE, TRANSFER_RE, suggestCategory, type Category
 import { dataRows } from './mapping';
 import { parseStatementAmount, parseStatementDate } from './normalize';
 import { MAX_IMPORT_ROWS, type RawTable } from './parsers';
-import { findMatchCandidates, type MatchCandidate } from './matching';
+import { feeOfLeg, findMatchCandidates, type MatchCandidate } from './matching';
 
 export type CandidateKind = 'expense' | 'income' | 'refund' | 'transfer';
 export type Confidence = 'high' | 'medium' | 'low';
@@ -148,6 +148,25 @@ export function suggestSignConvention(table: RawTable, s: Omit<ImportSettings, '
   return { convention: 'as_is', reason: 'Negative amounts are treated as money out.' };
 }
 
+/**
+ * The existing transaction a statement row already IS (re-importing the same statement): the same bank transaction
+ * id; or a transaction imported from the same row (date, amount and description as on the statement); or one
+ * linked to the same row in an earlier import (Phase 4A.5.10). Phase 4A.5.14: compared with the row's own date and
+ * amount as recorded at import/link time, so editing the transaction afterwards never makes the row look new.
+ * `consumed` (ids already claimed by earlier rows of the same file) keeps two identical rows two. Used by the preview
+ * and, again with the current data, by the data layer at commit.
+ */
+export function findExactDuplicate(p: { date: ISODate; amountCents: Cents; rawDescription: string; externalId?: string | null }, acctTx: readonly Transaction[], consumed: ReadonlySet<ID>): Transaction | undefined {
+  const norm = normalizeDescription(p.rawDescription);
+  return acctTx.find(
+    (t) =>
+      !consumed.has(t.id) &&
+      ((p.externalId && (t.provenance.externalId === p.externalId || t.statementMatch?.externalId === p.externalId)) ||
+        (t.provenance.source === 'import' && (t.provenance.rowDate ?? t.date) === p.date && (t.provenance.rowAmountCents ?? t.amountCents) === p.amountCents && normalizeDescription(t.provenance.rawDescription ?? '') === norm) ||
+        (!!t.statementMatch && t.statementMatch.date === p.date && (t.statementMatch.amountCents ?? t.amountCents) === p.amountCents && normalizeDescription(t.statementMatch.rawDescription) === norm)),
+  );
+}
+
 export function buildPreview(table: RawTable, s: ImportSettings, ctx: PreviewContext): ImportPreview {
   const { account } = ctx;
   const balanceDate = balanceAsOfDate(account, ctx.transactions);
@@ -251,18 +270,11 @@ export function buildPreview(table: RawTable, s: ImportSettings, ctx: PreviewCon
     // Duplicates
     let duplicate: ImportCandidate['duplicate'] = null;
     const norm = normalizeDescription(p.rawDescription);
-    const exact = acctTx.find(
-      (t) =>
-        !consumed.has(t.id) &&
-        ((p.externalId && t.provenance.externalId === p.externalId) ||
-          (t.provenance.source === 'import' && t.date === p.date && t.amountCents === p.amountCents && normalizeDescription(t.provenance.rawDescription ?? '') === norm) ||
-          // Phase 4A.5.10: a statement row already matched to an existing transaction in an earlier import
-          (!!t.statementMatch && ((!!p.externalId && t.statementMatch.externalId === p.externalId) || (t.statementMatch.date === p.date && t.amountCents === p.amountCents && normalizeDescription(t.statementMatch.rawDescription) === norm)))),
-    );
+    const exact = findExactDuplicate(p, acctTx, consumed);
     // Phase 4A.5.12: every existing transaction this row could be (pending items of any amount in the same direction,
     // posted transfer legs of the same amount), all listed, none chosen: the user picks one or says it's different.
     // Not "consumed" by an earlier row, so the file's order never decides which row is paired with which item.
-    const matchCandidates = exact ? [] : findMatchCandidates(p, account, acctTx);
+    const matchCandidates = exact ? [] : findMatchCandidates(p, account, ctx.transactions);
     const candidateIds = new Set(matchCandidates.map((m) => m.txId));
     if (exact?.statementMatch && !(p.externalId && exact.provenance.externalId === p.externalId)) {
       consumed.add(exact.id);
@@ -328,14 +340,27 @@ export function buildPreview(table: RawTable, s: ImportSettings, ctx: PreviewCon
 /**
  * Compare the statement's closing balance with what the app's balance would be after importing
  * the included rows. Never applies an adjustment itself.
- * `postedByMatch` (Phase 4A.5.10): pending transactions the user confirmed a statement row matches; they are treated
- * as posted (the rows themselves are not added).
+ * `postedByMatch` (Phase 4A.5.10): transactions the user confirmed a statement row matches; they are treated as
+ * posted (the rows themselves are not added). Phase 4A.5.14: per leg; see below.
  */
-export function reconcilePreview(preview: ImportPreview, included: readonly ImportCandidate[], ctx: Pick<PreviewContext, 'account' | 'transactions'> & { postedByMatch?: readonly ID[] }): ReconciliationPreview | null {
+export function reconcilePreview(preview: ImportPreview, included: readonly ImportCandidate[], ctx: Pick<PreviewContext, 'account' | 'transactions'> & { postedByMatch?: readonly (ID | { txId: ID; effectCents: Cents })[] }): ReconciliationPreview | null {
   if (ctx.postedByMatch?.length) {
-    const ids = new Set(ctx.postedByMatch);
-    const groups = new Set(ctx.transactions.filter((t) => ids.has(t.id) && t.transferGroupId).map((t) => t.transferGroupId!));
-    ctx = { ...ctx, transactions: ctx.transactions.map((t) => (ids.has(t.id) || (t.transferGroupId && groups.has(t.transferGroupId)) ? { ...t, status: 'confirmed' as const } : t)) };
+    // Phase 4A.5.14: only the linked leg (and a fee recorded on that same leg) counts as posted, never the other side
+    // of a transfer. `effectCents`: what the linked leg will take from / add to this account once a confirmed transfer
+    // fee is recorded (the statement amount).
+    const links = ctx.postedByMatch.map((x) => (typeof x === 'string' ? { txId: x, effectCents: null } : x));
+    const byId = new Map(links.map((l) => [l.txId, l.effectCents]));
+    const legs = ctx.transactions.filter((t) => byId.has(t.id));
+    const feeIds = new Set(legs.flatMap((l) => { const f = feeOfLeg(l, ctx.transactions); return f ? [f.id] : []; }));
+    const overridden = new Set(legs.filter((l) => byId.get(l.id) !== null && byId.get(l.id) !== undefined).map((l) => l.transferGroupId).filter(Boolean));
+    ctx = {
+      ...ctx,
+      transactions: ctx.transactions.flatMap((t) => {
+        if (byId.has(t.id)) { const e = byId.get(t.id); return [{ ...t, status: 'confirmed' as const, postedDate: undefined, ...(e !== null && e !== undefined ? { amountCents: e } : {}) }]; }
+        if (feeIds.has(t.id)) return overridden.has(t.transferFeeOf) ? [] : [{ ...t, status: 'confirmed' as const, postedDate: undefined }];
+        return [t];
+      }),
+    };
   }
   const withBal = preview.candidates.filter((c) => c.balanceCents !== null);
   if (withBal.length === 0) return null;

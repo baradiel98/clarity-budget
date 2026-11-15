@@ -229,7 +229,7 @@ test.describe('statement import', () => {
     await expect(page.getByTestId('review-table')).toContainText('Trader Joe');
     await expect(page.getByTestId('reconciliation')).toContainText('statement ends before');
     await page.getByTestId('commit-import').click();
-    await expect(page.getByTestId('import-done')).toContainText('Imported 7 transactions');
+    await expect(page.getByTestId('import-result')).toHaveText('7 new transactions imported'); // Phase 4A.5.14 (D8): what was done, exactly
     await page.keyboard.press('1');
     await expect(money(page, 'available-cash')).toHaveText('$1,196.00');
     await page.keyboard.press('2');

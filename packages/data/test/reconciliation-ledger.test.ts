@@ -47,7 +47,8 @@ it('300 random sequences equal the independent ledger after every step', () => {
     const before = (x: Item) => x.date < '2026-11-01'; // dated before the opening date: already in the opening balance
     const counted = (k: string) => opening[k]! + items.filter((x) => x.acct === k && !x.history && !before(x)).reduce((a, x) => a + x.cents, 0);
     const pendingOf = (k: string) => items.filter((x) => x.acct === k && !x.history && !before(x) && x.pending);
-    const pendingCredits = (k: string) => pendingOf(k).filter((x) => x.cents > 0 && !x.group).reduce((a, x) => a + x.cents, 0);
+    // Phase 4A.5.14 (owner decision): a transfer leg still pending at the receiving bank is a pending credit too
+    const pendingCredits = (k: string) => pendingOf(k).filter((x) => x.cents > 0).reduce((a, x) => a + x.cents, 0);
     const posted = (k: string) => counted(k) - pendingOf(k).reduce((a, x) => a + x.cents, 0);
     const expectedSts = () => (counted('chk') - pendingCredits('chk')) + (counted('wal') - pendingCredits('wal')) - Math.max(0, pendingCredits('visa') - counted('visa')) - Math.max(0, pendingCredits('sav') - counted('sav'));
     const eligible = (k: string, date: string, pending: boolean) => !pending && date >= '2026-11-01' && date <= confirmed[k]! && date <= today;
@@ -91,22 +92,24 @@ it('300 random sequences equal the independent ledger after every step', () => {
         const to = pick((['chk', 'wal', 'sav', 'visa'] as const).filter((x) => x !== from));
         const cents = (1 + Math.floor(r() * 6)) * 2500;
         const pending = r() < 0.3;
-        const cf = choice(from, date, pending), ct = choice(to, date, pending);
-        const input: TxInput = { kind: 'transfer', accountId: ids[from]!, toAccountId: ids[to]!, date, amountCents: cents, merchant: 'T', categoryId: null, status: pending ? 'pending' : 'confirmed', ...(cf.flag !== undefined ? { includedInBalance: cf.flag } : {}), ...(ct.flag !== undefined ? { toIncludedInBalance: ct.flag } : {}) };
+        // Phase 4A.5.14: each leg has its own status (e.g. "Sent · awaiting deposit")
+        const toPending = r() < 0.3 ? !pending : pending;
+        const cf = choice(from, date, pending), ct = choice(to, date, toPending);
+        const input: TxInput = { kind: 'transfer', accountId: ids[from]!, toAccountId: ids[to]!, date, amountCents: cents, merchant: 'T', categoryId: null, status: pending ? 'pending' : 'confirmed', toStatus: toPending ? 'pending' : 'confirmed', ...(cf.flag !== undefined ? { includedInBalance: cf.flag } : {}), ...(ct.flag !== undefined ? { toIncludedInBalance: ct.flag } : {}) };
         if (cf.refused || ct.refused) { expect(() => addTransaction(ctx(), input)).toThrow(CommandError); tally.refusedFlags++; continue; }
         const res = addTransaction(ctx(), input);
         data = applyOps(data, res.ops);
         const g = res.txs[0]!.transferGroupId!;
         items.push({ id: res.txs.find((t) => t.amountCents < 0)!.id, acct: from, cents: -cents, pending, history: cf.history, date, group: g, kind: 'transfer' });
-        items.push({ id: res.txs.find((t) => t.amountCents > 0)!.id, acct: to, cents, pending, history: ct.history, date, group: g, kind: 'transfer' });
+        items.push({ id: res.txs.find((t) => t.amountCents > 0)!.id, acct: to, cents, pending: toPending, history: ct.history, date, group: g, kind: 'transfer' });
         tally.transfers++;
         if (cf.history !== ct.history) tally.splitTransfers++;
-      } else if (op < 0.6) { // mark a pending item posted (both legs of a transfer)
+      } else if (op < 0.6) { // mark a pending item posted (Phase 4A.5.14: one leg of a transfer only)
         const p = items.filter((x) => x.pending);
         if (!p.length) continue;
         const it = pick(p);
         data = applyOps(data, markTransactionPosted(ctx(), it.id));
-        for (const x of items) if (x.id === it.id || (it.group && x.group === it.group)) x.pending = false;
+        it.pending = false;
       } else if (op < 0.68) { // delete
         const it = pick(items);
         data = applyOps(data, deleteTransaction(ctx(), it.id));
@@ -146,7 +149,7 @@ it('300 random sequences equal the independent ledger after every step', () => {
             // resolve: the first matching set has cleared at the bank → mark it posted; then the bank figure matches exactly
             for (const it of matches[0]!) {
               data = applyOps(data, markTransactionPosted(ctx(), it.id));
-              for (const x of items) if (x.id === it.id || (it.group && x.group === it.group)) x.pending = false;
+              it.pending = false; // Phase 4A.5.14: only this leg
             }
             const res = adjustBalance(ctx(), ids[k]!, enteredFigure, 'x', today, { unrelatedToPending: true }); // other same-direction items may remain
             const left = delta - matches[0]!.reduce((a, x) => a + x.cents, 0); // 0: the set was the difference
@@ -183,7 +186,7 @@ it('300 random sequences equal the independent ledger after every step', () => {
       const sts = computeSafeToSpend(i).cents;
       expect(sts, `${where} Safe to Spend`).toBe(expectedSts());
       // pending credits never raise it; the EUR account never changes it
-      expect(computeSafeToSpend({ ...i, transactions: i.transactions.filter((t) => !(t.status === 'pending' && t.amountCents > 0 && !t.transferGroupId)) }).cents, `${where} pending credits`).toBe(sts);
+      expect(computeSafeToSpend({ ...i, transactions: i.transactions.filter((t) => !(t.status === 'pending' && t.amountCents > 0)) }).cents, `${where} pending credits`).toBe(sts);
       expect(computeSafeToSpend({ ...i, transactions: i.transactions.filter((t) => t.accountId !== ids.eur) }).cents, `${where} EUR`).toBe(sts);
       // a transfer whose two sides are both counted moves money without creating or destroying any
       for (const g of new Set(items.filter((x) => x.group).map((x) => x.group!))) {

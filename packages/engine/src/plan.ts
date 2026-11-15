@@ -262,7 +262,7 @@ function cardLines(low: LowPoint, input: EngineInput, horizonEnd: ISODate, nextA
         : `covered by the payment you planned for ${r.paymentDate ? formatShortDate(r.paymentDate) : '—'} (a date you entered, not a statement due date); counted on that day` });
     }
     if (r.pendingCreditCents > 0) {
-      lines.push({ kind: 'info', label: `${name(r.accountId)}: ${formatCents(r.pendingCreditCents, cur)} pending refund or credit`, note: "not counted until it posts; it is included in what's owed above" });
+      lines.push({ kind: 'info', label: `${name(r.accountId)}: ${formatCents(r.pendingCreditCents, cur)} pending refund, deposit or incoming transfer`, note: "not counted until it posts; it is included in what's owed above" });
     }
     if (r.nextCredit) {
       lines.push({ kind: 'info', label: `${name(r.accountId)}: ${formatCents(r.nextCredit.cents, cur)} refund or credit expected ${formatShortDate(r.nextCredit.date)}`, note: "not a payment; it lowers what's owed only from the day it arrives" });
@@ -794,7 +794,7 @@ export function buildDashboard(input: EngineInput): Dashboard {
           const r = sts.cardDebtToday.find((x) => x.accountId === line.accountId);
           const reserved = r ? r.uncoveredCents + r.advanceCents : -line.balanceCents;
           const pending = r?.pendingCreditCents ?? 0;
-          return `No payment is scheduled, so Safe to Spend counts the ${formatCents(reserved, cur)} as owed now.${pending > 0 ? ` That includes ${formatCents(pending, cur)} of pending refunds, which aren't counted until they post.` : ''}${line.archived ? ` ${line.name} is archived; archiving doesn't clear what it owes.` : ''}`;
+          return `No payment is scheduled, so Safe to Spend counts the ${formatCents(reserved, cur)} as owed now.${pending > 0 ? ` That includes ${formatCents(pending, cur)} of pending refunds or payments, which aren't counted until they post.` : ''}${line.archived ? ` ${line.name} is archived; archiving doesn't clear what it owes.` : ''}`;
         })(),
         accountId: line.accountId,
       });

@@ -1,10 +1,10 @@
 import { AlertTriangle, CheckCircle2, CopyCheck, FileUp, Link2, ListChecks, ShieldCheck, Upload } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { commitImport, describeImportUndo, markTransactionPosted, undoImportBatch as undoImport, type ImportDecision } from '@clarity/data';
+import { commitImport, describeImportResult, describeImportUndo, markTransactionPosted, matchDecision, matchOptionView, postedByMatchOf, undoImportBatch as undoImport, type ImportDecision } from '@clarity/data';
 import {
-  candidateLabel, checkImportFile, dataRowCount, DATE_FORMATS, findMatchCandidates, headerSignature, NO_DATA_ROWS_MESSAGE, reconcilePreview, type ImportCandidate, type ImportPreview, type ImportSettings,
+  checkImportFile, dataRowCount, DATE_FORMATS, findMatchCandidates, headerSignature, MATCH_WINDOWS, NO_DATA_ROWS_MESSAGE, reconcilePreview, type ImportCandidate, type ImportPreview, type ImportSettings,
 } from '@clarity/import';
-import { formatCents, formatShortDate, IMPORT_BUTTON, MATCH_AMOUNT_NOTE, MATCH_CHOICE_TITLE, MATCH_NONE_LABEL, MATCH_PENDING_NOTE, MATCH_POSTED_NOTE, MATCH_SKIP_LABEL, MATCH_TAKEN, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, TERMS, type ColumnMapping, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
+import { formatShortDate, IMPORT_BUTTON, MATCH_CHOICE_TITLE, MATCH_NONE_LABEL, MATCH_SKIP_LABEL, MATCH_STALE_TITLE, MATCH_TAKEN, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, TERMS, type ColumnMapping, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
 import { useRouter } from '../lib/router';
 import { sha256Hex } from '../platform/files';
 import { useData, useRun, useSession } from '../state/session';
@@ -129,8 +129,9 @@ export function ImportPage() {
   // once); those listed when the review was built stay, so nothing disappears silently.
   const liveOf = (r: Row) => (account ? findMatchCandidates(r, account, data.transactions, { alsoIds: r.matchCandidates.map((m) => m.txId) }) : []);
   const linked = (r: Row) => r.matchChoice !== null && r.matchChoice !== 'none';
-  const sameIds = included.filter(linked).map((r) => r.matchChoice!);
-  const recon = useMemo(() => (preview && account ? reconcilePreview(preview, included.filter((r) => !linked(r)), { account, transactions: data.transactions, postedByMatch: sameIds }) : null), [preview, included, account, data.transactions, sameIds.join()]);
+  // Phase 4A.5.14: per leg; a confirmed transfer fee makes the linked leg's effect the statement amount
+  const sameIds = included.filter(linked).map((r) => postedByMatchOf(r.matchChoice!, liveOf(r), r.amountCents));
+  const recon = useMemo(() => (preview && account ? reconcilePreview(preview, included.filter((r) => !linked(r)), { account, transactions: data.transactions, postedByMatch: sameIds }) : null), [preview, included, account, data.transactions, JSON.stringify(sameIds)]);
   // a row linked to an existing transaction (e.g. an existing transfer) creates nothing, so it needs no other account
   const blocking = included.filter((r) => r.editKind === 'transfer' && !r.otherAccountId && !linked(r));
   // Phase 4A.5.9: pending items that could explain the statement difference (cleared at the bank, still pending here)
@@ -147,7 +148,8 @@ export function ImportPage() {
       const res = commitImport(ctx, {
         accountId: account.id, fileName: file.name, fileHash: file.hash, parserId: 'csv', headerSignature: headerSignature(analysis.guess.headers), delimiter: analysis.delimiter,
         settings: { hasHeader, columns, dateFormat, decimalSeparator: decimal, signConvention: sign },
-        decisions: included.map((x) => ({ candidate: x, kind: x.editKind, categoryId: x.editKind === 'transfer' ? null : x.editCategory, merchant: x.merchant, ...(x.otherAccountId ? { otherAccountId: x.otherAccountId } : {}), linkOccurrence: x.linkOccurrence, ...(x.matchChoice === 'none' ? { match: { none: true as const, seen: liveOf(x).map((m) => m.txId) } } : x.matchChoice ? { match: { txId: x.matchChoice } } : {}) })),
+        decisions: included.map((x) => ({ candidate: x, kind: x.editKind, categoryId: x.editKind === 'transfer' ? null : x.editCategory, merchant: x.merchant, ...(x.otherAccountId ? { otherAccountId: x.otherAccountId } : {}), linkOccurrence: x.linkOccurrence, ...(x.matchChoice !== null ? { match: matchDecision(x.matchChoice, liveOf(x)) } : {}) })),
+        knownDuplicateIds: rows.flatMap((x) => (x.duplicate?.level === 'exact' ? [x.duplicate.txId] : [])),
         totalRows: rows.length + preview.errors.length, excludedCount: rows.length - included.length, duplicateCount: rows.filter((x) => x.duplicate).length, errorCount: preview.errors.length,
         reconciliation: recon, applyAdjustment: applyAdj && (reconPending.length === 0 || reconUnrelated), adjustmentUnrelatedToPending: reconUnrelated,
       });
@@ -355,22 +357,26 @@ export function ImportPage() {
                         {(r.duplicate || r.reasons.length > 0) && <div className="hint" style={{ marginTop: 4 }}>{[r.duplicate?.reason, ...r.reasons].filter(Boolean).join(' ')}</div>}
                         {liveOf(r).length > 0 && (() => {
                           const live = liveOf(r);
-                          const chosen = live.find((m) => m.txId === r.matchChoice);
+                          const views = live.map((m) => matchOptionView(m, r.amountCents, data, cur));
+                          const chosen = views.find((v) => v.txId === r.matchChoice);
+                          const option = (v: typeof views[number]) => {
+                            const taken = rows.find((o) => o !== r && o.include && o.matchChoice === v.txId);
+                            return (
+                              <label key={v.txId} className="check" style={{ fontSize: 12.5 }}>
+                                <input type="radio" name={`match-${r.rowNumber}`} checked={r.matchChoice === v.txId} disabled={!!taken || !!v.disabledReason} onChange={() => setRow(i, { matchChoice: v.txId, include: true })} />
+                                <span>{v.label}{taken ? ` (${MATCH_TAKEN(taken.rowNumber)})` : ''}{v.disabledReason && <span className="hint warn" style={{ display: 'block' }}>{v.disabledReason}</span>}</span>
+                              </label>
+                            );
+                          };
                           return (
                             <div role="radiogroup" aria-label={`Row ${r.rowNumber}: ${MATCH_CHOICE_TITLE}`} className="stack" style={{ gap: 2, marginTop: 6 }} data-testid={`match-choice-${r.rowNumber}`}>
                               <strong style={{ fontSize: 12.5 }}>{MATCH_CHOICE_TITLE}</strong>
-                              {live.map((m) => {
-                                const taken = rows.find((o) => o !== r && o.include && o.matchChoice === m.txId);
-                                return (
-                                  <label key={m.txId} className="check" style={{ fontSize: 12.5 }}>
-                                    <input type="radio" name={`match-${r.rowNumber}`} checked={r.matchChoice === m.txId} disabled={!!taken} onChange={() => setRow(i, { matchChoice: m.txId, include: true })} />
-                                    <span>It's this one: {candidateLabel(m, data.accounts.find((a) => a.id === m.accountId)?.name ?? '', cur)}{taken ? ` (${MATCH_TAKEN(taken.rowNumber)})` : ''}</span>
-                                  </label>
-                                );
-                              })}
+                              {views.filter((v) => !v.stale).map(option)}
+                              {views.some((v) => v.stale) && <div className="hint warn" style={{ marginTop: 4 }} data-testid={`match-stale-${r.rowNumber}`}>{MATCH_STALE_TITLE(MATCH_WINDOWS.pending.daysAfter)}</div>}
+                              {views.filter((v) => v.stale).map(option)}
                               <label className="check" style={{ fontSize: 12.5 }}><input type="radio" name={`match-${r.rowNumber}`} checked={r.matchChoice === 'none'} onChange={() => setRow(i, { matchChoice: 'none', include: true })} /><span>{MATCH_NONE_LABEL(live.length)}</span></label>
                               <label className="check" style={{ fontSize: 12.5 }}><input type="radio" name={`match-${r.rowNumber}`} checked={r.matchChoice === null} onChange={() => setRow(i, { matchChoice: null, include: false })} /><span>{MATCH_SKIP_LABEL}</span></label>
-                              {chosen && <div className="hint" data-testid={`match-note-${r.rowNumber}`}>{chosen.status === 'pending' ? MATCH_PENDING_NOTE : MATCH_POSTED_NOTE}{chosen.differenceCents !== 0 ? ` ${MATCH_AMOUNT_NOTE(formatCents(chosen.amountCents, cur, { sign: 'always' }), formatCents(r.amountCents, cur, { sign: 'always' }), formatCents(chosen.differenceCents, cur, { sign: 'always' }))}` : ''}</div>}
+                              {chosen && <div className="hint" data-testid={`match-note-${r.rowNumber}`}>{chosen.note}</div>}
                             </div>
                           );
                         })()}
@@ -444,10 +450,11 @@ export function ImportPage() {
       {stage === 'done' && result && (
         <div className="card empty" data-testid="import-done">
           <div className="ico" style={{ background: 'var(--c-positive-soft)', color: 'var(--c-positive)' }}><CheckCircle2 size={26} /></div>
-          <div className="t-title2">Imported {result.count} transaction{result.count === 1 ? '' : 's'}</div>
+          <div className="t-title2">Import complete</div>
+          {(() => { const b = data.importBatches.find((x) => x.id === result.batchId); return b ? <div className="t-callout" data-testid="import-result">{describeImportResult(b)}</div> : null; })()}
           <div className="t-callout">Your balances and forecast are updated. The statement file was not kept.</div>
           <div className="row" style={{ marginTop: 8 }}>
-            <button className="btn btn-secondary" onClick={async () => { const msg = describeImportUndo(data, result.batchId); const r = await run((ctx) => undoImport(ctx, result.batchId)); if (r.ok) { toast({ message: msg }); setStage('choose'); } }}>Undo import</button>
+            <button className="btn btn-secondary" onClick={async () => { const msg = describeImportUndo(data, result.batchId); const r = await run((ctx) => undoImport(ctx, result.batchId)); if (r.ok) { toast({ message: msg }); setStage('choose'); } else toast({ message: r.errors.map((e) => e.message).join(' ') }); }}>Undo import</button>
             <button className="btn btn-primary" onClick={() => navigate('/transactions')}>View transactions</button>
           </div>
         </div>
@@ -471,9 +478,9 @@ export function ImportHistory() {
           <div key={b.id} className="kv">
             <div>
               <div className="t-callout" style={{ fontWeight: 500 }}>{b.fileName} {b.undoneAt && <span className="badge">Undone</span>}</div>
-              <div className="hint">{new Date(b.importedAt).toLocaleString()} · {data.accounts.find((a) => a.id === b.accountId)?.name} · {b.counts.imported} imported, {b.counts.excluded} excluded, {b.counts.errors} unreadable</div>
+              <div className="hint">{new Date(b.importedAt).toLocaleString()} · {data.accounts.find((a) => a.id === b.accountId)?.name} · {describeImportResult(b)} · {b.counts.excluded} excluded, {b.counts.errors} unreadable</div>
             </div>
-            {!b.undoneAt && <button className="btn btn-secondary btn-sm" onClick={async () => { const msg = describeImportUndo(data, b.id); const r = await run((ctx) => undoImport(ctx, b.id)); toast({ message: r.ok ? msg : 'Could not undo' }); }}>Undo</button>}
+            {!b.undoneAt && <button className="btn btn-secondary btn-sm" onClick={async () => { const msg = describeImportUndo(data, b.id); const r = await run((ctx) => undoImport(ctx, b.id)); toast({ message: r.ok ? msg : r.errors.map((e) => e.message).join(' ') }); }}>Undo</button>}
           </div>
         ))}
       </div>

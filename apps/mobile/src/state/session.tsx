@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import * as ExpoCrypto from 'expo-crypto';
-import { buildDemoWorkspace, CommandError, MemoryAdapter, WorkspaceStore, type Ctx, type Op } from '@clarity/data';
+import { buildDemoWorkspace, CommandError, MemoryAdapter, StaleDataError, WorkspaceStore, type Ctx, type Op } from '@clarity/data';
 import { localISODate, TABLES, type ISODate, type WorkspaceData } from '@clarity/shared';
 import { biometricSupport, disableBiometric, enableBiometric, isBiometricEnabled, readBiometricKey, type BiometricSupport } from '../platform/biometrics';
 import { provider } from '../platform/crypto';
@@ -210,6 +210,8 @@ export function useRun() {
         return { ok: true };
       } catch (e) {
         if (e instanceof CommandError) return { ok: false, errors: e.issues };
+        // Phase 4A.5.14: another tab/window changed the data first; nothing was saved and the latest data is now shown
+        if (e instanceof StaleDataError) return { ok: false, errors: [{ field: 'stale', message: e.message }] };
         return { ok: false, errors: [{ field: 'form', message: e instanceof Error ? e.message : 'Something went wrong.' }] };
       }
     },

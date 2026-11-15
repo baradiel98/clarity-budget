@@ -2,12 +2,12 @@ import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native';
 import * as ExpoCrypto from 'expo-crypto';
-import { commitImport, describeImportUndo, markTransactionPosted, undoImportBatch, type ImportDecision } from '@clarity/data';
+import { commitImport, describeImportResult, describeImportUndo, markTransactionPosted, matchDecision, matchOptionView, postedByMatchOf, undoImportBatch, type ImportDecision } from '@clarity/data';
 import {
-  buildPreview, candidateLabel, checkImportFile, findMatchCandidates, csvParser, dataRowCount, guessMapping, headerSignature, NO_DATA_ROWS_MESSAGE, nonBlankRowCount, reconcilePreview, suggestSignConvention, type ImportCandidate, type ImportPreview,
+  buildPreview, checkImportFile, findMatchCandidates, csvParser, MATCH_WINDOWS, dataRowCount, guessMapping, headerSignature, NO_DATA_ROWS_MESSAGE, nonBlankRowCount, reconcilePreview, suggestSignConvention, type ImportCandidate, type ImportPreview,
   type MappingGuess, type RawTable,
 } from '@clarity/import';
-import { formatCents, formatShortDate, IMPORT_BUTTON, MATCH_AMOUNT_NOTE, MATCH_CHOICE_TITLE, MATCH_NONE_LABEL, MATCH_PENDING_NOTE, MATCH_POSTED_NOTE, MATCH_SKIP_LABEL, MATCH_TAKEN, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, TERMS, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
+import { formatCents, formatShortDate, IMPORT_BUTTON, MATCH_CHOICE_TITLE, MATCH_NONE_LABEL, MATCH_SKIP_LABEL, MATCH_STALE_TITLE, MATCH_TAKEN, PENDING_MATCH_NOTE, PENDING_MATCH_TITLE, PENDING_MATCH_UNRELATED, TERMS, type DateFormat, type DecimalSeparator, type SignConvention } from '@clarity/shared';
 import { Check } from '../src/features/Welcome';
 import { pickTextFile } from '../src/platform/files';
 import { useData, useRun, useSession } from '../src/state/session';
@@ -117,8 +117,9 @@ export default function ImportScreen() {
   // Phase 4A.5.12: candidates recomputed from the CURRENT data (same rules as web and the data layer)
   const liveOf = (r: Row) => (account ? findMatchCandidates(r, account, data.transactions, { alsoIds: r.matchCandidates.map((m) => m.txId) }) : []);
   const linked = (r: Row) => r.matchChoice !== null && r.matchChoice !== 'none';
-  const sameIds = included.filter(linked).map((r) => r.matchChoice!);
-  const recon = useMemo(() => (preview && account ? reconcilePreview(preview, included.filter((r) => !linked(r)), { account, transactions: data.transactions, postedByMatch: sameIds }) : null), [preview, included, account, data.transactions, sameIds.join()]);
+  // Phase 4A.5.14: per leg; a confirmed transfer fee makes the linked leg's effect the statement amount
+  const sameIds = included.filter(linked).map((r) => postedByMatchOf(r.matchChoice!, liveOf(r), r.amountCents));
+  const recon = useMemo(() => (preview && account ? reconcilePreview(preview, included.filter((r) => !linked(r)), { account, transactions: data.transactions, postedByMatch: sameIds }) : null), [preview, included, account, data.transactions, JSON.stringify(sameIds)]);
   const blocking = included.filter((r) => r.editKind === 'transfer' && !r.otherAccountId && !linked(r)).length;
   const rowFor = (txId: string) => rows.find((r) => liveOf(r).some((m) => m.txId === txId));
   // Phase 4A.5.9: pending items that could explain the statement difference (cleared at the bank, still pending here)
@@ -134,7 +135,8 @@ export default function ImportScreen() {
       const res = commitImport(ctx, {
         accountId: account.id, fileName: file.name, fileHash: file.hash, parserId: 'csv', headerSignature: headerSignature(file.guess.headers), delimiter: file.table.delimiter,
         settings: { hasHeader: file.guess.hasHeader, columns: file.guess.columns!, dateFormat, decimalSeparator: decimal, signConvention: sign },
-        decisions: included.map((x) => ({ candidate: x, kind: x.editKind, categoryId: x.editKind === 'transfer' ? null : x.editCategory, merchant: x.merchant, ...(x.otherAccountId ? { otherAccountId: x.otherAccountId } : {}), linkOccurrence: x.linkOccurrence, ...(x.matchChoice === 'none' ? { match: { none: true as const, seen: liveOf(x).map((m) => m.txId) } } : x.matchChoice ? { match: { txId: x.matchChoice } } : {}) })),
+        decisions: included.map((x) => ({ candidate: x, kind: x.editKind, categoryId: x.editKind === 'transfer' ? null : x.editCategory, merchant: x.merchant, ...(x.otherAccountId ? { otherAccountId: x.otherAccountId } : {}), linkOccurrence: x.linkOccurrence, ...(x.matchChoice !== null ? { match: matchDecision(x.matchChoice, liveOf(x)) } : {}) })),
+        knownDuplicateIds: rows.flatMap((x) => (x.duplicate?.level === 'exact' ? [x.duplicate.txId] : [])),
         totalRows: rows.length + preview.errors.length, excludedCount: rows.length - included.length, duplicateCount: rows.filter((x) => x.duplicate).length, errorCount: preview.errors.length,
         reconciliation: recon, applyAdjustment: applyAdj && (reconPending.length === 0 || reconUnrelated), adjustmentUnrelatedToPending: reconUnrelated,
       });
@@ -210,17 +212,26 @@ export default function ImportScreen() {
                     <T variant="caption" color="textSecondary">{[r.duplicate?.reason, ...r.reasons].filter(Boolean).join(' ')}</T>
                     {liveOf(r).length > 0 && (() => {
                       const live = liveOf(r);
-                      const chosen = live.find((m) => m.txId === r.matchChoice);
+                      const views = live.map((m) => matchOptionView(m, r.amountCents, data, cur));
+                      const chosen = views.find((v) => v.txId === r.matchChoice);
+                      const option = (v: typeof views[number]) => {
+                        const taken = rows.find((o) => o !== r && o.include && o.matchChoice === v.txId);
+                        return (
+                          <View key={v.txId}>
+                            <Check label={`${v.label}${taken ? ` (${MATCH_TAKEN(taken.rowNumber)})` : ''}`} value={r.matchChoice === v.txId} onChange={() => { if (!taken && !v.disabledReason) setRow(i, { matchChoice: v.txId, include: true }); }} />
+                            {v.disabledReason && <T variant="caption" color="warning">{v.disabledReason}</T>}
+                          </View>
+                        );
+                      };
                       return (
                         <View accessibilityRole="radiogroup" testID={`match-choice-${r.rowNumber}`} style={{ gap: 6 }}>
                           <T variant="footnote" style={{ fontFamily: 'Inter_600SemiBold' }}>{MATCH_CHOICE_TITLE}</T>
-                          {live.map((m) => {
-                            const taken = rows.find((o) => o !== r && o.include && o.matchChoice === m.txId);
-                            return <Check key={m.txId} label={`It's this one: ${candidateLabel(m, data.accounts.find((a) => a.id === m.accountId)?.name ?? '', cur)}${taken ? ` (${MATCH_TAKEN(taken.rowNumber)})` : ''}`} value={r.matchChoice === m.txId} onChange={() => { if (!taken) setRow(i, { matchChoice: m.txId, include: true }); }} />;
-                          })}
+                          {views.filter((v) => !v.stale).map(option)}
+                          {views.some((v) => v.stale) && <T variant="caption" color="warning" testID={`match-stale-${r.rowNumber}`}>{MATCH_STALE_TITLE(MATCH_WINDOWS.pending.daysAfter)}</T>}
+                          {views.filter((v) => v.stale).map(option)}
                           <Check label={MATCH_NONE_LABEL(live.length)} value={r.matchChoice === 'none'} onChange={() => setRow(i, { matchChoice: 'none', include: true })} />
                           <Check label={MATCH_SKIP_LABEL} value={r.matchChoice === null} onChange={() => setRow(i, { matchChoice: null, include: false })} />
-                          {chosen && <T variant="caption" color="textSecondary" testID={`match-note-${r.rowNumber}`}>{chosen.status === 'pending' ? MATCH_PENDING_NOTE : MATCH_POSTED_NOTE}{chosen.differenceCents !== 0 ? ` ${MATCH_AMOUNT_NOTE(formatCents(chosen.amountCents, cur, { sign: 'always' }), formatCents(r.amountCents, cur, { sign: 'always' }), formatCents(chosen.differenceCents, cur, { sign: 'always' }))}` : ''}</T>}
+                          {chosen && <T variant="caption" color="textSecondary" testID={`match-note-${r.rowNumber}`}>{chosen.note}</T>}
                         </View>
                       );
                     })()}
@@ -281,10 +292,11 @@ export default function ImportScreen() {
 
       {stage === 'done' && (
         <Card>
-          <T variant="title2" color="positive">Imported {included.length} transaction{included.length === 1 ? '' : 's'}</T>
+          <T variant="title2" color="positive">Import complete</T>
+          {(() => { const b = data.importBatches.find((x) => x.id === batchId); return b ? <T testID="import-result">{describeImportResult(b)}</T> : null; })()}
           <T color="textSecondary">Balances and forecast are updated. The statement file was not kept.</T>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-            <Button title="Undo import" kind="secondary" small onPress={async () => { if (!batchId) return; const msg = describeImportUndo(data, batchId); const r = await run((ctx) => undoImportBatch(ctx, batchId)); if (r.ok) { toast({ message: msg }); setStage('choose'); } }} />
+            <Button title="Undo import" kind="secondary" small onPress={async () => { if (!batchId) return; const msg = describeImportUndo(data, batchId); const r = await run((ctx) => undoImportBatch(ctx, batchId)); if (r.ok) { toast({ message: msg }); setStage('choose'); } else toast({ message: r.errors.map((e) => e.message).join(' ') }); }} />
             <Button title="Done" small onPress={() => router.back()} />
           </View>
         </Card>

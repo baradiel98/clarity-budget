@@ -15,6 +15,17 @@ const SCHEMA_ID = 'schema';
 
 export type Unlock = { passphrase: string } | { recoveryKey: string } | { masterKey: Uint8Array };
 
+/**
+ * Phase 4A.5.14: another tab or window changed the workspace after this copy was loaded, so this change was NOT saved
+ * (it was decided against old data). The store has reloaded the latest data; the user reviews and tries again.
+ */
+export class StaleDataError extends Error {
+  constructor() {
+    super('Clarity was changed in another tab or window, so this change was not saved. The latest data is now shown; check it and try again.');
+    this.name = 'StaleDataError';
+  }
+}
+
 export interface UndoEntry {
   label: string;
   ops: Op[];
@@ -29,6 +40,8 @@ export class WorkspaceStore {
   private undoStack: UndoEntry[] = [];
   private queue: Promise<unknown> = Promise.resolve();
   private locked = false;
+  /** Phase 4A.5.14: the storage revision this copy of the data corresponds to (see StorageAdapter.writeRowsIfRevision). */
+  private revision: string | null = null;
 
   private constructor(
     private adapter: StorageAdapter,
@@ -59,6 +72,7 @@ export class WorkspaceStore {
     // Write meta first, then the initial settings + schema rows.
     await adapter.saveVaultMeta(v.meta);
     await adapter.writeRows([await store.encryptSchema(opts.now), await store.encrypt('settings', 'settings', data.settings, opts.now)]);
+    store.revision = await adapter.loadRevision();
     return { store, recoveryKey: v.recoveryKey };
   }
 
@@ -71,9 +85,12 @@ export class WorkspaceStore {
         : 'recoveryKey' in how
           ? await unlockWithRecoveryKey(provider, meta, how.recoveryKey)
           : how.masterKey;
+    const revision = await adapter.loadRevision(); // before the rows (see loadRevision)
     const rows = await adapter.loadRows();
     const data = await decryptAll(provider, mk, meta.vaultId, rows);
-    return new WorkspaceStore(adapter, provider, meta, mk, await adapter.getDeviceId(), data);
+    const store = new WorkspaceStore(adapter, provider, meta, mk, await adapter.getDeviceId(), data);
+    store.revision = revision;
+    return store;
   }
 
   /** Restore an encrypted backup file, replacing everything on this device. */
@@ -89,6 +106,9 @@ export class WorkspaceStore {
     const data = await decryptAll(provider, mk, backup.vault.vaultId, backup.rows);
     await adapter.replaceAll(backup.vault, backup.rows);
     const store = new WorkspaceStore(adapter, provider, backup.vault, mk, await adapter.getDeviceId(), data);
+    // a restore replaces everything: give it a new revision, so other tabs holding the old data can't write over it
+    const fresh = store.newRevision();
+    if (await adapter.writeRowsIfRevision([], null, fresh)) store.revision = fresh;
     if (backup.schemaVersion < SCHEMA_VERSION) await store.rewriteAll(Date.now());
     return store;
   }
@@ -171,7 +191,14 @@ export class WorkspaceStore {
         seen.add(key);
         rows.push(op.t === 'put' ? await this.encrypt(op.table, id, op.value, now) : tombstone(op.table, id, this.meta.keyVersion, now, this.deviceId));
       }
-      await this.adapter.writeRows(rows); // throws → memory unchanged
+      // Phase 4A.5.14: only if no other tab/window has written since this copy was loaded; otherwise nothing is
+      // written, the latest data is loaded, and the caller is told (the change was decided against old data)
+      const next = this.newRevision();
+      if (!(await this.adapter.writeRowsIfRevision(rows, this.revision, next))) { // throws → memory unchanged
+        await this.reloadNow();
+        throw new StaleDataError();
+      }
+      this.revision = next;
       this._data = after;
       if (opts.undoLabel) {
         this.undoStack.push({ label: opts.undoLabel, ops: inverseOps(before, ops) });
@@ -247,7 +274,28 @@ export class WorkspaceStore {
     this.lock();
   }
 
+  /** Phase 4A.5.14: load the latest data from storage (e.g. after another tab changed it). Clears the undo history. */
+  reload(): Promise<void> {
+    const p = this.queue.then(() => this.reloadNow(), () => this.reloadNow());
+    this.queue = p.catch(() => undefined);
+    return p;
+  }
+
   // ─── internals ───
+
+  private async reloadNow() {
+    this.assertUnlocked();
+    const revision = await this.adapter.loadRevision(); // before the rows (see loadRevision)
+    const rows = await this.adapter.loadRows();
+    this._data = await decryptAll(this.provider, this.mk, this.meta.vaultId, rows);
+    this.revision = revision;
+    this.undoStack = [];
+    this.emit();
+  }
+
+  private newRevision(): string {
+    return Array.from(this.provider.randomBytes(12), (b) => b.toString(16).padStart(2, '0')).join('');
+  }
 
   private assertUnlocked() {
     if (this.locked) throw new Error('Locked');

@@ -385,3 +385,32 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
   - A statement whose rows all share one date is read oldest-first (pre-existing).
   - Duplicates created by imports before Phase 4A.5.10 aren't detected retroactively.
 
+
+## Phase 4A.5.14 (2026-11-15): independent transfer settlement and reconciliation integrity (audit 4A.5.13 D1–D9)
+- **[Confirmed decisions, owner]** Each transfer leg settles independently. An incoming pending transfer is not spendable until that account's leg posts; an outgoing pending transfer reduces the sender at once. Transfer neutrality holds once both legs posted, not in transit. Undo reverses only its own leg and its own changes. Fees are explicit; a transfer amount is never altered silently. Stale pending items stay discoverable. Several tabs may be open, but stale/conflicting commits are refused.
+- **[Verified defects, fixed]**
+  - D1: linking, "Mark posted" and Update balance posted BOTH legs; now one leg only (`commitImport`, `markTransactionPosted`, `reconcilePreview`).
+  - D2: `isPendingCredit` excluded transfer legs, so money in transit was spendable; it now includes the receiving leg (engine; archived/negative accounts use the same rule).
+  - D3: undo restored both legs to the matched leg's old status, over other imports' links. Now per leg, only `setStatus`; refused when a later import is linked to something it created.
+  - D4: pending items more than 10 days old were never candidates (a check cashed 15 days later was counted twice). Now listed as 'stale' candidates.
+  - D5: editing a linked/imported transaction let the same row in again. Exact-duplicate detection now uses the row's own amount/date (`statementMatch.amountCents`, `provenance.rowDate/rowAmountCents`); a linked item can't be made pending by editing.
+  - D6: posted transfer legs with a different amount weren't listed. Now any amount, with a fee option.
+  - D7: the web form kept a hidden pending flag when switching to Transfer. Transfers now have a visible Status choice (both posted / sent · awaiting deposit / received / neither), on web and mobile.
+  - D8: the done screen said "Imported N transactions" for linked rows. Now `describeImportResult`.
+  - D9: commits weren't protected across tabs. Now there are snapshots on decisions, an exact-duplicate re-check at commit, and a storage revision compare-and-write (`StorageAdapter.writeRowsIfRevision`, `StaleDataError`, store reload).
+- **[Data model, no migration]** New optional fields:
+  - On transactions: `postedDate`, `transferFeeOf`.
+  - On `StatementMatch`: `amountCents`, `setStatus`, `previousPostedDate`, `fee`, `postedFeeTxId`.
+  - On provenance: `rowDate`, `rowAmountCents`.
+  - On `ImportBatch.counts`: `markedPosted`, `fees`, `awaiting`.
+  - Old data stays valid (legs had equal statuses).
+- **[Decision, mine; documented]**
+  - Posted, unlinked transfer legs match over −3/+10 days (was +7), plus as stale when the amount is exact. This covers a leg the user marked posted by hand before an 8–11-day settlement.
+  - A posting date is recorded only from a statement row. When marked posted by hand, the transaction counts from its own date.
+- **[Consequence to review]** A card payment still pending at the card issuer counts against checking AND the card debt until the issuer posts it. It was counted once before; this is the literal reading of the owner's rules 2 and 4.
+- **[Lesson]** In web `Transactions.tsx`, helpers after the component's `return` must be function declarations: a `const` there crashed the page ("settlement is not defined"), found by the browser suite.
+- **[Known limitations]**
+  - A fee can be confirmed only for a sender-charged difference: less arrived, or more left. A receiving-bank fee isn't modelled.
+  - A leg marked posted by hand whose statement arrives more than 10 days later with a different amount isn't listed.
+  - A toast "Undo" from an out-of-date tab is refused without a message (data is reloaded).
+  - Cross-tab safety relies on IndexedDB read-write transactions being serialized per store, which is browser behaviour. It was tested in Chromium only.

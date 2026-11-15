@@ -3,7 +3,7 @@ import { Search, Sparkles, Upload } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
 import { Alert, Pressable, SectionList, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { deleteTransaction } from '@clarity/data';
+import { deleteTransaction, transferSettlement } from '@clarity/data';
 import { balanceAsOfDate, historyStatus, periodTotals } from '@clarity/engine';
 import { addDays, BEFORE_OPENING_BADGE, BEFORE_OPENING_REASON, endOfMonth, formatMonthYear, formatShortDate, formatWeekdayDate, HISTORY_ONLY_BADGE, HISTORY_ONLY_REASON, startOfMonth, TERMS } from '@clarity/shared';
 import { setAddPrefill } from '../../src/state/nav';
@@ -90,6 +90,8 @@ export default function Transactions() {
           const acc = accts.get(t.accountId);
           const hist = acc ? historyStatus(acc, t, balanceAsOfDate(acc, data.transactions)) : null;
           const histReason = hist ? (hist.kind === 'included' ? HISTORY_ONLY_REASON(formatShortDate(hist.asOf)) : BEFORE_OPENING_REASON(formatShortDate(hist.asOf))) : '';
+          // Phase 4A.5.14: where a transfer leg is in its settlement ("Sent · awaiting deposit"), never "posted" for both sides
+          const settle = transferSettlement(t, data.transactions, data.accounts);
           const other = t.transferGroupId ? data.transactions.find((x) => x.transferGroupId === t.transferGroupId && x.id !== t.id) : undefined;
           const title = t.kind === 'transfer' ? `${t.amountCents < 0 ? 'To' : 'From'} ${other ? accts.get(other.accountId)?.name ?? '' : ''}` : t.merchant || (t.kind === 'income' ? 'Income' : '—');
           return (
@@ -107,7 +109,7 @@ export default function Transactions() {
                 <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                   <T variant="caption" color="textTertiary">{t.splits?.length ? 'Split' : t.kind === 'transfer' ? 'Transfer' : cat?.name ?? 'Uncategorized'} · {accts.get(t.accountId)?.name}</T>
                   {hist && <Badge label={hist.kind === 'included' ? `${HISTORY_ONLY_BADGE} · ${formatShortDate(hist.asOf)}` : BEFORE_OPENING_BADGE} />}
-                  {t.status === 'pending' && <Badge label="Pending" tone="warn" />}
+                  {settle ? <Badge label={settle} tone="warn" /> : t.status === 'pending' && <Badge label="Pending" tone="warn" />}
                   {t.statementMatch && <Badge label="Matched to statement" />}
                   {t.date > today && <Badge label="Planned" tone="accent" />}
                 </View>

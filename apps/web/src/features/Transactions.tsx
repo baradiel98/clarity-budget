@@ -1,6 +1,6 @@
 import { ArrowDown, ArrowUp, ReceiptText, Search, Sparkles, Trash2, Upload } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { deleteTransaction, type Op } from '@clarity/data';
+import { deleteTransaction, transferSettlement, type Op } from '@clarity/data';
 import { balanceAsOfDate, historyStatus, periodTotals } from '@clarity/engine';
 import { addDays, BEFORE_OPENING_BADGE, BEFORE_OPENING_REASON, endOfMonth, formatMonthYear, formatShortDate, HISTORY_ONLY_BADGE, HISTORY_ONLY_REASON, startOfMonth, TERMS, type Transaction } from '@clarity/shared';
 import { isFresh } from '../state/fresh';
@@ -330,6 +330,10 @@ export function Transactions() {
     setSelected((prev) => { const s = new Set(prev); if (s.has(id)) s.delete(id); else s.add(id); return s; });
   }
 
+  // (a function declaration, like the others here: this code sits after the component's return)
+  function settlement(t: Transaction) {
+    return transferSettlement(t, data.transactions, data.accounts);
+  }
   function badges(t: Transaction) {
     // Phase 4A.5.8 (D7): kept for history but not added to the balance again, with the reason
     const acc = data.accounts.find((a) => a.id === t.accountId);
@@ -338,7 +342,8 @@ export function Transactions() {
     return (
       <>
         {hist && <span className="badge" title={reason} aria-label={reason} data-testid="history-only">{hist.kind === 'included' ? `${HISTORY_ONLY_BADGE} · ${formatShortDate(hist.asOf)}` : BEFORE_OPENING_BADGE}</span>}
-        {t.status === 'pending' && <span className="badge warn">Pending</span>}
+        {/* Phase 4A.5.14: a transfer leg says where the transfer is in its settlement; one side posting is never "posted" for both */}
+        {settlement(t) ? <span className="badge warn wrap" data-testid="transfer-settlement">{settlement(t)}</span> : t.status === 'pending' && <span className="badge warn">Pending</span>}
         {t.kind === 'refund' && <span className="badge pos">Refund</span>}
         {t.kind === 'adjustment' && <span className="badge" title={t.adjustmentReason}>Adjustment</span>}
         {t.splits?.length ? <span className="badge">Split</span> : null}

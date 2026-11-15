@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { addTransaction, onboard, WorkspaceStore } from '@clarity/data';
+import { addTransaction, onboard, StaleDataError, WorkspaceStore } from '@clarity/data';
 import { buildDashboard } from '@clarity/engine';
 import { createWebCryptoProvider } from '@clarity/security/webcrypto';
 import { engineInput, MemoryAdapter } from '@clarity/data';
@@ -93,6 +93,20 @@ describe('SQLiteAdapter + mobile crypto provider', () => {
     await expect(store.apply(transfer.ops)).rejects.toThrow('disk full');
     expect(store.data).toBe(before);
     expect(dbs.get('t2.db')!.rows.size).toBe(rowsBefore);
+  });
+
+  it('Phase 4A.5.14: two stores on the same database (as two copies of the app would be): the second, decided on old data, is refused and reloaded; nothing is overwritten', async () => {
+    const { store: a } = await WorkspaceStore.create(new SQLiteAdapter('t5.db'), provider, 'phone passphrase here', { withRecoveryKey: false, now: NOW });
+    await a.apply(onboard(a.ctx(NOW, TODAY), { checkingBalanceCents: 1000 }));
+    const b = await WorkspaceStore.unlock(new SQLiteAdapter('t5.db'), provider, { passphrase: 'phone passphrase here' });
+    const acct = a.data.accounts[0]!;
+    await a.apply(addTransaction(a.ctx(NOW, TODAY), { kind: 'expense', accountId: acct.id, date: TODAY, amountCents: 100, merchant: 'from A', categoryId: null }).ops);
+    const fromB = addTransaction(b.ctx(NOW, TODAY), { kind: 'expense', accountId: acct.id, date: TODAY, amountCents: 200, merchant: 'from B', categoryId: null });
+    await expect(b.apply(fromB.ops)).rejects.toBeInstanceOf(StaleDataError);
+    expect(b.data.transactions.map((t) => t.merchant)).toEqual(['from A']); // B now shows the latest data
+    await b.apply(addTransaction(b.ctx(NOW, TODAY), { kind: 'expense', accountId: acct.id, date: TODAY, amountCents: 200, merchant: 'from B', categoryId: null }).ops);
+    const fresh = await WorkspaceStore.unlock(new SQLiteAdapter('t5.db'), provider, { passphrase: 'phone passphrase here' });
+    expect(fresh.data.transactions.map((t) => t.merchant).sort()).toEqual(['from A', 'from B']);
   });
 
   it('wipe crypto-shreds and deletes the database', async () => {

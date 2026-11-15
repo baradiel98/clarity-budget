@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { accountBalance, computeSafeToSpend } from '@clarity/engine';
-import { buildPreview, csvParser, findMatchCandidates, guessMapping, reconcilePreview, suggestSignConvention, type ImportCandidate } from '@clarity/import';
+import { buildPreview, csvParser, findMatchCandidates, guessMapping, reconcilePreview, snapshotOf, suggestSignConvention, type CandidateSnapshot, type ImportCandidate } from '@clarity/import';
 import type { WorkspaceData } from '@clarity/shared';
 import {
   addTransaction, adjustBalance, applyOps, CommandError, commitImport, createAccount, defaultSettings, deleteTransaction, emptyWorkspace, engineInput,
@@ -41,17 +41,19 @@ class W {
     const preview = buildPreview(table, settings, { account: this.a(accountId), accounts: this.data.accounts, transactions: this.data.transactions, recurring: [], exceptions: [], importBatches: this.data.importBatches, fileHash: csv, today: this.today });
     const live = (c: ImportCandidate) => findMatchCandidates(c, this.a(accountId), this.data.transactions, { alsoIds: c.matchCandidates.map((m) => m.txId) });
     const decided = (c: ImportCandidate) => decide[c.rawDescription] !== undefined && (c.matchCandidates.length > 0 || live(c).length > 0);
-    const matchOf = (c: ImportCandidate): { txId: string } | { none: true; seen: string[] } => {
+    // like the review screens: the decision carries what the user sees now (the live candidate's snapshot)
+    const matchOf = (c: ImportCandidate): { txId: string; snapshot?: CandidateSnapshot; fee?: { feeCents: number } } | { none: true; seen: CandidateSnapshot[] } => {
       const v = decide[c.rawDescription]!;
-      if (typeof v === 'string') return { txId: v };
-      if (v === false) return { none: true, seen: live(c).map((m) => m.txId) };
+      const snap = (id: string) => { const m = live(c).find((x) => x.txId === id); return m ? { snapshot: snapshotOf(m), ...(m.feeOption ? { fee: { feeCents: m.feeOption.feeCents } } : {}) } : {}; };
+      if (typeof v === 'string') return { txId: v, ...snap(v) };
+      if (v === false) return { none: true, seen: live(c).map(snapshotOf) };
       const exact = live(c).filter((m) => m.differenceCents === 0);
       if (exact.length !== 1) throw new Error(`test setup: ${c.rawDescription} has ${exact.length} same-amount candidates`);
-      return { txId: exact[0]!.txId };
+      return { txId: exact[0]!.txId, ...snap(exact[0]!.txId) };
     };
     const chosen = () => preview.candidates.filter((c) => decided(c) || (pick ?? ((x: ImportCandidate) => x.include))(c));
     // rows confirmed as an existing transaction aren't added; that transaction counts as posted
-    const sameIds = () => chosen().filter((c) => decided(c) && 'txId' in matchOf(c)).map((c) => (matchOf(c) as { txId: string }).txId);
+    const sameIds = () => chosen().filter((c) => decided(c) && 'txId' in matchOf(c)).map((c) => { const m = matchOf(c) as { txId: string; fee?: unknown }; return m.fee ? { txId: m.txId, effectCents: c.amountCents } : m.txId; });
     const recon = () => reconcilePreview(preview, chosen().filter((c) => !(decided(c) && 'txId' in matchOf(c))), { account: this.a(accountId), transactions: this.data.transactions, postedByMatch: sameIds() })!;
     return { preview, settings, chosen, recon, decide, decided, matchOf };
   }
@@ -60,6 +62,7 @@ class W {
       accountId, fileName: 'statement.csv', fileHash: String(++seq), parserId: 'csv', headerSignature: 'h', delimiter: ',', settings: r.settings,
       decisions: r.chosen().map((c) => ({ candidate: c, kind: opts.other?.[c.rawDescription] ? 'transfer' : c.kind, categoryId: null, merchant: c.merchant, linkOccurrence: false, ...(opts.other?.[c.rawDescription] ? { otherAccountId: opts.other[c.rawDescription]! } : {}), ...(r.decided(c) ? { match: r.matchOf(c) } : {}) })),
       totalRows: 0, excludedCount: 0, duplicateCount: 0, errorCount: 0, reconciliation: r.recon(), applyAdjustment: opts.applyAdjustment ?? true, adjustmentUnrelatedToPending: opts.unrelated,
+      knownDuplicateIds: r.preview.candidates.flatMap((c) => (c.duplicate?.level === 'exact' ? [c.duplicate.txId] : [])),
     });
     this.data = applyOps(this.data, res.ops);
     return res;
@@ -140,14 +143,14 @@ describe('F1/F2: every same-amount candidate is listed; the user chooses; file o
     const r = w.review(c, H + '09/09/2026,REFUND X,300.00,1600.00\n09/08/2026,REFUND Y,300.00,1300.00\n', undefined, { 'REFUND X': d.id, 'REFUND Y': d.id });
     expect(errorOf(() => w.commit(c, r))).toMatchObject({ field: 'match', message: expect.stringMatching(/already chosen for another row/) });
   });
-  it('not candidates: another account, another currency (its own account), the opposite direction, outside the window', () => {
+  it('not candidates: another account, another currency (its own account), the opposite direction, dated before the account was opened, more than 3 days after the row', () => {
     const { w, c } = setup();
     w.at('2026-09-01');
     const s = w.acct('Savings', 'savings', 0);
     w.at('2026-09-12');
     pendingDeposit(w, s, 30000);
     pendingPurchase(w, c, 30000);
-    pendingDeposit(w, c, 30000, '2026-08-25', 'Too early'); // row Sep 9 is 15 days later (> 10)
+    pendingDeposit(w, c, 30000, '2026-08-25', 'Too early'); // before the account was opened (Sep 1): not in its balance (an older one inside the account period is a stale candidate: see Phase 4A.5.14 D4)
     pendingDeposit(w, c, 30000, '2026-09-20', 'Too late'); // row is 11 days before (> 3)
     expect(cands(w.review(c, H + '09/09/2026,AMAZON REFUND,300.00,1300.00\n'), 'AMAZON REFUND')).toEqual([]);
   });
@@ -212,15 +215,18 @@ describe('F4/F5: a statement row from the other account is linked to the existin
     w.commit(s, w.review(s, H + '09/08/2026,DEPOSIT FROM CHK,100.00,600.00\n', undefined, { 'DEPOSIT FROM CHK': true }));
     const chkLeg = legs.find((l) => l.accountId === c)!;
     const r = w.review(c, H + '09/08/2026,ONLINE TRANSFER,-100.00,900.00\n');
-    expect(cands(r, 'ONLINE TRANSFER').map((m) => [m.txId, m.status])).toEqual([[chkLeg.id, 'confirmed']]);
+    // Phase 4A.5.14: linking the savings leg never posts the checking leg: it is still pending until its own statement
+    expect(cands(r, 'ONLINE TRANSFER').map((m) => [m.txId, m.status])).toEqual([[chkLeg.id, 'pending']]);
     w.commit(c, w.review(c, H + '09/08/2026,ONLINE TRANSFER,-100.00,900.00\n', undefined, { 'ONLINE TRANSFER': chkLeg.id }));
     expect([w.rec(c), w.rec(s), w.data.transactions.length, w.data.transactions.filter((t) => t.statementMatch).length]).toEqual([90000, 60000, 2, 2]);
   });
-  it('the transfer window: 7 days after the transfer is listed, 8 days is not', () => {
-    const { w, s } = transferSetup();
-    expect(cands(w.review(s, H + '09/12/2026,DEPOSIT,100.00,600.00\n'), 'DEPOSIT')).toHaveLength(1);
-    const later = transferSetup({ date: '2026-09-03' });
-    expect(cands(later.w.review(later.s, H + '09/11/2026,DEPOSIT,100.00,600.00\n'), 'DEPOSIT')).toEqual([]);
+  it('the transfer window (Phase 4A.5.14: 10 days, like pending items): 8 days after a posted leg is listed normally; 9 days with a different amount is listed (fee check); the same amount older than 10 days is listed as stale', () => {
+    const { w, s } = transferSetup({ date: '2026-09-03' });
+    expect(cands(w.review(s, H + '09/11/2026,DEPOSIT,100.00,600.00\n'), 'DEPOSIT').map((m) => m.basis)).toEqual(['transfer']);
+    expect(cands(w.review(s, H + '09/12/2026,DEPOSIT,95.00,595.00\n'), 'DEPOSIT').map((m) => [m.basis, m.differenceCents])).toEqual([['transfer', -500]]);
+    w.at('2026-09-20');
+    expect(cands(w.review(s, H + '09/15/2026,DEPOSIT,100.00,600.00\n'), 'DEPOSIT').map((m) => [m.basis, m.ageDays])).toEqual([['stale', 12]]);
+    expect(cands(w.review(s, H + '09/15/2026,DEPOSIT,95.00,595.00\n'), 'DEPOSIT')).toEqual([]);
   });
   it('re-importing both statements adds nothing; undo of one side removes only its link; re-import offers it again', () => {
     const { w, c, s, legs } = transferSetup();
@@ -291,14 +297,15 @@ describe('one coherent workflow: stale reviews, other actions, repeated actions'
     const d = pendingDeposit(w, c, 30000);
     const r = w.review(c, H + '09/09/2026,AMAZON REFUND,300.00,1300.00\n', undefined, { 'AMAZON REFUND': d.id });
     w.commit(c, r);
-    expect(errorOf(() => w.commit(c, r))).toMatchObject({ field: 'match', message: expect.stringMatching(/no longer a possible match/) });
+    // Phase 4A.5.14: refused before anything else: the row is already in Clarity (linked by the first commit)
+    expect(errorOf(() => w.commit(c, r))).toMatchObject({ field: 'stale', message: expect.stringMatching(/already in Clarity as “Store return”.*added or linked after this review was opened/) });
     expect([cnt(w, 30000), w.sts()]).toEqual([1, 130000]);
   });
   it('undo says exactly what it reverted', () => {
     const { w, c } = setup();
     const d = pendingDeposit(w, c, 30000);
     const res = w.commit(c, w.review(c, H + '09/09/2026,AMAZON REFUND,300.00,1290.00\n09/06/2026,COFFEE,-10.00,990.00\n', undefined, { 'AMAZON REFUND': d.id }));
-    expect(describeImportUndo(w.data, res.batch.id)).toBe('Import undone. Removed 1 imported transaction; “Store return” is pending again and no longer linked to the statement.');
+    expect(describeImportUndo(w.data, res.batch.id)).toBe('Import undone. Removed 1 imported transaction; “Store return” in Checking is pending again and no longer linked to the statement.');
   });
 });
 

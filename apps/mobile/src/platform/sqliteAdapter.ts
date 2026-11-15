@@ -68,9 +68,35 @@ export class SQLiteAdapter implements StorageAdapter {
     });
   }
 
+  async loadRevision(): Promise<string | null> {
+    const db = await this.open();
+    const r = await db.getFirstAsync<{ value: string }>('SELECT value FROM meta WHERE key = ?', 'revision');
+    return r?.value ?? null;
+  }
+
+  /** Phase 4A.5.14: compare-and-write inside one exclusive transaction (see StorageAdapter.writeRowsIfRevision). */
+  async writeRowsIfRevision(rows: EncryptedRow[], expected: string | null, next: string): Promise<boolean> {
+    const db = await this.open();
+    let ok = false;
+    await db.withExclusiveTransactionAsync(async (txn) => {
+      const cur = await txn.getFirstAsync<{ value: string }>('SELECT value FROM meta WHERE key = ?', 'revision');
+      if ((cur?.value ?? null) !== expected) return;
+      for (const r of rows) {
+        await txn.runAsync(
+          'INSERT OR REPLACE INTO rows (table_name, id, key_version, iv, ct, updated_at, device_id, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          r.table, r.id, r.keyVersion, r.iv, r.ct, r.updatedAt, r.deviceId, r.deleted ? 1 : 0,
+        );
+      }
+      await txn.runAsync('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', 'revision', next);
+      ok = true;
+    });
+    return ok;
+  }
+
   async replaceAll(meta: VaultMeta, rows: EncryptedRow[]): Promise<void> {
     const db = await this.open();
     await db.withExclusiveTransactionAsync(async (txn) => {
+      await txn.runAsync("DELETE FROM meta WHERE key = 'revision'");
       await txn.runAsync('DELETE FROM rows');
       for (const r of rows) {
         await txn.runAsync(
