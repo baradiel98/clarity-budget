@@ -951,6 +951,24 @@ Base: `phase5a-complete` (1ea3d1a, unchanged).
 - Phase 5A steps rewritten to work on any date (sample data follows the device's date), with exact navigation;
 - A4 (badge read aloud) and Safari steps S1–S3 added.
 
+## 7aj. Phase 5A.3: fixes from the production browser QA (F1–F3)
+
+Checkpoint `phase5a3-checkpoint-before` (8d2423c).
+- **F1, keyboard focus in Transactions (web):** ↑/↓ now move real keyboard focus to the row, so screen readers are told which one it is.
+  - **Table rows:** focusable, but not a Tab stop. The 2px ring uses the focus color, measured at 3:1 or more against the row in light and dark.
+  - **Phone-width list:** ↓ focuses the row's button, which already has a focus ring.
+  - **Removed:** `aria-selected` on plain table rows, which isn't valid ARIA there. The checkbox in each row conveys selection.
+  - **Unchanged:** shortcuts, mouse clicks and the row highlight.
+- **F2, one account (web and mobile):** Planning uses that account's own view without a chooser, so today's Day details starts from the confirmed balance. QA step P5 is corrected.
+- **F3, same-time records (`balanceTrail`):** the rule is in calculation-rules.md; the trail order is deterministic. No figure depends on it.
+
+**Verified:**
+- New tests: 6 package tests (mutation-checked), 4 Chromium tests (`phase5a3.spec.ts`) and 1 mobile component test.
+- The 5A test that had silently created a same-time record now advances the helper's clock, to keep its intent.
+- Financial outputs compared with the pre-change engine (see the commit report).
+
+**Not run:** Safari, devices, screen readers.
+
 ## 8. Owner decisions still open
 - App name and icon. "Clarity" is a working name and the trademark has not been checked.
 - Bundle IDs. The placeholder `app.clarity.budget.dev` must be changed.

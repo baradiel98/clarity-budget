@@ -21,6 +21,8 @@ import {
   LEDGER_RECORDED_AFTER,
   LEDGER_RECORDED_AFTER_ADJUSTMENT,
   LEDGER_CHANGES_NAMED,
+  LEDGER_CHANGES_SAME_TIME,
+  LEDGER_SAME_TIME,
   LEDGER_CHANGES_UNNAMED,
   LEDGER_CHANGED_AFTER,
   LEDGER_RECORDED_TODAY,
@@ -216,8 +218,13 @@ export interface TrailLine {
   deltaCents: Cents;
   balanceAfterCents: Cents;
   pending: boolean;
-  /** Why it is counted on top of the anchor: dated after it, not yet posted by its date, or recorded after confirming. */
-  reason: 'after' | 'not_posted' | 'recorded_after';
+  /**
+   * Why it is counted on top of the anchor: dated after it, not yet posted by its date, recorded after confirming, or
+   * (Phase 5A.3) recorded at exactly the confirmation's time, so its time alone can't place it (see `sameTime`).
+   */
+  reason: 'after' | 'not_posted' | 'recorded_after' | 'same_time';
+  /** Phase 5A.3: for 'same_time': 'after' = the confirmed figure shows it wasn't in it; 'unknown' = can't tell. */
+  sameTime?: 'after' | 'unknown';
 }
 
 export interface BalanceTrail {
@@ -237,6 +244,13 @@ export interface BalanceTrail {
    * changes Clarity can name; how much each changed, and any deleted transaction, can't be known.
    */
   changedAfter: { txId: ID; date: ISODate; label: string; cents: Cents; counted: boolean }[];
+  /**
+   * Phase 5A.3 (F3): posted transactions dated on or before a stored confirmation and recorded at exactly its time.
+   * Time can't order them. 'in_confirmed' / 'after': exactly one combination of them makes the figure entered add up
+   * (and nothing was edited after the confirmation), so that placement is used; 'unknown': none or several do, so they
+   * are counted on top and the trail says Clarity can't tell. Never affects a balance.
+   */
+  sameTime: { txId: ID; date: ISODate; label: string; cents: Cents; placement: 'in_confirmed' | 'after' | 'unknown' }[];
   /** Transactions dated on the anchor date that are part of the anchor balance (history only), listed, never counted. */
   alreadyIncluded: { txId: ID; date: ISODate; label: string; cents: Cents }[];
   earlierIncludedCount: number;
@@ -277,7 +291,30 @@ export function balanceTrail(input: EngineInput, accountId: ID): BalanceTrail {
   let kind: AnchorKind;
   let inside: (t: Transaction) => boolean;
   // recorded strictly before the confirmation; the adjustment that confirmation created carries its exact time
-  if (conf) { kind = 'confirmed'; inside = (t) => postedBy(t) && (t.createdAt < conf.at || (t.createdAt === conf.at && t.kind === 'adjustment')); }
+  const tiesIn = new Set<ID>();
+  let ties: Transaction[] = [];
+  let tiesResolved = false;
+  if (conf) {
+    kind = 'confirmed';
+    const clearInside = (t: Transaction) => postedBy(t) && (t.createdAt < conf.at || (t.createdAt === conf.at && t.kind === 'adjustment'));
+    // Phase 5A.3 (F3): recorded at exactly the confirmation's time: time alone can't say whether it was in the figure
+    ties = counted.filter((t) => postedBy(t) && t.createdAt === conf.at && t.kind !== 'adjustment').sort(order);
+    if (ties.length) {
+      const needed = conf.postedCents - account.openingBalanceCents - counted.filter(clearInside).reduce((s, t) => s + amt(t), 0);
+      // a placement is used only when the stored figure supports exactly one, and no later edit could explain it instead
+      const editedAfter = txs.some((t) => t.accountId === accountId && t.date <= D && t.createdAt <= conf.at && t.updatedAt > conf.at);
+      const matches: number[] = [];
+      if (!editedAfter && ties.length <= 12) {
+        for (let mask = 0; mask < 1 << ties.length && matches.length < 2; mask++) {
+          let sum = 0;
+          ties.forEach((t, i) => { if (mask & (1 << i)) sum += amt(t); });
+          if (sum === needed) matches.push(mask);
+        }
+      }
+      if (matches.length === 1) { tiesResolved = true; ties.forEach((t, i) => { if (matches[0]! & (1 << i)) tiesIn.add(t.id); }); }
+    }
+    inside = (t) => clearInside(t) || tiesIn.has(t.id);
+  }
   // an import that applied an adjustment created it with its own rows (same time): those rows are in the figure
   else if (adj) { kind = 'confirmed_from_records'; inside = (t) => postedBy(t) && t.createdAt <= adj.createdAt; }
   else if (D > account.openingDate) { kind = 'posted_in_records'; inside = postedBy; }
@@ -287,8 +324,9 @@ export function balanceTrail(input: EngineInput, accountId: ID): BalanceTrail {
   let run = anchorCents;
   const lines: TrailLine[] = counted.filter((t) => !inside(t)).sort(order).map((t) => {
     run += amt(t);
-    const reason: TrailLine['reason'] = kind === 'opening' ? (t.date >= D ? 'after' : 'not_posted') : t.date > D ? 'after' : isUnpostedAsOf(t, D) ? 'not_posted' : 'recorded_after';
-    return { txId: t.id, date: t.date, label: txLabel(t), deltaCents: amt(t), balanceAfterCents: run, pending: t.status === 'pending', reason };
+    const tie = ties.includes(t);
+    const reason: TrailLine['reason'] = kind === 'opening' ? (t.date >= D ? 'after' : 'not_posted') : t.date > D ? 'after' : isUnpostedAsOf(t, D) ? 'not_posted' : tie ? 'same_time' : 'recorded_after';
+    return { txId: t.id, date: t.date, label: txLabel(t), deltaCents: amt(t), balanceAfterCents: run, pending: t.status === 'pending', reason, ...(tie ? { sameTime: tiesResolved ? 'after' as const : 'unknown' as const } : {}) };
   });
   const history = txs.filter((t) => historyStatus(account, t, D) !== null);
   const pendingCredit = account.type === 'credit_card' ? 0 : pendingCreditTotal(account, txs, input.today);
@@ -301,6 +339,7 @@ export function balanceTrail(input: EngineInput, accountId: ID): BalanceTrail {
       ? txs.filter((t) => t.accountId === accountId && t.date <= D && t.createdAt < conf.at && t.updatedAt > conf.at).sort(order)
         .map((t) => ({ txId: t.id, date: t.date, label: txLabel(t), cents: amt(t), counted: counted.includes(t) }))
       : [],
+    sameTime: ties.map((t) => ({ txId: t.id, date: t.date, label: txLabel(t), cents: amt(t), placement: tiesIn.has(t.id) ? 'in_confirmed' as const : tiesResolved ? 'after' as const : 'unknown' as const })),
     alreadyIncluded: history.filter((t) => t.date === D).sort(order).map((t) => ({ txId: t.id, date: t.date, label: txLabel(t), cents: t.amountCents })),
     earlierIncludedCount: history.filter((t) => t.date < D).length,
     recordedCents: recorded,
@@ -334,12 +373,13 @@ export function ledgerDayExplanation(input: EngineInput, ledger: DailyLedger, da
     lines.push({ kind: 'start', label: ledger.isCard ? `${anchorLabel}, owed` : anchorLabel, cents: k * t.anchor.cents, note: LEDGER_ANCHOR_NOTE[t.anchor.kind] });
     for (const a of t.alreadyIncluded) lines.push({ kind: 'info', label: a.label, date: a.date, note: `${formatCents(k * a.cents, cur, { sign: 'always' })} · ${LEDGER_ALREADY_INCLUDED}` });
     if (t.earlierIncludedCount) lines.push({ kind: 'info', label: LEDGER_EARLIER_INCLUDED(t.earlierIncludedCount) });
+    for (const st of t.sameTime) if (st.placement === 'in_confirmed') lines.push({ kind: 'info', label: st.label, date: st.date, note: `${formatCents(k * st.cents, cur, { sign: 'always' })} · ${LEDGER_SAME_TIME.in_confirmed}` });
     for (const l of t.lines) {
-      const why = l.reason === 'recorded_after' ? (t.anchor.kind === 'confirmed' ? LEDGER_RECORDED_AFTER : LEDGER_RECORDED_AFTER_ADJUSTMENT) : l.reason === 'not_posted' ? LEDGER_NOT_POSTED_BY(formatShortDate(t.anchor.date)) : undefined;
+      const why = l.reason === 'same_time' ? LEDGER_SAME_TIME[l.sameTime ?? 'unknown'] : l.reason === 'recorded_after' ? (t.anchor.kind === 'confirmed' ? LEDGER_RECORDED_AFTER : LEDGER_RECORDED_AFTER_ADJUSTMENT) : l.reason === 'not_posted' ? LEDGER_NOT_POSTED_BY(formatShortDate(t.anchor.date)) : undefined;
       lines.push({ kind: k * l.deltaCents < 0 ? 'out' : 'in', label: l.label, cents: k * l.deltaCents, date: l.date, note: [l.pending ? LEDGER_BASIS.pending : LEDGER_BASIS.recorded, why].filter(Boolean).join(' · '), balanceAfterCents: k * l.balanceAfterCents });
     }
     if (t.changesSinceCents) {
-      lines.push({ kind: k * t.changesSinceCents < 0 ? 'out' : 'in', label: LEDGER_CHANGES_SINCE(formatShortDate(t.anchor.date)), cents: k * t.changesSinceCents, note: t.changedAfter.length ? LEDGER_CHANGES_NAMED : LEDGER_CHANGES_UNNAMED, balanceAfterCents: k * t.recordedCents });
+      lines.push({ kind: k * t.changesSinceCents < 0 ? 'out' : 'in', label: LEDGER_CHANGES_SINCE(formatShortDate(t.anchor.date)), cents: k * t.changesSinceCents, note: t.sameTime.some((x) => x.placement === 'unknown') ? LEDGER_CHANGES_SAME_TIME : t.changedAfter.length ? LEDGER_CHANGES_NAMED : LEDGER_CHANGES_UNNAMED, balanceAfterCents: k * t.recordedCents });
       for (const c of t.changedAfter) lines.push({ kind: 'info', label: c.label, date: c.date, note: LEDGER_CHANGED_AFTER(formatCents(k * c.cents, cur, { sign: 'always' }), c.counted) });
     }
     lines.push({ kind: 'start', label: ledger.isCard ? `${LEDGER_RECORDED_TODAY}, owed` : LEDGER_RECORDED_TODAY, cents: k * t.recordedCents });

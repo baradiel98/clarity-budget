@@ -286,6 +286,16 @@ The anchor is `balanceAsOfDate`: the opening date, or the latest Update balance 
   - How much each one changed can't be known, because earlier versions aren't kept.
   - Deleted transactions aren't kept either (only encrypted storage tombstones the engine never sees). When nothing is named, the line says it is likely a deletion. Nothing is ever attributed by guess.
 
+- **Records with the same time as the confirmation (Phase 5A.3):**
+  - **The problem:** a posted transaction dated on or before a stored confirmation, recorded at exactly the confirmation's time, can't be placed before or after it by time. This happens with a frozen or coarse clock, or with records made in one instant.
+  - **The rule:** Clarity looks for the combinations of those transactions that make the figure entered add up (opening balance + transactions clearly before it + the combination = the figure).
+    - If exactly one combination fits, and no transaction dated on or before the confirmation was edited after it, that placement is used. The trail says "the confirmed figure shows it was (or wasn't) in it".
+    - Otherwise the transactions are counted on top and labelled "Clarity can't tell whether it was already in the confirmed figure"; any difference line says it may be them rather than an edit or deletion.
+    - The search covers up to 12 such transactions; beyond that they are treated as "can't tell".
+  - **What is never affected:** time never decides it, the order shown is deterministic (date, time, then id), and no balance depends on it.
+  - Older confirmations without a stored figure keep their existing rule: records made in the same instant as the adjustment count as part of it.
+- **One account (Phase 5A.3):** with a single account, Planning shows that account's own view (no Show control), so today's trail from the confirmed balance is always reachable. For a single spendable account the figures are the same as all spendable cash.
+
 Anchor + listed items (+ any change line) = the recorded balance today. Then recorded − pending credits = available = the first day's start in the ledger (tested for every account).
 
 **Worked example (the owner's):** Checking confirmed at $1,500 on Nov 15; groceries $85 on Nov 15; Nov 16 electricity $115 (scheduled), gas $50 and another expense $250 (planned).

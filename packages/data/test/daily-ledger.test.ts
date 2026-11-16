@@ -180,6 +180,7 @@ describe('Daily ledger (Phase 5A): which transactions are in the last confirmed 
     b.at('2026-11-15');
     const r = confirm(b, C, 100000);
     expect(r.tx).toBeNull();
+    b.ctx().newId('tick'); // the harness clock only moves when an id is made: record the purchase strictly later (ties: daily-ledger-5a3)
     tx(b, { accountId: C, date: '2026-11-15', amountCents: 8500, merchant: 'Groceries' });
     const t = balanceTrail(engineInput(b.data, b.today), C);
     expect(t.anchor).toEqual({ kind: 'confirmed', date: '2026-11-15', cents: 100000 });

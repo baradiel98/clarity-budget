@@ -769,3 +769,10 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Lesson]** The order of accounts and scheduled items can differ after data is reloaded from storage (records are read back in storage order). This is pre-existing and not a data change.
 - **[Open]** Real iPhone, Android, Safari, VoiceOver and TalkBack QA for Phase 5A (§2c) and Phase 4B.5 (§2b) is NOT RUN. Phase 4B.5 is still untagged.
 - **[Open]** Not confirmed: whether the `clarity-budget-test` Render service exists (it would also deploy from `phase-1`).
+
+## Phase 5A.3 (2026-11-16): production QA fixes F1–F3
+- **[Verified]** F1: the Transactions keyboard row takes real focus with a focus-colour ring (≥ 3:1, tested light and dark). `aria-selected` was removed from plain table rows; the row checkbox conveys selection.
+- **[Verified]** F2: with one account, Planning shows that account's view (no chooser), so the confirmed-balance trail is reachable. QA step P5 is fixed.
+- **[Decision/Verified]** F3: same-time records are never ordered by time. A placement is used only when exactly one combination makes the stored figure add up and nothing was edited after the confirmation; otherwise the trail says "can't tell".
+- **[Lesson]** The data test helper (`Book`) moves its clock only when an id is created, so a confirmation with no new record shares its time with the next record. Tests that need distinct times must advance it (`b.ctx().newId(...)`).
+- **[Lesson]** Browser QA with a frozen clock gives every record the same time; real-clock checks are needed for anything that is decided by time.

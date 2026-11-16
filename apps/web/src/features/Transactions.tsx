@@ -128,7 +128,12 @@ export function Transactions() {
         const next = visible[Math.max(0, Math.min(visible.length - 1, idx + (e.key === 'ArrowDown' ? 1 : -1)))];
         if (next) {
           setCursor(next.id);
-          document.querySelector(`[data-row="${next.id}"]`)?.scrollIntoView({ block: 'nearest' });
+          // Phase 5A.3 (F1): move real keyboard focus to the row, so it is visibly focused and announced by screen
+          // readers (the table row itself; on a phone-width list, the row's button)
+          const el = document.querySelector<HTMLElement>(`[data-row="${next.id}"]`);
+          const target = el?.tagName === 'TR' ? el : el?.querySelector<HTMLElement>('.tx-main');
+          target?.focus({ preventScroll: true });
+          el?.scrollIntoView({ block: 'nearest' });
         }
       } else if ((e.key === 'Enter' || e.key === 'e' || e.key === 'E') && cursor) {
         e.preventDefault();
@@ -378,8 +383,9 @@ export function Transactions() {
       <tr
         key={t.id}
         data-row={t.id}
-        className={[isFresh(t.id) ? 'fresh' : '', t.date > today ? 'planned' : ''].join(' ').trim() || undefined}
-        aria-selected={cursor === t.id || selected.has(t.id)}
+        className={[isFresh(t.id) ? 'fresh' : '', t.date > today ? 'planned' : '', cursor === t.id ? 'cursor' : '', selected.has(t.id) ? 'checked' : ''].join(' ').trim() || undefined}
+        // Phase 5A.3 (F1): focusable for ↑/↓ (not a Tab stop); selection is conveyed by each row's checkbox
+        tabIndex={-1}
         onClick={() => setCursor(t.id)}
         onDoubleClick={() => ui.openAdd({ editId: t.id })}
       >

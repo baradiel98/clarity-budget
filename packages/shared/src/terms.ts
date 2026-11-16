@@ -286,6 +286,16 @@ export const LEDGER_CHANGES_SINCE = (d: string) => `Changes since you confirmed 
  */
 export const LEDGER_CHANGES_NAMED = "Clarity doesn't keep earlier versions of a transaction, so it can't show how much each one below changed. A deleted transaction can't be listed.";
 export const LEDGER_CHANGES_UNNAMED = "No transaction dated on or before that date was edited after you confirmed it, so this is likely a deleted transaction. Clarity doesn't keep deleted transactions, so it can't name it.";
+/**
+ * Phase 5A.3 (F3): a transaction recorded at exactly the time a balance was confirmed. Time can't place it; when the
+ * figure entered supports exactly one placement it is used and said so, otherwise Clarity says it can't tell.
+ */
+export const LEDGER_SAME_TIME: Record<'in_confirmed' | 'after' | 'unknown', string> = {
+  in_confirmed: 'recorded at the same moment as the confirmation; the confirmed figure shows it was already in it, so it isn\'t counted again',
+  after: 'recorded at the same moment as the confirmation; the confirmed figure shows it wasn\'t in it',
+  unknown: 'recorded at the same moment as the confirmation, so Clarity can\'t tell whether it was already in the confirmed figure; it\'s counted here',
+};
+export const LEDGER_CHANGES_SAME_TIME = "Some transactions were recorded at the same moment as this confirmation and Clarity can't tell whether they were already in it, so part or all of this difference may be them rather than a later edit or deletion.";
 export const LEDGER_CHANGED_AFTER = (now: string, counted: boolean) => `changed after you confirmed this balance; now ${now}${counted ? '' : ', not counted'}`;
 export const LEDGER_RECORDED_TODAY = 'Recorded balance today';
 export const LEDGER_PENDING_HELD = 'Pending credits not yet available';

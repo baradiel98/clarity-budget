@@ -93,7 +93,9 @@ export function Planning() {
   // Phase 5A: the schedule for all spendable cash (default) or one account, from the same forecast
   const [scope, setScope] = useState<string>('cash');
   const ledgerChoices = useMemo(() => ledgerAccounts(data.accounts, forecast), [data.accounts, forecast]);
-  const scopeId = scope !== 'cash' && ledgerChoices.some((a) => a.id === scope) ? scope : 'cash';
+  // Phase 5A.3 (F2): with only one account there is nothing to choose: show that account's own view (for a single
+  // spendable account the figures are the same as all spendable cash), so its trail from the confirmed balance is there
+  const scopeId = ledgerChoices.length === 1 ? ledgerChoices[0]!.id : scope !== 'cash' && ledgerChoices.some((a) => a.id === scope) ? scope : 'cash';
   const scopeAcct = data.accounts.find((a) => a.id === scopeId);
   const ledger = useMemo(() => buildDailyLedger(engineInput(data, today), scopeId === 'cash' ? { kind: 'cash' } : { kind: 'account', accountId: scopeId }, { forecast }), [data, today, scopeId, forecast]);
   const scopeName = scopeAcct?.name ?? LEDGER_ALL_CASH;
