@@ -18,6 +18,8 @@ const add = (b: Book, now: number, i: Partial<TxInput> & Pick<TxInput, 'accountI
 };
 const confirm = (b: Book, now: number, id: string, cents: number) => { b.data = applyOps(b.data, adjustBalance(at(b, now), id, cents, 'QA', b.today, { unrelatedToPending: true }).ops); };
 const view = (b: Book, C: string) => balanceTrail(engineInput(b.data, b.today), C);
+/** Today's Day details for the account: the explanation both apps display. */
+const explain = (b: Book, C: string) => { const input = engineInput(b.data, b.today); return ledgerDayExplanation(input, buildDailyLedger(input, { kind: 'account', accountId: C }), b.today)!; };
 const setup = () => { const b = new Book(); b.at('2026-11-01'); const C = b.acct('Checking', 'checking', 120000); b.at('2026-11-16'); return { b, C }; };
 
 describe('Equal timestamps around a balance confirmation (Phase 5A.3, F3)', () => {
@@ -75,7 +77,16 @@ describe('Equal timestamps around a balance confirmation (Phase 5A.3, F3)', () =
     add(b, T, { accountId: C, amountCents: 1000, merchant: 'Refund in', kind: 'refund' });
     add(b, T, { accountId: C, amountCents: 1000, merchant: 'Shop' });
     confirm(b, T, C, 120000); // either both are in it or neither: the figure can't say which
-    expect(view(b, C).sameTime.map((x) => x.placement)).toEqual(['unknown', 'unknown']);
+    const t = view(b, C);
+    expect(t.sameTime.map((x) => x.placement)).toEqual(['unknown', 'unknown']);
+    // both counted on top: $1,200.00 + $10.00 − $10.00 = $1,200.00 = recorded, so no difference to explain
+    expect([t.lines.length, t.lines[1]!.balanceAfterCents, t.changesSinceCents, t.recordedCents]).toEqual([2, 120000, 0, 120000]);
+    const ex = explain(b, C);
+    expect(ex.lines.filter((l) => l.label === 'Refund in' || l.label === 'Shop').map((l) => l.note).sort()).toEqual([
+      "Recorded · recorded at the same moment as the confirmation, so Clarity can't tell whether it was already in the confirmed figure; it's counted here",
+      "Recorded · recorded at the same moment as the confirmation, so Clarity can't tell whether it was already in the confirmed figure; it's counted here",
+    ]);
+    expect(ex.lines.some((l) => l.label.startsWith('Changes since') || /already in it|wasn't in it/.test(l.note ?? ''))).toBe(false);
   });
 
   it('when a transaction was edited after the confirmation, a matching sum is not trusted (the edit could explain it)', () => {
@@ -84,7 +95,56 @@ describe('Equal timestamps around a balance confirmation (Phase 5A.3, F3)', () =
     add(b, T, { accountId: C, amountCents: 650, merchant: 'Coffee' });
     confirm(b, T, C, 120000 - 2000 - 650);
     b.data = applyOps(b.data, updateTransaction(at(b, T + 60_000), early.id, { kind: 'expense', accountId: C, date: b.today, amountCents: 2000, merchant: 'Earlier (renamed)', categoryId: null }).ops);
-    expect(view(b, C).sameTime.map((x) => x.placement)).toEqual(['unknown']);
+    const t = view(b, C);
+    expect(t.sameTime.map((x) => x.placement)).toEqual(['unknown']);
+    // Coffee counted on top: $1,173.50 − $6.50 = $1,167.00; recorded $1,173.50 → a +$6.50 difference, explained as
+    // either the same-moment coffee or the renamed transaction (both are named; neither is picked)
+    expect([t.lines.map((l) => [l.label, l.balanceAfterCents, l.sameTime]), t.changesSinceCents, t.recordedCents]).toEqual([[['Coffee', 116700, 'unknown']], 650, 117350]);
+    const ex = explain(b, C);
+    const i = ex.lines.findIndex((l) => l.label.startsWith('Changes since'));
+    expect([ex.lines[i]!.cents, ex.lines[i]!.note]).toEqual([650, "Some transactions were recorded at the same moment as this confirmation and Clarity can't tell whether they were already in it, so part or all of this difference may be them rather than a later edit or deletion."]);
+    expect([ex.lines[i + 1]!.label, ex.lines[i + 1]!.note]).toEqual(['Earlier (renamed)', 'changed after you confirmed this balance; now −$20.00']);
+    expect(ex.lines.find((l) => l.label === 'Coffee')!.note).toBe("Recorded · recorded at the same moment as the confirmation, so Clarity can't tell whether it was already in the confirmed figure; it's counted here");
+    expect(ex.lines.some((l) => /likely a deleted transaction/.test(l.note ?? ''))).toBe(false);
+  });
+
+  /**
+   * More than 12 same-moment records: never searched, always "can't tell". Amounts are 1, 2, 4, … 4,096 cents, so every
+   * total has exactly ONE combination: if the 13 were searched they would be placed. The confirmation contains the first
+   * three (1 + 2 + 4 = 7 cents): figure $1,199.93. All 13 counted on top: $1,199.93 − $81.91 = $1,118.02; recorded
+   * $1,200.00 − $81.91 = $1,118.09 → +$0.07, explained as the same-moment ambiguity (not as a deletion).
+   */
+  it('13 same-moment records (more than the 12 searched): all "can\'t tell", the difference explained as that, no deletion claim', () => {
+    const { b, C } = setup();
+    for (let i = 0; i < 3; i++) add(b, T, { accountId: C, amountCents: 2 ** i, merchant: `Item ${i + 1}` });
+    confirm(b, T, C, 120000 - 7);
+    for (let i = 3; i < 13; i++) add(b, T, { accountId: C, amountCents: 2 ** i, merchant: `Item ${i + 1}` });
+    const t = view(b, C);
+    expect(t.sameTime).toHaveLength(13);
+    expect(t.sameTime.every((x) => x.placement === 'unknown')).toBe(true);
+    expect(t.lines.every((l) => l.reason === 'same_time' && l.sameTime === 'unknown')).toBe(true);
+    expect([t.lines.length, t.lines[12]!.balanceAfterCents, t.changesSinceCents, t.recordedCents]).toEqual([13, 111802, 7, 111809]);
+    expect(t.recordedCents).toBe(accountBalance(b.a(C), b.data.transactions, b.today));
+    const ex = explain(b, C);
+    const items = ex.lines.filter((l) => l.label.startsWith('Item '));
+    expect(items).toHaveLength(13);
+    expect(items.every((l) => l.note === "Recorded · recorded at the same moment as the confirmation, so Clarity can't tell whether it was already in the confirmed figure; it's counted here")).toBe(true);
+    const change = ex.lines.find((l) => l.label.startsWith('Changes since'))!;
+    expect([change.cents, change.note]).toEqual([7, "Some transactions were recorded at the same moment as this confirmation and Clarity can't tell whether they were already in it, so part or all of this difference may be them rather than a later edit or deletion."]);
+    expect(ex.lines.some((l) => /likely a deleted transaction|already in it, so it isn't counted again|wasn't in it/.test(l.note ?? ''))).toBe(false);
+  });
+
+  it('12 same-moment records (the limit) with one fitting combination are placed: the boundary of the rule above', () => {
+    const { b, C } = setup();
+    for (let i = 0; i < 3; i++) add(b, T, { accountId: C, amountCents: 2 ** i, merchant: `Item ${i + 1}` });
+    confirm(b, T, C, 120000 - 7);
+    for (let i = 3; i < 12; i++) add(b, T, { accountId: C, amountCents: 2 ** i, merchant: `Item ${i + 1}` });
+    const t = view(b, C);
+    // Items 1–3 in the figure; 4–12 after it: $1,199.93 − (8 + … + 2,048 = 4,088) cents = $1,159.05 = recorded; no difference
+    expect(t.sameTime.filter((x) => x.placement === 'in_confirmed').map((x) => x.label).sort()).toEqual(['Item 1', 'Item 2', 'Item 3']);
+    expect(t.sameTime.filter((x) => x.placement === 'after')).toHaveLength(9);
+    expect([t.changesSinceCents, t.recordedCents]).toEqual([0, 115905]);
+    expect(explain(b, C).lines.some((l) => l.label.startsWith('Changes since'))).toBe(false);
   });
 
   it('deterministic: the same trail whatever order the records are stored in', () => {
