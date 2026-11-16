@@ -750,3 +750,22 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Decision, owner]** Keep the conservative negative projection in a non-spendable account's own view. The wording must separate: the projection (whole payment taken from the account), the unallocated shortfall (counted against spendable accounts, no account chosen) and the bank's actual response (unknown).
 - **[Lesson]** For notes on covered payments, use `ForecastEvent.applied` for what the account pays: card payments from savings have rewritten legs, so the scheduled legs give wrong amounts.
 - **[Lesson]** Sample data follows the device's date, so manual QA steps must not quote fixed dates or figures from test runs (they used Nov 13, 2026).
+
+## Release: Phase 5A to production (2026-11-16)
+- **[Verified]** Production (`clarity-budget-vzhu.onrender.com`, branch `phase-1`) went from `316a147` to `d1c3cd5`. It was a fast-forward push (`316a147..d1c3cd5`), with no tags pushed and none moved. The live page reported build `d1c3cd5` about 80 s after the push (02:07:57 UTC). Release contents: `f11ee21`, `1ea3d1a`, `98d1e9b`, `d1c3cd5` (Phase 5A only; Phase 4B.5's code was already live in `316a147`).
+- **[Decision, owner]** Deploy first, then test on real devices with Xcode. The owner confirmed the Render dashboard settings; I couldn't access the dashboard or the deploy logs.
+- **[Verified]** Pre-release, in a browser on this machine (fictional data, isolated profiles, both builds served at one address):
+  - a `316a147` workspace upgraded in place to `d1c3cd5` with identical Safe to Spend, balances and transactions;
+  - a `316a147` backup restored in `d1c3cd5`, by passphrase and by recovery key;
+  - wrong-passphrase and tampered backups were refused;
+  - rollback works: a `d1c3cd5` backup restores in `316a147` with identical figures.
+- **[Verified]** After the release, on the live site (fresh empty contexts, fictional data):
+  - sample data at Nov 13: Safe to Spend $2,427.17, Nov 18 Day details $2,779.83, Savings shortfall −$800.00 with its badge;
+  - Catch up and Paid this month work;
+  - onboarding works, and lock/unlock works (a wrong passphrase is refused);
+  - a `316a147` backup restores to Safe to Spend $1,165.00;
+  - no console errors or failed requests.
+- **[Lesson]** In automation, a tab already open on the old build kept running it through reloads; a closed and reopened browser got the new build. The update mechanism is unchanged from earlier releases, so users may need Settings → Check for updates, or to close and reopen the app.
+- **[Lesson]** The order of accounts and scheduled items can differ after data is reloaded from storage (records are read back in storage order). This is pre-existing and not a data change.
+- **[Open]** Real iPhone, Android, Safari, VoiceOver and TalkBack QA for Phase 5A (§2c) and Phase 4B.5 (§2b) is NOT RUN. Phase 4B.5 is still untagged.
+- **[Open]** Not confirmed: whether the `clarity-budget-test` Render service exists (it would also deploy from `phase-1`).
