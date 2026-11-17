@@ -98,6 +98,7 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - Secure storage can throw on some devices or environments. Startup must never depend on it succeeding.
 - A test expecting the next paycheck after month-end exposed a horizon bug: the forecast only looked to month-end. Fixed by looking ahead 62 days for the next income.
 - In test fixtures, `trackFrom` must be set deliberately. Past occurrences after it are (correctly) overdue.
+- **[Verified, 2026-11-17]** Any Jest test that runs Argon2id (pure-JS noble: `WorkspaceStore.create`/unlock, `runCryptoSelfTest`) needs an explicit timeout. The crypto self-test takes ~4 s alone (default limit 5 s) and ~15 s under CPU load. Removing its `60_000` reproduces the old "1 failed, 15 passed" exactly when root `npx vitest run` runs concurrently. Current files with Argon2 (`storage`, `capture`, `phase4b1`, `logic`) all set 60–120 s; peak under heavy load ≈ 42 s (storage). Reproduce flakes with a load loop, not isolated reruns.
 
 ## Unlock screen (Nov 2026)
 - **[Decision, user]** The unlock screen is always dark (deep navy #070B14, one blue light), brand = logo + "Clarity" wordmark, heading "Unlock Clarity", subtitle "Your financial world, securely stored on this device." (checked as accurate). No lock icon.
@@ -114,7 +115,7 @@ Safe to Spend · Projected month-end balance · Current recorded balance · Avai
 - **[Open, owner]** Optional vs required accounts; one password vs two secrets; own API vs managed auth; hosting and email budget; external security review.
 - **[Decision]** The motion system is CSS-only (no animation library). Numbers never count up; changed values fade in already correct. Reduced motion makes everything instant, including delays. Tests: `e2e/motion.spec.ts`, `e2e/account-preview.spec.ts`.
 - **[Lesson]** The reduced-motion rule must also zero `animation-delay`, or staggered items stay invisible during their delay.
-- **[Open]** Mobile jest failed twice in this session when run right after other heavy suites, and could not be reproduced in 11 isolated runs. Not investigated further; mobile code was unchanged in that round.
+- **[Superseded, 2026-11-17]** ~~Mobile jest failed twice ("1 failed, 15 passed") right after other heavy suites; not reproduced alone.~~ Investigated: see the Argon2 timeout lesson under Lessons. The committed code already has the fix.
 
 ## Onboarding pay step (Nov 2026)
 - **[Fixed, verified]** The five pay-frequency options were a single segmented control that overflowed on phones ("Irregular" outside the box, 54px of horizontal scroll at 390px). They are now a wrapping grid of radio choices; tested at 320/390/1440px.
